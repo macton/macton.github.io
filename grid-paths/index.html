@@ -1,0 +1,1390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grid Paths — Algorithm Visualization</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171c24; --panel2:#1d2530; --line:#2b3543;
+    --text:#d7dee8; --muted:#8a97a8; --accent:#4ea1ff;
+    --grid:#3a4a5e; --wall:#e7ecf3;
+    --target:#d36bd8; --source:#e7c14b; --changed:#5ad17a;
+    --blocked:#5a6472; --island:#e7c14b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:28px 20px 80px}
+  h1{font-size:24px; margin:0 0 4px}
+  h2{font-size:17px; margin:30px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line)}
+  p{color:var(--muted); margin:8px 0}
+  code{background:var(--panel2); padding:1px 5px; border-radius:4px; color:#cfe0f5; font-size:12.5px}
+  .sub{color:var(--muted); font-size:13px; max-width:780px}
+  .cols{display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px}
+  .legend{display:flex; flex-wrap:wrap; gap:14px 20px; font-size:12.5px; color:var(--muted); margin-top:14px}
+  .legend .item{display:flex; align-items:center; gap:7px}
+  .sw{width:16px; height:16px; border-radius:4px; display:inline-block; border:1px solid var(--line)}
+
+  /* grid */
+  .gridbox{display:inline-block; background:var(--panel2); padding:3px; border-radius:8px;
+           border:3px solid var(--grid)}
+  .grid{display:grid; gap:0}
+  .cell{
+    position:relative; width:62px; height:62px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border:1px solid var(--grid); background:#10151c; user-select:none;
+  }
+  .cell .arrows{font-size:15px; letter-spacing:1px; line-height:1; height:16px; color:#a9c6ec}
+  .cell .dist{font-size:12px; color:var(--muted); margin-top:3px; font-variant-numeric:tabular-nums}
+  .cell.wN{border-top-color:var(--wall); border-top-width:3px}
+  .cell.wS{border-bottom-color:var(--wall); border-bottom-width:3px}
+  .cell.wE{border-right-color:var(--wall); border-right-width:3px}
+  .cell.wW{border-left-color:var(--wall); border-left-width:3px}
+  .cell.target{background:#3a1f3d}
+  .cell.target .arrows{color:var(--target); font-size:18px}
+  .cell.source{background:#3a3216; outline:2px solid var(--source); outline-offset:-2px; z-index:2}
+  .cell.changed{background:#143020; outline:2px solid var(--changed); outline-offset:-2px; z-index:1}
+  .cell.island{background:#3a3216}
+  .cell.blocked .arrows{color:var(--blocked)}
+  .cell.blocked .dist{color:var(--blocked)}
+  .cell.clickable{cursor:pointer}
+  .cell.clickable:hover{filter:brightness(1.4)}
+  /* edge hit zones for explorer */
+  .edge{position:absolute; z-index:3; cursor:pointer}
+  .edge:hover{background:rgba(78,161,255,.45)}
+  .edge.n{top:0;left:0;right:0;height:9px}
+  .edge.s{bottom:0;left:0;right:0;height:9px}
+  .edge.e{right:0;top:0;bottom:0;width:9px}
+  .edge.w{left:0;top:0;bottom:0;width:9px}
+
+  /* controls */
+  .controls{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px}
+  button{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover{border-color:var(--accent); color:#fff}
+  button:disabled{opacity:.4; cursor:default; border-color:var(--line); color:var(--muted)}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#06121f; font-weight:600}
+  input[type=range]{flex:1; min-width:160px; accent-color:var(--accent)}
+  .stepno{font-variant-numeric:tabular-nums; color:var(--muted); white-space:nowrap}
+  .banner{
+    background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius:8px; padding:12px 14px; margin-bottom:14px; min-height:64px;
+  }
+  .banner .action{font-weight:600; color:#fff; margin-bottom:6px}
+  .banner ul{margin:0; padding-left:18px; color:var(--muted); font-size:12.5px}
+  .meta{font-size:12.5px; color:var(--muted); margin-top:12px}
+  .tag{display:inline-block; padding:1px 7px; border-radius:99px; font-size:11px; border:1px solid var(--line)}
+  .tag.t{color:var(--target); border-color:var(--target)}
+  .tag.s{color:var(--source); border-color:var(--source)}
+  .cmp .cell .badge{position:absolute; top:2px; right:3px; font-size:10px; color:var(--muted)}
+  .cmp .cell.same{background:#10151c}
+  .cmp .cell.compat{background:#16202c; outline:2px solid #3f6e9e; outline-offset:-2px}
+  .cmp .cell.compat .arrows{color:#7fb2e6}
+  .cmp .cell.diff{background:#3a2a14; outline:2px solid #e08a3c; outline-offset:-2px; z-index:1}
+  .cmp .cell.diff .arrows{color:#f0a85a}
+  .cmp .cell.tprime{outline:2px solid var(--accent); outline-offset:-2px; z-index:2}
+  .bigstat{font-size:26px; color:#fff; font-variant-numeric:tabular-nums}
+  pre.code{background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:14px 16px;
+           overflow:auto; font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+           color:#cfe0f5; max-width:900px}
+  pre.code .cm{color:var(--muted)}
+  .ordTable td.best, .ordTable tr.best td{color:var(--changed)}
+  tr.selrow td{background:#1d2530}
+  .ddtable{border-collapse:collapse; width:100%; font-size:13px}
+  .ddtable th,.ddtable td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  .ddtable th{color:#fff; font-weight:600; border-bottom:1px solid var(--grid)}
+  .ddtable td:first-child,.ddtable td:nth-child(2){white-space:nowrap; color:var(--text)}
+  .ddtable td{color:var(--muted)}
+  .steps-by{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px}
+  .chip{font-size:11.5px; padding:4px 9px; border-radius:7px; background:var(--panel2);
+        border:1px solid var(--line); cursor:pointer; color:var(--muted)}
+  .chip.active{border-color:var(--accent); color:#fff}
+  /* 3D demo sections */
+  #cubeStage,#sphStage{width:560px; max-width:100%; height:440px; border-radius:10px; background:radial-gradient(ellipse at 50% 30%, #1a2230, #0b0f14); display:block}
+  #cubeNet,#sphFlat{width:560px; max-width:100%; height:auto; border-radius:8px; background:#0b0f14; display:block; cursor:crosshair}
+  .demolegend{display:flex; flex-wrap:wrap; gap:10px 16px; font-size:12px; color:var(--muted); margin-top:10px}
+  .demolegend .item{display:flex; align-items:center; gap:6px}
+  .demolegend .dot{width:13px; height:13px; border-radius:50%; display:inline-block}
+  .demolegend .bar{width:16px; height:9px; border-radius:2px; display:inline-block}
+  .dctl{display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:10px}
+  .dctl label{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Grid Paths</h1>
+  <p class="sub" style="margin-bottom:2px">Jump to: <a href="#cube" style="color:var(--accent)">§7 Cube surface chase</a> · <a href="#sphere" style="color:var(--accent)">§8 Sphere surface chase</a> — the grid wrapped onto a 3D surface, with agents chasing a target.</p>
+  <p class="sub">
+    For every <span class="tag t">target</span> cell, the algorithm stores a complete
+    <em>shortest-path field</em>: from each source cell, which direction(s) step toward the target,
+    and the distance. When a wall is added between two cells, only the affected fields are repaired —
+    paths are rerouted, and fully enclosed regions are detected as closed islands.
+    This page replays the demo from <code>paths.js</code> step by step, and lets you experiment.
+  </p>
+
+  <h2>1 · Data design</h2>
+  <p class="sub" style="margin-top:0">
+    The whole system is a few flat arrays on one <code>grid</code> object. Cells are addressed by a
+    single index, <code>index = y · colCount + x</code> (so the grid is stored row-major).
+  </p>
+  <div class="panel" style="max-width:900px">
+    <table class="ddtable">
+      <tr><th>Field</th><th>Shape</th><th>Meaning</th></tr>
+      <tr><td><code>paths</code></td><td>N×N table<br><code>paths[target][source]</code></td>
+        <td>The heart of it. For <em>every</em> target cell there is a full field over all source cells.
+            Each entry is <code>{ dir, dist }</code>: the direction(s) that step toward the target, and the distance in steps.</td></tr>
+      <tr><td><code>dir</code></td><td>4-bit mask</td>
+        <td><code>N=1</code>, <code>S=2</code>, <code>W=4</code>, <code>E=8</code>, OR-combined.
+            More than one bit means several equally-short paths exist (e.g. <code>N|E</code> on a diagonal). <code>0</code> = the target itself.</td></tr>
+      <tr><td><code>dist</code></td><td>integer</td>
+        <td>Steps to the target. <code>0</code> at the target, <code>-1</code> means unreachable (sealed off).</td></tr>
+      <tr><td><code>obstacles</code></td><td>per-cell<br>4-bit mask</td>
+        <td>Which of a cell's four edges hold a wall. A wall is shared: adding one sets the bit on
+            <em>both</em> adjacent cells (north of A ⇔ south of B).</td></tr>
+      <tr><td><code>island</code></td><td>per-cell int</td>
+        <td>Which closed region a cell belongs to (<code>0</code> = the original open region). Set when a wall fully encloses an area.</td></tr>
+      <tr><td><code>islandCount</code>,<br><code>islandTargetCounts</code></td><td>scalars / array</td>
+        <td>Number of regions and the cell-count of each. Used to detect an island split: if every blocked
+            target equals the whole region's count, the region has been cut in two.</td></tr>
+    </table>
+    <p class="sub" style="margin:12px 0 0">
+      Cost note: this layout stores an explicit field for every target — <code>O(N²)</code> memory for an
+      <code>N</code>-cell grid (<code>N</code> targets × <code>N</code> sources). A distance query is then an
+      <code>O(1)</code> lookup, though walking an actual route still costs <code>O(path length)</code>.
+      And adding a wall is <em>not</em> a cheap local patch: <code>AddObstacle</code> scans every target's field
+      to find blocked entries (<code>FindBlockedTargets</code> sweeps the whole grid per affected source) and
+      re-resolves each one, so a single wall can touch work proportional to the entire table.
+      The real saving grace is <strong>redundancy</strong>: neighboring targets have almost identical fields,
+      so the table holds far less information than <code>N²</code> independent numbers — demonstrated in <a href="#redundancy" style="color:var(--accent)">§5</a>.
+    </p>
+  </div>
+
+  <h2>2 · Building the path data</h2>
+  <p class="sub" style="margin-top:0">
+    <code>InitializePaths(target)</code> fills the field for one target on an empty grid, where the
+    shortest path is just the Manhattan direction. It does this by region: the target, the four
+    arms sharing the target's row/column, then the four diagonal quadrants. Click any cell to rebuild
+    for a different target.
+  </p>
+  <div class="cols">
+    <div style="flex:1; min-width:420px">
+      <div class="controls">
+        <button id="ifirst">⏮</button>
+        <button id="iprev">◀ Prev</button>
+        <button id="iplay" class="primary">▶ Play</button>
+        <button id="inext">Next ▶</button>
+        <button id="ilast">⏭</button>
+        <span class="stepno" id="istepno"></span>
+      </div>
+      <input type="range" id="islider" min="0" value="0" style="width:100%; margin-bottom:14px">
+      <div class="banner" id="ibanner"></div>
+    </div>
+    <div class="panel">
+      <div class="gridbox"><div class="grid" id="initGrid"></div></div>
+      <div class="meta" id="initMeta">Click a cell to choose the target.</div>
+    </div>
+  </div>
+
+  <h2>3 · Repairing paths as walls are added</h2>
+  <p class="sub" style="margin-top:0">
+    Each frame shows the shortest-path field for one target. Arrows point along the shortest path
+    <strong>toward</strong> the target; the number is the distance. Walls are the thick white edges.
+  </p>
+
+  <div class="cols">
+    <div style="flex:1; min-width:540px">
+      <div class="controls">
+        <button id="first">⏮</button>
+        <button id="prev">◀ Prev</button>
+        <button id="play" class="primary">▶ Play</button>
+        <button id="next">Next ▶</button>
+        <button id="last">⏭</button>
+        <span class="stepno" id="stepno"></span>
+      </div>
+      <input type="range" id="slider" min="0" value="0" style="width:100%; margin-bottom:14px">
+      <div class="steps-by" id="actionChips"></div>
+      <div class="banner" id="banner"></div>
+    </div>
+    <div class="panel">
+      <div class="gridbox"><div class="grid" id="stepGrid"></div></div>
+      <div class="meta" id="stepMeta"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="sw" style="background:#3a1f3d;border-color:var(--target)"></span> Target ★</span>
+    <span class="item"><span class="sw" style="background:#3a3216;border-color:var(--source)"></span> Source / island</span>
+    <span class="item"><span class="sw" style="background:#143020;border-color:var(--changed)"></span> Changed this step</span>
+    <span class="item"><span class="sw" style="background:var(--wall)"></span> Wall</span>
+    <span class="item">↑ N&nbsp;&nbsp;↓ S&nbsp;&nbsp;← W&nbsp;&nbsp;→ E&nbsp;&nbsp;·&nbsp;&nbsp;∅ no path</span>
+  </div>
+
+  <h2>4 · Interactive explorer</h2>
+  <p class="sub" style="margin-top:0">
+    Click any <strong>cell</strong> to make it the target and see its shortest-path field recompute.
+    Click a cell <strong>edge</strong> to drop a wall there — the field repairs incrementally,
+    exactly like the algorithm. Unreachable cells (closed off) show <code>∅</code>.
+  </p>
+  <div class="cols">
+    <div class="panel">
+      <div class="gridbox"><div class="grid" id="liveGrid"></div></div>
+      <div class="meta" id="liveMeta"></div>
+    </div>
+    <div style="flex:1; min-width:280px">
+      <div class="controls">
+        <button id="loadDemo">Load demo walls</button>
+        <button id="reset">Reset grid</button>
+      </div>
+      <p class="sub">
+        Target: <span class="tag t" id="liveTarget">4, 4</span>
+      </p>
+      <p class="sub">
+        Tip: build a pocket of walls around a cell and watch it become unreachable
+        (a closed island) once every exit is sealed.
+      </p>
+    </div>
+  </div>
+
+  <h2 id="redundancy">5 · Redundancy across targets (and how to store less than O(N²))</h2>
+  <p class="sub" style="margin-top:0">
+    The <code>O(N²)</code> table looks expensive, but the fields are nowhere near independent.
+    Move the target by one cell and most of the field is unchanged — and the part that does change (distance)
+    follows a fixed rule. Here is target <span class="tag t">T</span>
+    next to a neighbor <span class="tag" style="color:var(--accent);border-color:var(--accent)">T′</span>; every
+    cell is colored by how its two entries compare. Click any cell to move <span class="tag t">T</span>;
+    pick which neighbor to compare against.
+  </p>
+  <div class="cols">
+    <div class="panel">
+      <div class="gridbox"><div class="grid cmp" id="cmpGrid"></div></div>
+      <div class="meta" id="cmpMeta"></div>
+    </div>
+    <div style="flex:1; min-width:300px">
+      <div class="controls">
+        <span class="stepno">Neighbor T′:</span>
+        <button data-nb="8">East →</button>
+        <button data-nb="4">West ←</button>
+        <button data-nb="1">North ↑</button>
+        <button data-nb="2">South ↓</button>
+      </div>
+      <div class="controls">
+        <button id="cmpOpen" class="primary">Open grid</button>
+        <button id="cmpWalls">With demo walls</button>
+      </div>
+      <div id="cmpStats" class="panel" style="background:var(--panel2); margin-top:4px"></div>
+    </div>
+  </div>
+  <div class="panel" style="max-width:900px; margin-top:18px">
+    <p style="margin-top:0; color:var(--text); font-weight:600">What this implies for storage</p>
+    <p class="sub" style="margin-top:4px">
+      Two facts fall out of the picture above:
+    </p>
+    <ul class="sub" style="margin-top:4px">
+      <li><b>Distance carries almost no new information.</b> On an open grid, stepping the target one cell
+        changes <em>every</em> cell's Manhattan distance by exactly <code>±1</code> (the shifted axis term
+        moves by one, integers, so the absolute value can only tick up or down). The neighbor's entire
+        distance field is therefore the previous one plus a single sign rule — there is nothing per-cell to
+        store.</li>
+      <li><b>Direction barely reroutes.</b> On an open grid, moving the target one cell produces
+        <em>zero</em> genuine reroutes — every cell still has a shortest-path move it shares with the old
+        field. A diagonal band of cells does change its <em>set</em> of co-optimal moves (e.g. <code>S</code>
+        becomes <code>S|E</code>, or <code>N|E</code> becomes <code>N</code>) because <code>dir</code> records
+        <em>all</em> equally-short first moves — but those are compatible refinements, not changes of route.
+        Real reroutes (disjoint direction sets) only appear once <b>obstacles</b> force a detour.</li>
+    </ul>
+    <p class="sub">
+      So instead of <code>N</code> independent <code>N</code>-entry fields, keep a few <b>anchor</b> fields and
+      store every other target as a <b>sparse diff</b> from an adjacent one: only the cells whose direction
+      flipped (a minority), plus the per-axis distance sign — the distance field itself is reconstructed, not
+      stored. Any field is then a walk of diffs from the nearest anchor.
+    </p>
+    <p class="sub">
+      The stronger statement is that the whole table is just <em>deviations from the analytic Manhattan
+      field</em>. A fully open grid needs essentially <code>O(1)</code> storage — the distance is a formula and
+      directions follow from the sign of <code>(source − target)</code>. Real information only appears where
+      geometry breaks: at <b>obstacles</b>. Switch to <b>"With demo walls"</b> and slide <span class="tag t">T</span>
+      around — far from the walls neighbors still match ~75%, but a pair straddling a wall can drop to a few
+      percent. That is where the diffs concentrate, so storage scales with the <b>number of obstacles</b>, not
+      with <code>N²</code>.
+    </p>
+  </div>
+
+  <h2 id="incremental">6 · Building the table incrementally — and why iteration order matters</h2>
+  <p class="sub" style="margin-top:0">
+    The same property that saves storage also saves <em>construction</em> work. The original code calls
+    <code>InitializePaths</code> independently for every target — <code>N</code> full fields, <code>O(N²)</code>
+    total. But §5 showed an adjacent target's field is almost the same. So build each target's field by
+    <b>cloning an already-built neighbor and patching the difference</b>:
+  </p>
+  <pre class="code">buildTable(order):                       // order = sequence of all N targets
+  field[order[0]] = fromScratch(order[0]) // one full build  — O(N)
+  for k in 1 .. N-1:
+    p = order[k-1];  t = order[k]
+    if adjacent(p, t):                    // one step away ⇒ use the property
+      field[t] = clone(field[p])
+      patchStep(field[t], p→t)            //   distances shift ±1   (closed form, no search)
+                                          //   only the "wavefront" band re-evaluates direction
+                                          //   genuine reroutes appear only where obstacles bite
+    else:                                 // a jump ⇒ neighbor is useless
+      field[t] = fromScratch(t)           //   fall back to a full rebuild</pre>
+  <p class="sub">
+    The cost of <code>patchStep</code> is the number of cells whose direction must be re-evaluated — small for
+    an adjacent step (the wavefront from §5), large for a jump. So the total work depends entirely on the
+    <b>iteration order</b>: an order whose consecutive targets are always neighbors pays the small cost every
+    time; one that jumps across the grid keeps paying for near-full rebuilds. Pick an order below and scrub
+    through the construction — red segments are jumps.
+  </p>
+
+  <div class="cols">
+    <div class="panel">
+      <canvas id="pathCanvas" width="468" height="468" style="display:block; background:var(--panel2); border-radius:8px"></canvas>
+      <input type="range" id="pathSlider" min="0" max="63" value="63" style="width:100%; margin-top:12px">
+      <div class="meta" id="pathMeta"></div>
+    </div>
+    <div style="flex:1; min-width:300px">
+      <div class="controls">
+        <button class="ord primary" data-ord="row">Row-major</button>
+        <button class="ord" data-ord="col">Column-major</button>
+        <button class="ord" data-ord="bous">Boustrophedon</button>
+        <button class="ord" data-ord="hil">Hilbert</button>
+        <button class="ord" data-ord="mort">Morton / Z</button>
+      </div>
+      <div class="controls">
+        <button id="pathOpen" class="primary">Open grid</button>
+        <button id="pathWalls">With demo walls</button>
+      </div>
+      <div class="panel" id="pathStats" style="background:var(--panel2); margin:4px 0 14px"></div>
+      <table class="ddtable" id="ordTable"></table>
+    </div>
+  </div>
+
+  <div class="panel" style="max-width:900px; margin-top:18px">
+    <p style="margin-top:0; color:var(--text); font-weight:600">Reading the numbers</p>
+    <ul class="sub" style="margin-top:4px">
+      <li><b>Adjacency is everything.</b> <b>Row-major</b> and <b>column-major</b> are cheap inside a row/column
+        but take a full-width <em>jump</em> at every wrap (7 of them on an 8×8), and each jump costs almost a
+        rebuild. <b>Boustrophedon</b> (snake) removes those jumps by reversing direction each row, so every
+        consecutive pair is adjacent — travel drops to the minimum <code>N²−1</code>.</li>
+      <li><b>Morton / Z-order</b> looks local but its quadrant seams are discontinuities: it has the
+        <em>most</em> jumps and the worst total, a caution that "a space-filling curve" is not automatically a
+        good order.</li>
+      <li><b>Hilbert</b> ties boustrophedon on an open grid (both jump-free) but <em>wins once walls exist</em>:
+        its 2D locality keeps successive targets inside the same region, so it crosses obstacle boundaries less
+        often and accumulates fewer reroutes. Flip to <b>"With demo walls"</b> and compare the totals — the
+        curve that respects 2D neighborhoods pays off exactly when the field has real structure.</li>
+    </ul>
+  </div>
+
+  <h2 id="cube">7 · Cube surface chase (the grid wrapped on a cube)</h2>
+  <p class="sub" style="margin-top:0">
+    One F×F grid is wrapped over all six faces of a cube. All pathing/chase logic runs on the 2D grid with
+    <b>edge-wrap rules</b> (each face border folds 90° onto its neighbor); only the rendering is 3D.
+    <b>Walls live on the edges between cells</b> and are extruded as raised slabs. A wrap-aware shortest-path
+    field floods from the moving <b style="color:#d36bd8">target</b>; the <b style="color:#e7c14b">agents</b>
+    descend it, moving smoothly across faces. The flat <b>net</b> shows the same 2D state being wrapped.
+    <span class="hint">Drag to orbit · click the cube or the net to drop the target.</span>
+  </p>
+  <div class="cols">
+    <div class="panel" style="padding:10px">
+      <canvas id="cubeStage"></canvas>
+      <h3 class="sub" style="margin:12px 0 6px; color:var(--muted)">2D — the unfolded grid (flat)</h3>
+      <canvas id="cubeNet"></canvas>
+      <div class="demolegend">
+        <span class="item"><span class="dot" style="background:#d36bd8"></span> target</span>
+        <span class="item"><span class="dot" style="background:#e7c14b"></span> agent</span>
+        <span class="item"><span class="bar" style="background:#e7ecf3"></span> wall (edge)</span>
+        <span class="item"><span class="bar" style="background:linear-gradient(90deg,#3a6ea5,#15324a)"></span> distance field</span>
+      </div>
+    </div>
+    <div style="flex:1; min-width:250px">
+      <div class="panel">
+        <div class="dctl">
+          <button id="cubePlay" class="primary">⏸ Pause</button>
+          <button id="cubeStep">Step</button>
+          <button id="cubeReseed">Reseed</button>
+        </div>
+        <div class="dctl"><label>Speed <input type="range" id="cubeSpeed" min="1" max="20" value="6"></label></div>
+        <div class="dctl"><label>Grid F <input type="range" id="cubeF" min="4" max="14" value="8"></label></div>
+        <div class="dctl"><label>Agents <input type="range" id="cubeAgents" min="1" max="60" value="22"></label></div>
+        <div class="dctl"><label>Walls % <input type="range" id="cubeWalls" min="0" max="35" value="12"></label></div>
+        <div class="dctl"><label><input type="checkbox" id="cubeMove" checked> target wanders</label></div>
+        <div class="dctl"><label><input type="checkbox" id="cubeField" checked> distance field</label></div>
+        <div class="dctl"><label><input type="checkbox" id="cubeLabels"> face labels</label></div>
+        <p class="hint" id="cubeStats"></p>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="sphere">8 · Sphere surface chase (equal-area octahedral map)</h2>
+  <p class="sub" style="margin-top:0">
+    Same idea on a sphere. A single F×F grid — the unit square — is wrapped onto the sphere with the
+    <b>equal-area octahedral map</b> of Clarberg (2008): center → north pole, the four corners → south pole,
+    the rim → equator. The chase runs on that flat square; its boundary folds with the octahedral wrap, and
+    the cell adjacency near the poles is built geometrically so the field and agents flow smoothly over the
+    surface. <b>Walls are extruded</b> as raised slabs on the sphere (the flat square shows the same walls as
+    lines), and the distance field wraps onto the sphere as its texture.
+    <span class="hint">Drag to orbit · click the sphere or the square to drop the target.</span>
+  </p>
+  <div class="cols">
+    <div class="panel" style="padding:10px">
+      <canvas id="sphStage"></canvas>
+      <h3 class="sub" style="margin:12px 0 6px; color:var(--muted)">2D — the unit square (flat)</h3>
+      <canvas id="sphFlat"></canvas>
+      <div class="demolegend">
+        <span class="item"><span class="dot" style="background:#d36bd8"></span> target</span>
+        <span class="item"><span class="dot" style="background:#e7c14b"></span> agent</span>
+        <span class="item"><span class="bar" style="background:#e7ecf3"></span> wall (edge)</span>
+        <span class="item"><span class="bar" style="background:linear-gradient(90deg,#3a6ea5,#15324a)"></span> distance field</span>
+      </div>
+    </div>
+    <div style="flex:1; min-width:250px">
+      <div class="panel">
+        <div class="dctl">
+          <button id="sphPlay" class="primary">⏸ Pause</button>
+          <button id="sphStep">Step</button>
+          <button id="sphReseed">Reseed</button>
+        </div>
+        <div class="dctl"><label>Speed <input type="range" id="sphSpeed" min="1" max="20" value="6"></label></div>
+        <div class="dctl"><label>Grid F <input type="range" id="sphF" min="6" max="22" value="14"></label></div>
+        <div class="dctl"><label>Agents <input type="range" id="sphAgents" min="1" max="60" value="22"></label></div>
+        <div class="dctl"><label>Walls % <input type="range" id="sphWalls" min="0" max="35" value="12"></label></div>
+        <div class="dctl"><label><input type="checkbox" id="sphMove" checked> target wanders</label></div>
+        <div class="dctl"><label><input type="checkbox" id="sphField" checked> distance field</label></div>
+        <p class="hint" id="sphStats"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+ * Core algorithm — adapted from paths.js.
+ * console.log/PrintPaths are replaced with step recording (gated by RECORDING).
+ * ==========================================================================*/
+const kNorth=1, kSouth=2, kWest=4, kEast=8;
+
+function CellIndex(grid,x,y){ return (y*grid.colCount)+x; }
+function CellPosition(grid,index){ var y=(index/grid.colCount)|0; return {x:index-(y*grid.colCount), y:y}; }
+
+var ValidDirections = function(grid, cellIndex){
+  var p=CellPosition(grid,cellIndex), x=p.x, y=p.y, result=0x0f;
+  if (x==0) result&=~kWest;
+  if (x==(grid.colCount-1)) result&=~kEast;
+  if (y==0) result&=~kSouth;
+  if (y==(grid.rowCount-1)) result&=~kNorth;
+  if ((grid.obstacles[cellIndex]&kNorth)==kNorth) result&=~kNorth;
+  if ((grid.obstacles[cellIndex]&kSouth)==kSouth) result&=~kSouth;
+  if ((grid.obstacles[cellIndex]&kWest)==kWest)  result&=~kWest;
+  if ((grid.obstacles[cellIndex]&kEast)==kEast)  result&=~kEast;
+  return result;
+};
+
+function InitializePaths(grid,x,y){
+  var targetCellIndex=CellIndex(grid,x,y), paths=[], sourceCellIndex, i, j;
+  paths[targetCellIndex]={dir:0,dist:0};
+  for(j=0;j<x;j++){ sourceCellIndex=CellIndex(grid,j,y); paths[sourceCellIndex]={dir:kEast,dist:(x-j)}; }
+  for(j=x+1;j<grid.colCount;j++){ sourceCellIndex=CellIndex(grid,j,y); paths[sourceCellIndex]={dir:kWest,dist:(j-x)}; }
+  for(i=0;i<y;i++){ sourceCellIndex=CellIndex(grid,x,i); paths[sourceCellIndex]={dir:kNorth,dist:(y-i)}; }
+  for(i=y+1;i<grid.rowCount;i++){ sourceCellIndex=CellIndex(grid,x,i); paths[sourceCellIndex]={dir:kSouth,dist:(i-y)}; }
+  for(i=0;i<y;i++) for(j=0;j<x;j++){ sourceCellIndex=CellIndex(grid,j,i); paths[sourceCellIndex]={dir:kNorth|kEast,dist:(x-j)+(y-i)}; }
+  for(i=0;i<y;i++) for(j=x+1;j<grid.colCount;j++){ sourceCellIndex=CellIndex(grid,j,i); paths[sourceCellIndex]={dir:kNorth|kWest,dist:(j-x)+(y-i)}; }
+  for(i=y+1;i<grid.rowCount;i++) for(j=0;j<x;j++){ sourceCellIndex=CellIndex(grid,j,i); paths[sourceCellIndex]={dir:kSouth|kEast,dist:(x-j)+(i-y)}; }
+  for(i=y+1;i<grid.rowCount;i++) for(j=x+1;j<grid.colCount;j++){ sourceCellIndex=CellIndex(grid,j,i); paths[sourceCellIndex]={dir:kSouth|kWest,dist:(j-x)+(i-y)}; }
+  grid.paths[targetCellIndex]=paths;
+}
+
+function InitializeGrid(colCount,rowCount){
+  var grid={colCount:colCount,rowCount:rowCount,paths:[],obstacles:[],island:[],islandCount:1,islandTargetCounts:[rowCount*colCount]};
+  for(var y=0;y<rowCount;y++) for(var x=0;x<colCount;x++){
+    var idx=CellIndex(grid,x,y);
+    grid.obstacles[idx]=0; grid.island[idx]=0; InitializePaths(grid,x,y);
+  }
+  return grid;
+}
+
+/* ---- step recording (replaces PrintPaths) ---- */
+var RECORDING=false, STEPS=[], currentPhase=[], currentAction="";
+function recordStep(grid, config){
+  if(!RECORDING) return;
+  var src=grid.paths[config.targetCellIndex];
+  STEPS.push({
+    action: currentAction,
+    phase: currentPhase.slice(),
+    targetCellIndex: config.targetCellIndex,
+    sourceCellIndex: config.sourceCellIndex,
+    highlightIslandIndex: config.highlightIslandIndex,
+    changedCellIndices: (config.changedCellIndices||[]).slice(),
+    paths: src.map(function(p){ return p?{dir:p.dir,dist:p.dist}:null; }),
+    obstacles: grid.obstacles.slice(),
+    island: grid.island.slice(),
+    colCount: grid.colCount, rowCount: grid.rowCount
+  });
+}
+
+function FindBlockedTargets(grid,x,y,wall){
+  var targets=[], sourceCellIndex=CellIndex(grid,x,y);
+  for(var i=0;i<grid.rowCount;i++) for(var j=0;j<grid.colCount;j++){
+    var targetCellIndex=CellIndex(grid,j,i), cell=grid.paths[targetCellIndex][sourceCellIndex];
+    if((cell.dir&wall)==wall) targets.push(targetCellIndex);
+  }
+  return targets;
+}
+
+function AddObstacleToGrid(grid,cellIndex,dir){
+  var p=CellPosition(grid,cellIndex), x=p.x, y=p.y;
+  if(dir==kNorth){ grid.obstacles[cellIndex]|=kNorth; if(y<grid.rowCount-1) grid.obstacles[CellIndex(grid,x,y+1)]|=kSouth; }
+  if(dir==kSouth){ grid.obstacles[cellIndex]|=kSouth; if(y>0) grid.obstacles[CellIndex(grid,x,y-1)]|=kNorth; }
+  if(dir==kEast){ grid.obstacles[cellIndex]|=kEast; if(x<grid.colCount-1) grid.obstacles[CellIndex(grid,x+1,y)]|=kWest; }
+  if(dir==kWest){ grid.obstacles[cellIndex]|=kWest; if(x>0) grid.obstacles[CellIndex(grid,x-1,y)]|=kEast; }
+}
+
+var PHASE1=["Start with the source cell whose best path crosses the obstacle in one direction."];
+var PHASE2=PHASE1.concat(["Next check the source cell whose best path crosses from the opposite side."]);
+var PHASE3=PHASE2.concat(["Remove blocked paths that still have an alternative shortest path."]);
+var PHASE4=PHASE3.concat(["Remaining blocked paths have no known path."]);
+var PHASE5=PHASE4.concat(["Recursively find a new path — search only for the shortest path to an existing, valid path."]);
+
+function AddObstaclePass1(grid,x,y,dir){
+  var resultBlockedTargets=[];
+  var sourceCellIndex0=CellIndex(grid,x,y), blockedDirection0=dir;
+  AddObstacleToGrid(grid,sourceCellIndex0,dir);
+  var blockedTargets0=FindBlockedTargets(grid,x,y,dir);
+  blockedTargets0.forEach(function(t){ resultBlockedTargets.push({targetCellIndex:t,sourceCellIndex:sourceCellIndex0,blockedDirection:blockedDirection0}); });
+
+  currentPhase=PHASE1;
+  for(var i=0;i<blockedTargets0.length;i++) recordStep(grid,{targetCellIndex:blockedTargets0[i],sourceCellIndex:sourceCellIndex0});
+
+  var sourceCellIndex1=0, blockedTargets1=[], blockedDirection1;
+  if(dir==kNorth && y<grid.rowCount-1){ sourceCellIndex1=CellIndex(grid,x,y+1); blockedTargets1=FindBlockedTargets(grid,x,y+1,kSouth); blockedDirection1=kSouth; }
+  if(dir==kSouth && y>0){ sourceCellIndex1=CellIndex(grid,x,y-1); blockedTargets1=FindBlockedTargets(grid,x,y-1,kNorth); blockedDirection1=kNorth; }
+  if(dir==kEast && x<grid.colCount-1){ sourceCellIndex1=CellIndex(grid,x+1,y); blockedTargets1=FindBlockedTargets(grid,x+1,y,kWest); blockedDirection1=kWest; }
+  if(dir==kWest && x>0){ sourceCellIndex1=CellIndex(grid,x-1,y); blockedTargets1=FindBlockedTargets(grid,x-1,y,kEast); blockedDirection1=kEast; }
+
+  if(blockedTargets1.length>0){
+    blockedTargets1.forEach(function(t){ resultBlockedTargets.push({targetCellIndex:t,sourceCellIndex:sourceCellIndex1,blockedDirection:blockedDirection1}); });
+    currentPhase=PHASE2;
+    for(var i=0;i<blockedTargets1.length;i++) recordStep(grid,{targetCellIndex:blockedTargets1[i],sourceCellIndex:sourceCellIndex1});
+  }
+  return resultBlockedTargets;
+}
+
+function AddObstaclePass2(grid,x,y,dir){
+  var blockedTargets=AddObstaclePass1(grid,x,y,dir), fixupBlockedTargets=[];
+  currentPhase=PHASE3;
+  blockedTargets.forEach(function(bt){
+    var targetPaths=grid.paths[bt.targetCellIndex];
+    var hasAlt=(targetPaths[bt.sourceCellIndex].dir & (~bt.blockedDirection))!=0;
+    if(hasAlt){
+      targetPaths[bt.sourceCellIndex].dir &= ~bt.blockedDirection;
+      recordStep(grid,{targetCellIndex:bt.targetCellIndex,sourceCellIndex:bt.sourceCellIndex});
+    } else { fixupBlockedTargets.push(bt); }
+  });
+  return fixupBlockedTargets;
+}
+
+function DivideIsland(grid,blockedTargets){
+  var islandIndex=grid.islandCount; grid.islandCount+=2;
+  var firstDirection=blockedTargets[0].blockedDirection;
+  grid.islandTargetCounts[islandIndex]=0; grid.islandTargetCounts[islandIndex+1]=0;
+  blockedTargets.forEach(function(t){
+    if(t.blockedDirection==firstDirection){ grid.island[t.targetCellIndex]=islandIndex; grid.islandTargetCounts[islandIndex]++; }
+    else { grid.island[t.targetCellIndex]=islandIndex+1; grid.islandTargetCounts[islandIndex+1]++; }
+  });
+  currentPhase=["Path blocked due to a closed island — the two regions can no longer reach each other."];
+  blockedTargets.forEach(function(t){
+    var targetPaths=grid.paths[t.targetCellIndex];
+    blockedTargets.forEach(function(s){
+      if(t.blockedDirection!=s.blockedDirection){ targetPaths[s.targetCellIndex].dir=0; targetPaths[s.targetCellIndex].dist=-1; }
+    });
+    var hi=(t.blockedDirection==firstDirection)?islandIndex+1:islandIndex;
+    recordStep(grid,{targetCellIndex:t.targetCellIndex,highlightIslandIndex:hi});
+  });
+}
+
+function AddObstacle(grid,x,y,dir){
+  var islandIndex=grid.island[CellIndex(grid,x,y)];
+  var islandTargetCount=grid.islandTargetCounts[islandIndex];
+  var blockedTargets=AddObstaclePass2(grid,x,y,dir);
+
+  if(blockedTargets.length==islandTargetCount){ DivideIsland(grid,blockedTargets); return; }
+
+  currentPhase=PHASE4;
+  blockedTargets.forEach(function(bt){
+    var targetPaths=grid.paths[bt.targetCellIndex];
+    targetPaths[bt.sourceCellIndex].dir &= ~bt.blockedDirection;
+    targetPaths[bt.sourceCellIndex].dist=-1;
+    recordStep(grid,{targetCellIndex:bt.targetCellIndex,sourceCellIndex:bt.sourceCellIndex});
+  });
+
+  currentPhase=PHASE5;
+  blockedTargets.forEach(function(bt){
+    var changedCellIndices=[];
+    ResolveBlockedPath(grid,bt.sourceCellIndex,bt.targetCellIndex,[],changedCellIndices);
+    ResolveChangedPaths(grid,bt.targetCellIndex,changedCellIndices);
+    recordStep(grid,{targetCellIndex:bt.targetCellIndex,sourceCellIndex:bt.sourceCellIndex,changedCellIndices:changedCellIndices});
+  });
+}
+
+function ResolveChangedPaths(grid,targetCellIndex,changedCellIndices){
+  var targetPaths=grid.paths[targetCellIndex], changedCount=0;
+  changedCellIndices.forEach(function(sourceCellIndex){
+    var p=CellPosition(grid,sourceCellIndex), x=p.x, y=p.y;
+    var nN=CellIndex(grid,x,y+1), nS=CellIndex(grid,x,y-1), nE=CellIndex(grid,x+1,y), nW=CellIndex(grid,x-1,y);
+    var vd=ValidDirections(grid,sourceCellIndex), bestDist=grid.rowCount*grid.colCount, pathDir=0;
+    function consider(bit,nb){ if((vd&bit)==bit && CellHasPath(grid,nb,targetCellIndex) && targetPaths[nb].dist<bestDist) bestDist=targetPaths[nb].dist; }
+    consider(kNorth,nN); consider(kSouth,nS); consider(kEast,nE); consider(kWest,nW);
+    function pick(bit,nb){ if((vd&bit)==bit && CellHasPath(grid,nb,targetCellIndex) && targetPaths[nb].dist<=bestDist) pathDir|=bit; }
+    pick(kNorth,nN); pick(kSouth,nS); pick(kEast,nE); pick(kWest,nW);
+    var pathDist=bestDist+1;
+    if(targetPaths[sourceCellIndex].dist!=pathDist || targetPaths[sourceCellIndex].dir!=pathDir){
+      targetPaths[sourceCellIndex].dist=pathDist; targetPaths[sourceCellIndex].dir=pathDir; changedCount++;
+    }
+  });
+  return changedCount;
+}
+
+function CellHasPath(grid,sourceCellIndex,targetCellIndex){ return grid.paths[targetCellIndex][sourceCellIndex].dist!=-1; }
+
+function ResolveBlockedPath(grid,sourceCellIndex,targetCellIndex,parentCellIndices,changedCellIndices){
+  var p=CellPosition(grid,sourceCellIndex), x=p.x, y=p.y;
+  var targetPaths=grid.paths[targetCellIndex], pathDir=targetPaths[sourceCellIndex].dir;
+  var vd=ValidDirections(grid,sourceCellIndex);
+  if(vd==0){ targetPaths[sourceCellIndex].dist=-1; targetPaths[sourceCellIndex].dir=0; return; }
+  pathDir&=vd;
+  if((pathDir&kNorth)==kNorth && !CellHasPath(grid,CellIndex(grid,x,y+1),targetCellIndex)) pathDir&=~kNorth;
+  if((pathDir&kSouth)==kSouth && !CellHasPath(grid,CellIndex(grid,x,y-1),targetCellIndex)) pathDir&=~kSouth;
+  if((pathDir&kEast)==kEast && !CellHasPath(grid,CellIndex(grid,x+1,y),targetCellIndex)) pathDir&=~kEast;
+  if((pathDir&kWest)==kWest && !CellHasPath(grid,CellIndex(grid,x-1,y),targetCellIndex)) pathDir&=~kWest;
+
+  if(pathDir!=0 && targetPaths[sourceCellIndex].dir==pathDir) return;
+  if(changedCellIndices.indexOf(sourceCellIndex)==-1) changedCellIndices.push(sourceCellIndex);
+  targetPaths[sourceCellIndex].dir=pathDir;
+  if(pathDir!=0) return;
+
+  targetPaths[sourceCellIndex].dist=-1;
+  parentCellIndices.push(sourceCellIndex);
+  var nN=CellIndex(grid,x,y+1), nS=CellIndex(grid,x,y-1), nE=CellIndex(grid,x+1,y), nW=CellIndex(grid,x-1,y);
+  if(parentCellIndices.indexOf(nN)==-1 && (vd&kNorth)==kNorth && CellHasPath(grid,nN,targetCellIndex)) ResolveBlockedPath(grid,nN,targetCellIndex,parentCellIndices,changedCellIndices);
+  if(parentCellIndices.indexOf(nS)==-1 && (vd&kSouth)==kSouth && CellHasPath(grid,nS,targetCellIndex)) ResolveBlockedPath(grid,nS,targetCellIndex,parentCellIndices,changedCellIndices);
+  if(parentCellIndices.indexOf(nE)==-1 && (vd&kEast)==kEast && CellHasPath(grid,nE,targetCellIndex)) ResolveBlockedPath(grid,nE,targetCellIndex,parentCellIndices,changedCellIndices);
+  if(parentCellIndices.indexOf(nW)==-1 && (vd&kWest)==kWest && CellHasPath(grid,nW,targetCellIndex)) ResolveBlockedPath(grid,nW,targetCellIndex,parentCellIndices,changedCellIndices);
+
+  var bestDist=grid.rowCount*grid.colCount;
+  function consider(bit,nb){ if((vd&bit)==bit && CellHasPath(grid,nb,targetCellIndex) && targetPaths[nb].dist<bestDist) bestDist=targetPaths[nb].dist; }
+  consider(kNorth,nN); consider(kSouth,nS); consider(kEast,nE); consider(kWest,nW);
+  pathDir=0;
+  function pick(bit,nb){ if((vd&bit)==bit && CellHasPath(grid,nb,targetCellIndex) && targetPaths[nb].dist<=bestDist) pathDir|=bit; }
+  pick(kNorth,nN); pick(kSouth,nS); pick(kEast,nE); pick(kWest,nW);
+  targetPaths[sourceCellIndex].dist=bestDist+1;
+  targetPaths[sourceCellIndex].dir=pathDir;
+  parentCellIndices.pop();
+}
+
+/* ============================================================================
+ * Rendering
+ * ==========================================================================*/
+function dirArrows(dir){
+  var s="";
+  if(dir&kNorth) s+="↑";
+  if(dir&kSouth) s+="↓";
+  if(dir&kWest)  s+="←";
+  if(dir&kEast)  s+="→";
+  return s;
+}
+
+// data: {paths,obstacles,island,colCount,rowCount,targetCellIndex,sourceCellIndex,
+//        highlightIslandIndex,changedCellIndices, onCell, onEdge}
+function renderGrid(container, data){
+  var cc=data.colCount, rc=data.rowCount;
+  container.style.gridTemplateColumns="repeat("+cc+",62px)";
+  container.innerHTML="";
+  var changed=data.changedCellIndices||[];
+  for(var y=rc-1;y>=0;y--){
+    for(var x=0;x<cc;x++){
+      var idx=y*cc+x;
+      var cell=document.createElement("div");
+      cell.className="cell";
+      var ob=data.obstacles[idx]||0;
+      if(ob&kNorth) cell.className+=" wN";
+      if(ob&kSouth) cell.className+=" wS";
+      if(ob&kEast)  cell.className+=" wE";
+      if(ob&kWest)  cell.className+=" wW";
+
+      var pth=data.paths[idx];
+      var isTarget=(idx==data.targetCellIndex);
+      var blocked=pth && pth.dist==-1;
+      if(isTarget) cell.className+=" target";
+      if(blocked)  cell.className+=" blocked";
+      if(data.highlightIslandIndex!=null && data.island && data.island[idx]==data.highlightIslandIndex) cell.className+=" island";
+      if(changed.indexOf(idx)!=-1) cell.className+=" changed";
+      if(idx==data.sourceCellIndex) cell.className+=" source";
+
+      var arrows=document.createElement("div"); arrows.className="arrows";
+      var dist=document.createElement("div"); dist.className="dist";
+      if(isTarget){ arrows.textContent="★"; dist.textContent="0"; }
+      else if(!pth){ arrows.textContent=""; dist.textContent=""; }
+      else if(blocked){ arrows.textContent="∅"; dist.textContent="—"; }
+      else { arrows.textContent=dirArrows(pth.dir)||"·"; dist.textContent=pth.dist; }
+      cell.appendChild(arrows); cell.appendChild(dist);
+
+      if(data.onCell){ cell.className+=" clickable"; (function(i){ cell.addEventListener("click",function(e){ if(!e.target.classList.contains("edge")) data.onCell(i); }); })(idx); }
+      if(data.onEdge){
+        [["n",kNorth],["s",kSouth],["e",kEast],["w",kWest]].forEach(function(pair){
+          var ez=document.createElement("div"); ez.className="edge "+pair[0];
+          (function(i,d){ ez.addEventListener("click",function(e){ e.stopPropagation(); data.onEdge(i,d); }); })(idx,pair[1]);
+          cell.appendChild(ez);
+        });
+      }
+      container.appendChild(cell);
+    }
+  }
+}
+
+/* ============================================================================
+ * Build the demo steps (mirrors the bottom of paths.js)
+ * ==========================================================================*/
+function runDemo(grid){
+  function add(x,y,dir,name){ currentAction=name; AddObstacle(grid,x,y,dir); }
+  add(4,4,kNorth,"Add wall · North of (4,4)");
+  add(4,4,kWest, "Add wall · West of (4,4)");
+  add(5,4,kWest, "Add wall · West of (5,4)");
+  add(5,3,kWest, "Add wall · West of (5,3)");
+  add(4,3,kSouth,"Add wall · South of (4,3)");
+  add(4,3,kWest, "Add wall · West of (4,3)");
+  add(7,4,kNorth,"Add wall · North of (7,4)");
+  add(7,4,kWest, "Add wall · West of (7,4)");
+  add(8,4,kWest, "Add wall · West of (8,4)");
+  add(7,3,kSouth,"Add wall · South of (7,3)");
+  add(7,3,kWest, "Add wall · West of (7,3)");
+}
+
+(function buildSteps(){
+  var g=InitializeGrid(8,8);
+  RECORDING=true;
+  // initial reference frame
+  currentAction="Initial state"; currentPhase=["Every cell knows its shortest path to the target (open grid, Manhattan distance)."];
+  recordStep(g,{targetCellIndex:CellIndex(g,4,4)});
+  runDemo(g);
+  RECORDING=false;
+})();
+
+/* ============================================================================
+ * Step viewer UI
+ * ==========================================================================*/
+var idxStep=0, playing=false, timer=null;
+var stepGrid=document.getElementById("stepGrid");
+var slider=document.getElementById("slider");
+var banner=document.getElementById("banner");
+var stepno=document.getElementById("stepno");
+var stepMeta=document.getElementById("stepMeta");
+var actionChips=document.getElementById("actionChips");
+slider.max=STEPS.length-1;
+
+// build action chips (first step index of each action)
+var actionStarts=[];
+STEPS.forEach(function(s,i){ if(i==0 || s.action!=STEPS[i-1].action) actionStarts.push({i:i,name:s.action}); });
+actionStarts.forEach(function(a){
+  var c=document.createElement("div"); c.className="chip"; c.textContent=a.name; c.dataset.start=a.i;
+  c.addEventListener("click",function(){ goto(a.i); });
+  actionChips.appendChild(c);
+});
+
+function fmtCell(grid,idx){ var p=CellPosition({colCount:grid.colCount},idx); return p.x+", "+p.y; }
+
+function render(){
+  var s=STEPS[idxStep];
+  renderGrid(stepGrid, s);
+  // banner
+  var html='<div class="action">'+s.action+'</div><ul>';
+  s.phase.forEach(function(l){ html+="<li>"+l+"</li>"; });
+  html+="</ul>"; banner.innerHTML=html;
+  stepno.textContent="Step "+(idxStep+1)+" / "+STEPS.length;
+  slider.value=idxStep;
+  // meta
+  var tp=CellPosition({colCount:s.colCount},s.targetCellIndex);
+  var m='<span class="tag t">target '+tp.x+", "+tp.y+'</span>';
+  if(s.sourceCellIndex!=null){ var sp=CellPosition({colCount:s.colCount},s.sourceCellIndex); m+=' &nbsp; <span class="tag s">source '+sp.x+", "+sp.y+'</span>'; }
+  stepMeta.innerHTML=m;
+  // active chip
+  var active=0; actionStarts.forEach(function(a){ if(idxStep>=a.i) active=a.i; });
+  Array.prototype.forEach.call(actionChips.children,function(c){ c.classList.toggle("active", +c.dataset.start==active); });
+  // buttons
+  document.getElementById("first").disabled=idxStep==0;
+  document.getElementById("prev").disabled=idxStep==0;
+  document.getElementById("next").disabled=idxStep==STEPS.length-1;
+  document.getElementById("last").disabled=idxStep==STEPS.length-1;
+}
+function goto(i){ idxStep=Math.max(0,Math.min(STEPS.length-1,i)); render(); }
+function stopPlay(){ playing=false; clearInterval(timer); document.getElementById("play").textContent="▶ Play"; }
+function startPlay(){
+  if(idxStep>=STEPS.length-1) idxStep=0;
+  playing=true; document.getElementById("play").textContent="⏸ Pause";
+  timer=setInterval(function(){ if(idxStep>=STEPS.length-1){ stopPlay(); return; } idxStep++; render(); },650);
+}
+document.getElementById("first").onclick=function(){ stopPlay(); goto(0); };
+document.getElementById("prev").onclick =function(){ stopPlay(); goto(idxStep-1); };
+document.getElementById("next").onclick =function(){ stopPlay(); goto(idxStep+1); };
+document.getElementById("last").onclick =function(){ stopPlay(); goto(STEPS.length-1); };
+document.getElementById("play").onclick =function(){ playing?stopPlay():startPlay(); };
+slider.oninput=function(){ stopPlay(); goto(+slider.value); };
+document.addEventListener("keydown",function(e){
+  if(e.key=="ArrowRight"){ stopPlay(); goto(idxStep+1); }
+  if(e.key=="ArrowLeft"){ stopPlay(); goto(idxStep-1); }
+});
+render();
+
+/* ============================================================================
+ * "Building the path data" — instrumented InitializePaths, region by region.
+ * Mirrors InitializePaths() exactly, snapshotting after each region is filled.
+ * ==========================================================================*/
+function buildInitSteps(cc,rc,x,y){
+  var grid={colCount:cc,rowCount:rc};
+  var target=CellIndex(grid,x,y);
+  var paths=[], steps=[], i,j;
+  function snap(title,detail,filled){
+    steps.push({
+      title:title, detail:detail,
+      paths: paths.map(function(p){ return p?{dir:p.dir,dist:p.dist}:null; }),
+      obstacles:[], island:[], colCount:cc, rowCount:rc,
+      targetCellIndex:target, changedCellIndices:filled.slice()
+    });
+  }
+  var f;
+  paths[target]={dir:0,dist:0};
+  snap("Seed the target","The target's own entry: distance 0, no direction.",[target]);
+
+  f=[]; for(j=0;j<x;j++){ var s=CellIndex(grid,j,y); paths[s]={dir:kEast,dist:(x-j)}; f.push(s); }
+  snap("West arm","Cells left of the target on its row step <b>East →</b>; distance = columns away.",f);
+
+  f=[]; for(j=x+1;j<cc;j++){ var s=CellIndex(grid,j,y); paths[s]={dir:kWest,dist:(j-x)}; f.push(s); }
+  snap("East arm","Cells right of the target step <b>West ←</b>.",f);
+
+  f=[]; for(i=0;i<y;i++){ var s=CellIndex(grid,x,i); paths[s]={dir:kNorth,dist:(y-i)}; f.push(s); }
+  snap("South arm","Cells below the target on its column step <b>North ↑</b>.",f);
+
+  f=[]; for(i=y+1;i<rc;i++){ var s=CellIndex(grid,x,i); paths[s]={dir:kSouth,dist:(i-y)}; f.push(s); }
+  snap("North arm","Cells above the target step <b>South ↓</b>. The arms now split the grid into four quadrants.",f);
+
+  f=[]; for(i=0;i<y;i++) for(j=0;j<x;j++){ var s=CellIndex(grid,j,i); paths[s]={dir:kNorth|kEast,dist:(x-j)+(y-i)}; f.push(s); }
+  snap("SW quadrant","Below-left: both <b>North ↑</b> and <b>East →</b> are equally short, so <code>dir = N|E</code>. Distance is the Manhattan sum.",f);
+
+  f=[]; for(i=0;i<y;i++) for(j=x+1;j<cc;j++){ var s=CellIndex(grid,j,i); paths[s]={dir:kNorth|kWest,dist:(j-x)+(y-i)}; f.push(s); }
+  snap("SE quadrant","Below-right: <code>dir = N|W</code>.",f);
+
+  f=[]; for(i=y+1;i<rc;i++) for(j=0;j<x;j++){ var s=CellIndex(grid,j,i); paths[s]={dir:kSouth|kEast,dist:(x-j)+(i-y)}; f.push(s); }
+  snap("NW quadrant","Above-left: <code>dir = S|E</code>.",f);
+
+  f=[]; for(i=y+1;i<rc;i++) for(j=x+1;j<cc;j++){ var s=CellIndex(grid,j,i); paths[s]={dir:kSouth|kWest,dist:(j-x)+(i-y)}; f.push(s); }
+  snap("NE quadrant","Above-right: <code>dir = S|W</code>. The field for this target is now complete — and this runs once per target at startup.",f);
+
+  return steps;
+}
+
+var INIT=[], iIdx=0, iPlaying=false, iTimer=null, initTargetX=4, initTargetY=4;
+var initGridEl=document.getElementById("initGrid");
+var iSlider=document.getElementById("islider");
+var iBanner=document.getElementById("ibanner");
+var iStepno=document.getElementById("istepno");
+
+function renderInit(){
+  var s=INIT[iIdx];
+  s.onCell=function(idx){ var p=CellPosition(s,idx); initTargetX=p.x; initTargetY=p.y; rebuildInit(0); };
+  renderGrid(initGridEl,s);
+  iBanner.innerHTML='<div class="action">'+s.title+'</div><ul><li>'+s.detail+'</li></ul>';
+  iStepno.textContent="Step "+(iIdx+1)+" / "+INIT.length;
+  iSlider.value=iIdx;
+  document.getElementById("ifirst").disabled=iIdx==0;
+  document.getElementById("iprev").disabled=iIdx==0;
+  document.getElementById("inext").disabled=iIdx==INIT.length-1;
+  document.getElementById("ilast").disabled=iIdx==INIT.length-1;
+}
+function iStop(){ iPlaying=false; clearInterval(iTimer); document.getElementById("iplay").textContent="▶ Play"; }
+function iStart(){ if(iIdx>=INIT.length-1) iIdx=0; iPlaying=true; document.getElementById("iplay").textContent="⏸ Pause";
+  iTimer=setInterval(function(){ if(iIdx>=INIT.length-1){ iStop(); return; } iIdx++; renderInit(); },800); }
+function iGoto(n){ iIdx=Math.max(0,Math.min(INIT.length-1,n)); renderInit(); }
+function rebuildInit(n){ INIT=buildInitSteps(8,8,initTargetX,initTargetY); iSlider.max=INIT.length-1; iGoto(n); }
+document.getElementById("ifirst").onclick=function(){ iStop(); iGoto(0); };
+document.getElementById("iprev").onclick =function(){ iStop(); iGoto(iIdx-1); };
+document.getElementById("inext").onclick =function(){ iStop(); iGoto(iIdx+1); };
+document.getElementById("ilast").onclick =function(){ iStop(); iGoto(INIT.length-1); };
+document.getElementById("iplay").onclick =function(){ iPlaying?iStop():iStart(); };
+iSlider.oninput=function(){ iStop(); iGoto(+iSlider.value); };
+rebuildInit(0);
+
+/* ============================================================================
+ * Interactive explorer
+ * ==========================================================================*/
+var liveGrid=null, liveTargetIdx=null;
+var liveGridEl=document.getElementById("liveGrid");
+var liveMeta=document.getElementById("liveMeta");
+var liveTargetEl=document.getElementById("liveTarget");
+
+function newLiveGrid(){ liveGrid=InitializeGrid(8,8); liveTargetIdx=CellIndex(liveGrid,4,4); renderLive(); }
+
+function renderLive(){
+  var t=CellPosition(liveGrid,liveTargetIdx);
+  liveTargetEl.textContent=t.x+", "+t.y;
+  renderGrid(liveGridEl,{
+    paths: liveGrid.paths[liveTargetIdx],
+    obstacles: liveGrid.obstacles,
+    island: liveGrid.island,
+    colCount: liveGrid.colCount, rowCount: liveGrid.rowCount,
+    targetCellIndex: liveTargetIdx,
+    onCell: function(i){ liveTargetIdx=i; renderLive(); },
+    onEdge: function(i,dir){ AddObstacle(liveGrid,CellPosition(liveGrid,i).x,CellPosition(liveGrid,i).y,dir); renderLive(); }
+  });
+  // count unreachable
+  var blocked=0, total=liveGrid.colCount*liveGrid.rowCount;
+  liveGrid.paths[liveTargetIdx].forEach(function(p){ if(p && p.dist==-1) blocked++; });
+  liveMeta.innerHTML='Click a cell to retarget · click an edge to add a wall.'+
+    (blocked>0?' &nbsp; <span class="tag s">'+blocked+' / '+total+' cells unreachable</span>':'');
+}
+/* ============================================================================
+ * Cross-target redundancy demonstration
+ * ==========================================================================*/
+var cmpGridEl=document.getElementById("cmpGrid");
+var cmpMeta=document.getElementById("cmpMeta");
+var cmpStats=document.getElementById("cmpStats");
+var cmpOpenGrid=InitializeGrid(8,8);
+var cmpWallGrid=(function(){ var g=InitializeGrid(8,8); RECORDING=false; runDemo(g); return g; })();
+var cmpUseWalls=false, cmpTx=4, cmpTy=4, cmpNb=kEast;
+
+function nbPos(x,y,nb){
+  if(nb==kEast)  return x<7?{x:x+1,y:y}:null;
+  if(nb==kWest)  return x>0?{x:x-1,y:y}:null;
+  if(nb==kNorth) return y<7?{x:x,y:y+1}:null;
+  if(nb==kSouth) return y>0?{x:x,y:y-1}:null;
+}
+function clampTargetForNeighbor(){ if(!nbPos(cmpTx,cmpTy,cmpNb)){ // keep target where a neighbor exists
+  if(cmpNb==kEast&&cmpTx==7)cmpTx=6; if(cmpNb==kWest&&cmpTx==0)cmpTx=1;
+  if(cmpNb==kNorth&&cmpTy==7)cmpTy=6; if(cmpNb==kSouth&&cmpTy==0)cmpTy=1; } }
+
+function renderCmp(){
+  clampTargetForNeighbor();
+  var grid=cmpUseWalls?cmpWallGrid:cmpOpenGrid;
+  var t=CellIndex(grid,cmpTx,cmpTy);
+  var np=nbPos(cmpTx,cmpTy,cmpNb), t2=CellIndex(grid,np.x,np.y);
+  var fT=grid.paths[t], fT2=grid.paths[t2];
+  var cc=grid.colCount, rc=grid.rowCount;
+  cmpGridEl.style.gridTemplateColumns="repeat("+cc+",62px)";
+  cmpGridEl.innerHTML="";
+  var nSame=0,nCompat=0,nDiff=0,nReachChange=0,total=0;
+  for(var y=rc-1;y>=0;y--) for(var x=0;x<cc;x++){
+    var idx=y*cc+x, a=fT[idx], b=fT2[idx];
+    var cell=document.createElement("div"); cell.className="cell";
+    var ob=grid.obstacles[idx]||0;
+    if(ob&kNorth)cell.className+=" wN"; if(ob&kSouth)cell.className+=" wS";
+    if(ob&kEast)cell.className+=" wE"; if(ob&kWest)cell.className+=" wW";
+    var ra=a.dist!=-1, rb=b.dist!=-1;
+    var arrows=document.createElement("div"); arrows.className="arrows";
+    var dist=document.createElement("div"); dist.className="dist";
+    var klass, special=false;
+    if(idx==t){ klass="same"; special=true; arrows.textContent="★"; dist.textContent="0"; }
+    else if(idx==t2){ klass="same"; special=true; arrows.textContent = ra?(dirArrows(a.dir)||"·"):"∅"; dist.textContent = ra?a.dist:"—"; }
+    else {
+      total++;
+      // Compare the SETS of shortest-path directions, not raw bitmasks.
+      //  same   : identical direction set
+      //  compat : sets differ but still share a move (a tie was gained/lost) — no reroute
+      //  diff   : disjoint sets, or reachability changed — a genuine reroute
+      if(ra!=rb){ klass="diff"; nDiff++; nReachChange++; }
+      else if(!ra && !rb){ klass="same"; nSame++; }
+      else if(a.dir==b.dir){ klass="same"; nSame++; }
+      else if((a.dir & b.dir)!=0){ klass="compat"; nCompat++; }
+      else { klass="diff"; nDiff++; }
+      arrows.textContent = ra ? (dirArrows(a.dir)||"·") : "∅";
+      dist.textContent = ra ? a.dist : "—";
+      if(ra&&rb){ var d=b.dist-a.dist; var badge=document.createElement("div"); badge.className="badge";
+        badge.textContent=(d>0?"+":"")+d; cell.appendChild(badge); }
+    }
+    cell.className+=" "+klass;
+    if(idx==t2){ cell.className+=" tprime"; var bb=document.createElement("div"); bb.className="badge"; bb.style.color="var(--accent)"; bb.textContent="T′"; cell.appendChild(bb); }
+    cell.appendChild(arrows); cell.appendChild(dist);
+    cell.className+=" clickable";
+    (function(i){ cell.addEventListener("click",function(){ var p=CellPosition(grid,i); cmpTx=p.x; cmpTy=p.y; renderCmp(); }); })(idx);
+    cmpGridEl.appendChild(cell);
+  }
+  var kept=nSame+nCompat;
+  cmpMeta.innerHTML='Comparing the field of <span class="tag t">T ('+cmpTx+","+cmpTy+')</span> with '+
+    '<span class="tag" style="color:var(--accent);border-color:var(--accent)">T′ ('+np.x+","+np.y+')</span>. '+
+    'Orange = genuine reroute (no shared move) · blue = direction set changed but still overlaps · '+
+    'badge = distance shift.';
+  cmpStats.innerHTML=
+    '<div class="bigstat">'+nDiff+'</div>'+
+    '<div class="sub" style="margin:0 0 10px"><b>genuine reroute'+(nDiff==1?'':'s')+'</b> — cells whose direction '+
+      'set shares no move with the other field'+(nReachChange?' (incl. '+nReachChange+' reachability change'+(nReachChange==1?'':'s')+')':'')+
+      '. The other <b>'+kept+'</b> of '+total+' cells keep a usable direction toward the moved target.</div>'+
+    '<div class="sub"><span style="color:#f0a85a">■</span> disjoint direction (reroute): <b>'+nDiff+'</b><br>'+
+      '<span style="color:#7fb2e6">■</span> overlapping set, just a tie gained/lost: <b>'+nCompat+'</b><br>'+
+      '<span style="color:#56606e">■</span> identical direction: <b>'+nSame+'</b><br>'+
+      'Distance: every reachable cell shifts by its badge (±1 on an open grid). '+
+      'Exact storage of T′ touches the <b>'+(nDiff+nCompat)+'</b> cells whose set changed, '+
+      'but only <b>'+nDiff+'</b> are real reroutes.</div>';
+}
+Array.prototype.forEach.call(document.querySelectorAll("[data-nb]"),function(b){
+  b.addEventListener("click",function(){ cmpNb=+b.dataset.nb; renderCmp(); });
+});
+document.getElementById("cmpOpen").onclick=function(){ cmpUseWalls=false; this.classList.add("primary"); document.getElementById("cmpWalls").classList.remove("primary"); renderCmp(); };
+document.getElementById("cmpWalls").onclick=function(){ cmpUseWalls=true; this.classList.add("primary"); document.getElementById("cmpOpen").classList.remove("primary"); renderCmp(); };
+renderCmp();
+
+/* ============================================================================
+ * Incremental table construction & iteration-order comparison
+ * ==========================================================================*/
+var pathCanvas=document.getElementById("pathCanvas");
+var pctx=pathCanvas.getContext("2d");
+var pathSlider=document.getElementById("pathSlider");
+var pathMeta=document.getElementById("pathMeta");
+var pathStats=document.getElementById("pathStats");
+var ordTable=document.getElementById("ordTable");
+var PN=cmpOpenGrid.colCount;           // grid is square here
+var pathUseWalls=false, pathOrd="row";
+
+var ORDERS={
+  row:  {name:"Row-major",     gen:function(){ var o=[]; for(var y=0;y<PN;y++) for(var x=0;x<PN;x++) o.push([x,y]); return o; }},
+  col:  {name:"Column-major",  gen:function(){ var o=[]; for(var x=0;x<PN;x++) for(var y=0;y<PN;y++) o.push([x,y]); return o; }},
+  bous: {name:"Boustrophedon", gen:function(){ var o=[]; for(var y=0;y<PN;y++){ if(y%2==0) for(var x=0;x<PN;x++) o.push([x,y]); else for(var x=PN-1;x>=0;x--) o.push([x,y]); } return o; }},
+  hil:  {name:"Hilbert",       gen:function(){ var o=[]; for(var d=0;d<PN*PN;d++){ var t=d,x=0,y=0; for(var s=1;s<PN;s*=2){ var rx=1&((t/2)|0), ry=1&(t^rx); if(ry==0){ if(rx==1){ x=s-1-x; y=s-1-y; } var tmp=x; x=y; y=tmp; } x+=s*rx; y+=s*ry; t=(t/4)|0; } o.push([x,y]); } return o; }},
+  mort: {name:"Morton / Z",    gen:function(){ var a=[]; for(var y=0;y<PN;y++) for(var x=0;x<PN;x++){ var c=0; for(var b=0;b<3;b++){ c|=((x>>b)&1)<<(2*b); c|=((y>>b)&1)<<(2*b+1); } a.push([x,y,c]); } a.sort(function(p,q){return p[2]-q[2];}); return a.map(function(p){return [p[0],p[1]];}); }}
+};
+
+function pathGrid(){ return pathUseWalls?cmpWallGrid:cmpOpenGrid; }
+function dirChange(grid,A,B){
+  var fa=grid.paths[CellIndex(grid,A[0],A[1])], fb=grid.paths[CellIndex(grid,B[0],B[1])], ch=0,rer=0;
+  for(var i=0;i<PN*PN;i++){ var a=fa[i],b=fb[i],ra=a.dist!=-1,rb=b.dist!=-1;
+    if(ra!=rb){ ch++; rer++; continue; } if(!ra&&!rb) continue;
+    if(a.dir!=b.dir){ ch++; if((a.dir&b.dir)==0) rer++; } }
+  return {ch:ch,rer:rer};
+}
+function manhattan(A,B){ return Math.abs(A[0]-B[0])+Math.abs(A[1]-B[1]); }
+function evalOrder(grid,o){
+  var total=PN, rer=0, jumps=0, travel=0, perStep=[PN];
+  for(var i=1;i<o.length;i++){ var d=dirChange(grid,o[i-1],o[i]); total+=d.ch; rer+=d.rer;
+    var m=manhattan(o[i-1],o[i]); travel+=m; if(m>1) jumps++; perStep.push(d.ch); }
+  return {total:total, rer:rer, jumps:jumps, travel:travel, perStep:perStep};
+}
+
+var CELL=54, PAD=18;
+function cx(x){ return PAD+x*CELL+CELL/2; }
+function cy(y){ return PAD+(PN-1-y)*CELL+CELL/2; }
+function drawPath(){
+  var grid=pathGrid(), order=ORDERS[pathOrd].gen(), upto=+pathSlider.value;
+  pctx.clearRect(0,0,pathCanvas.width,pathCanvas.height);
+  // grid lines
+  pctx.strokeStyle="#27313e"; pctx.lineWidth=1;
+  for(var i=0;i<=PN;i++){ pctx.beginPath(); pctx.moveTo(PAD+i*CELL,PAD); pctx.lineTo(PAD+i*CELL,PAD+PN*CELL); pctx.stroke();
+    pctx.beginPath(); pctx.moveTo(PAD,PAD+i*CELL); pctx.lineTo(PAD+PN*CELL,PAD+i*CELL); pctx.stroke(); }
+  // walls
+  if(pathUseWalls){ pctx.strokeStyle="#e7ecf3"; pctx.lineWidth=3;
+    for(var y=0;y<PN;y++) for(var x=0;x<PN;x++){ var ob=grid.obstacles[CellIndex(grid,x,y)]||0;
+      var L=PAD+x*CELL, R=L+CELL, T=PAD+(PN-1-y)*CELL, B=T+CELL;
+      if(ob&kNorth){ pctx.beginPath(); pctx.moveTo(L,T); pctx.lineTo(R,T); pctx.stroke(); }
+      if(ob&kSouth){ pctx.beginPath(); pctx.moveTo(L,B); pctx.lineTo(R,B); pctx.stroke(); }
+      if(ob&kEast){ pctx.beginPath(); pctx.moveTo(R,T); pctx.lineTo(R,B); pctx.stroke(); }
+      if(ob&kWest){ pctx.beginPath(); pctx.moveTo(L,T); pctx.lineTo(L,B); pctx.stroke(); } } }
+  // path up to slider
+  for(var k=1;k<=upto;k++){
+    var A=order[k-1], B=order[k], jump=manhattan(A,B)>1;
+    pctx.lineWidth=jump?3:2.5;
+    if(jump){ pctx.strokeStyle="#e0556a"; pctx.setLineDash([5,4]); }
+    else { var h=Math.round(210+ (k/(PN*PN))*120); pctx.strokeStyle="hsl("+h+",70%,62%)"; pctx.setLineDash([]); }
+    pctx.beginPath(); pctx.moveTo(cx(A[0]),cy(A[1])); pctx.lineTo(cx(B[0]),cy(B[1])); pctx.stroke();
+  }
+  pctx.setLineDash([]);
+  // built nodes
+  for(var k=0;k<=upto;k++){ var P=order[k];
+    pctx.fillStyle = (k==upto)?"#e7c14b":(k==upto-1?"#4ea1ff":"#3a4756");
+    var r=(k==upto)?6:(k==upto-1?5:3);
+    pctx.beginPath(); pctx.arc(cx(P[0]),cy(P[1]),r,0,7); pctx.fill(); }
+  // start marker
+  pctx.strokeStyle="#5ad17a"; pctx.lineWidth=2; pctx.beginPath(); pctx.arc(cx(order[0][0]),cy(order[0][1]),8,0,7); pctx.stroke();
+
+  // step meta
+  var stepCost = (upto==0)?PN : dirChange(grid,order[upto-1],order[upto]).ch;
+  var jmp = (upto>0) && manhattan(order[upto-1],order[upto])>1;
+  pathMeta.innerHTML = "Step "+upto+" / "+(PN*PN-1)+" — build target ("+order[upto][0]+","+order[upto][1]+")"+
+    (upto==0?" <b>from scratch</b> ("+PN+" cells)." :
+      " from ("+order[upto-1][0]+","+order[upto-1][1]+"): "+
+      (jmp?'<span style="color:#e0556a">jump → near-full rebuild, '+stepCost+' cells</span>'
+          :'<span style="color:#7fb2e6">adjacent → patch '+stepCost+' cells</span>')+".");
+}
+
+function renderPathStats(){
+  var grid=pathGrid(), e=evalOrder(grid,ORDERS[pathOrd].gen()), baseline=PN*PN*PN;
+  var pct=Math.round(e.total/baseline*100);
+  pathStats.innerHTML=
+    '<div class="bigstat">'+e.total.toLocaleString()+'</div>'+
+    '<div class="sub" style="margin:0 0 10px">direction re-evaluations to build the whole table with '+
+      '<b>'+ORDERS[pathOrd].name+'</b> — vs <b>'+baseline.toLocaleString()+'</b> building every field from '+
+      'scratch ('+pct+'%).</div>'+
+    '<div class="sub">genuine reroutes: <b>'+e.rer+'</b> &nbsp;·&nbsp; long jumps: '+
+      '<b style="color:'+(e.jumps?'#e0556a':'#5ad17a')+'">'+e.jumps+'</b> &nbsp;·&nbsp; travel: <b>'+e.travel+'</b> '+
+      '(min '+(PN*PN-1)+').</div>';
+  // comparison table
+  var rows=Object.keys(ORDERS).map(function(key){ var ev=evalOrder(grid,ORDERS[key].gen()); return {key:key,name:ORDERS[key].name,ev:ev}; });
+  var best=Math.min.apply(null,rows.map(function(r){return r.ev.total;}));
+  var html='<tr><th>Order</th><th>Work</th><th>Reroutes</th><th>Jumps</th></tr>';
+  rows.sort(function(a,b){return a.ev.total-b.ev.total;}).forEach(function(r){
+    var cls=(r.key==pathOrd?'selrow':'')+(r.ev.total==best?' best':'');
+    html+='<tr class="'+cls+'"><td>'+r.name+'</td><td>'+r.ev.total.toLocaleString()+'</td><td>'+r.ev.rer+'</td><td>'+r.ev.jumps+'</td></tr>';
+  });
+  ordTable.className="ddtable ordTable"; ordTable.innerHTML=html;
+}
+function renderPathAll(){ drawPath(); renderPathStats(); }
+Array.prototype.forEach.call(document.querySelectorAll(".ord"),function(b){
+  b.addEventListener("click",function(){ pathOrd=b.dataset.ord;
+    Array.prototype.forEach.call(document.querySelectorAll(".ord"),function(o){o.classList.remove("primary");});
+    b.classList.add("primary"); renderPathAll(); });
+});
+document.getElementById("pathOpen").onclick=function(){ pathUseWalls=false; this.classList.add("primary"); document.getElementById("pathWalls").classList.remove("primary"); renderPathAll(); };
+document.getElementById("pathWalls").onclick=function(){ pathUseWalls=true; this.classList.add("primary"); document.getElementById("pathOpen").classList.remove("primary"); renderPathAll(); };
+pathSlider.oninput=drawPath;
+renderPathAll();
+
+document.getElementById("reset").onclick=newLiveGrid;
+document.getElementById("loadDemo").onclick=function(){ liveGrid=InitializeGrid(8,8); RECORDING=false; runDemo(liveGrid); liveTargetIdx=CellIndex(liveGrid,4,4); renderLive(); };
+newLiveGrid();
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const V3 = THREE.Vector3;
+
+/* ===== shared helpers ===== */
+function projCube(p){ const m=Math.max(Math.abs(p.x),Math.abs(p.y),Math.abs(p.z))||1; return new V3(p.x/m,p.y/m,p.z/m); }
+function maxDist(d){ let m=1; for(let k=0;k<d.length;k++) if(d[k]>m) m=d[k]; return m; }
+function fieldColor(d,md){ const t=Math.max(0,Math.min(1,d/md));
+  return `rgb(${Math.round(58-(58-21)*t)},${Math.round(110-(110-50)*t)},${Math.round(165-(165-74)*t)})`; }
+const agentMat=new THREE.MeshStandardMaterial({color:0xe7c14b, emissive:0x4a3a08, roughness:0.45, metalness:0.15});
+const targetMat=new THREE.MeshStandardMaterial({color:0xd36bd8, emissive:0x4a1850, roughness:0.4, metalness:0.1});
+const wallMat=new THREE.MeshStandardMaterial({color:0xe7ecf3, emissive:0x1a1f26, roughness:0.65, metalness:0.05});
+
+/* ===== chase core (identical for every surface; operates on an abstract graph) ===== */
+const ekey=(N,a,b)=> a<b ? a*N+b : b*N+a;
+const blocked=(sim,a,b)=> sim.walls.has(ekey(sim.N,a,b));
+function genWalls(sim,pct){ sim.walls=new Set(); const E=sim.wallEdges, want=Math.floor(E.length*pct);
+  for(let k=0;k<want;k++){ const e=E[(Math.random()*E.length)|0]; sim.walls.add(ekey(sim.N,e[0],e[1])); } }
+function computeField(sim){ sim.dist=new Int32Array(sim.N).fill(-1); sim.dist[sim.target.c]=0;
+  const q=[sim.target.c]; let h=0;
+  while(h<q.length){ const c=q[h++], d=sim.dist[c];
+    for(const n of sim.nbr[c]){ if(blocked(sim,c,n)) continue; if(sim.dist[n]===-1){ sim.dist[n]=d+1; q.push(n); } } } }
+function nextStep(sim,c){ const here=sim.dist[c]; if(here<=0) return c; let best=here, pick=c;
+  for(const n of sim.nbr[c]){ if(blocked(sim,c,n)) continue; const d=sim.dist[n]; if(d!==-1 && d<best){ best=d; pick=n; } } return pick; }
+function seed(sim,n){ sim.agents=[]; for(let k=0;k<n;k++){ const c=(Math.random()*sim.N)|0; sim.agents.push({c,prev:c}); } }
+function tickSim(sim,move){ sim.target.prev=sim.target.c;
+  if(move && (sim.targetTick++ % 3)===0){ const opt=sim.nbr[sim.target.c].filter(n=>!blocked(sim,sim.target.c,n));
+    if(opt.length) sim.target.c=opt[(Math.random()*opt.length)|0]; }
+  computeField(sim);
+  for(const a of sim.agents){ a.prev=a.c; a.c=nextStep(sim,a.c); } }
+
+/* ===== CUBE adapter (6 faces, geometric edge fold; extruded walls) ===== */
+function buildCube(F){
+  const FAC=[
+    {key:'F',n:new V3(0,0,1),r:new V3(1,0,0),u:new V3(0,1,0),net:[1,1],color:'#1b2533'},
+    {key:'B',n:new V3(0,0,-1),r:new V3(-1,0,0),u:new V3(0,1,0),net:[3,1],color:'#1d2735'},
+    {key:'R',n:new V3(1,0,0),r:new V3(0,0,-1),u:new V3(0,1,0),net:[2,1],color:'#1a2431'},
+    {key:'L',n:new V3(-1,0,0),r:new V3(0,0,1),u:new V3(0,1,0),net:[0,1],color:'#1e2836'},
+    {key:'U',n:new V3(0,1,0),r:new V3(1,0,0),u:new V3(0,0,-1),net:[1,0],color:'#19222f'},
+    {key:'D',n:new V3(0,-1,0),r:new V3(1,0,0),u:new V3(0,0,1),net:[1,2],color:'#202b39'} ];
+  const N=6*F*F, cid=(f,i,j)=>f*F*F+j*F+i, dec=c=>{const f=(c/(F*F))|0,r=c-f*F*F,j=(r/F)|0;return [f,r-j*F,j];};
+  const fwN=e=>{let b=0,bd=-2;for(let f=0;f<6;f++){const d=FAC[f].n.dot(e);if(d>bd){bd=d;b=f;}}return b;};
+  const cc=(f,i,j)=>{const fc=FAC[f],a=((i+0.5)/F)*2-1,b=((j+0.5)/F)*2-1;return new V3().copy(fc.n).addScaledVector(fc.r,a).addScaledVector(fc.u,b);};
+  function step(f,i,j,dir){ const fc=FAC[f];
+    if(dir===0&&i<F-1)return cid(f,i+1,j); if(dir===1&&i>0)return cid(f,i-1,j);
+    if(dir===2&&j<F-1)return cid(f,i,j+1); if(dir===3&&j>0)return cid(f,i,j-1);
+    const ax=(dir<2)?fc.r:fc.u, sg=(dir===0||dir===2)?1:-1, e=new V3().copy(ax).multiplyScalar(sg), t=(dir<2)?fc.u:fc.r;
+    const C=cc(f,i,j), Cp=new V3().copy(C).addScaledVector(ax,sg*2/F), ce=Cp.dot(e), ct=Cp.dot(t);
+    const P=new V3().copy(e).addScaledVector(t,ct).addScaledVector(fc.n,2-ce), f2=fwN(e), nf=FAC[f2];
+    const cl=v=>Math.max(0,Math.min(F-1,Math.round((v+1)/2*F-0.5)));
+    return cid(f2,cl(P.dot(nf.r)),cl(P.dot(nf.u))); }
+  const nbr=[]; for(let c=0;c<N;c++){ const [f,i,j]=dec(c), s=new Set(); for(let d=0;d<4;d++)s.add(step(f,i,j,d)); s.delete(c); nbr[c]=[...s]; }
+  const wallEdges=[]; for(let c=0;c<N;c++) for(const n of nbr[c]) if(c<n) wallEdges.push([c,n]);
+  const center=c=>{ const [f,i,j]=dec(c); return cc(f,i,j); };
+  const baseR=()=>(2/F)*0.34, TS=320; let fctx=[],ftex=[],fmesh=[];
+  function init3D(group){ fctx=[];ftex=[];fmesh=[];
+    for(let f=0;f<6;f++){ const cv=document.createElement('canvas'); cv.width=cv.height=TS; fctx[f]=cv.getContext('2d');
+      const tex=new THREE.CanvasTexture(cv); tex.colorSpace=THREE.SRGBColorSpace; tex.magFilter=THREE.NearestFilter; ftex[f]=tex;
+      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.MeshBasicMaterial({map:tex})), fc=FAC[f];
+      mesh.setRotationFromMatrix(new THREE.Matrix4().makeBasis(fc.r,fc.u,fc.n)); mesh.position.copy(fc.n); mesh.userData.faceIndex=f;
+      fmesh[f]=mesh; group.add(mesh); }
+    group.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(2.002,2.002,2.002)),
+      new THREE.LineBasicMaterial({color:0x4ea1ff,transparent:true,opacity:0.3}))); }
+  function drawSurface(sim,o){ const md=maxDist(sim.dist), cs=TS/F;
+    for(let f=0;f<6;f++){ const ctx=fctx[f]; ctx.fillStyle=FAC[f].color; ctx.fillRect(0,0,TS,TS);
+      if(o.field) for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const d=sim.dist[cid(f,i,j)]; if(d>=0){ ctx.fillStyle=fieldColor(d,md); ctx.fillRect(i*cs+1,(F-1-j)*cs+1,cs-2,cs-2); } }
+      ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.lineWidth=1;
+      for(let k=0;k<=F;k++){ ctx.beginPath();ctx.moveTo(k*cs,0);ctx.lineTo(k*cs,TS);ctx.stroke(); ctx.beginPath();ctx.moveTo(0,k*cs);ctx.lineTo(TS,k*cs);ctx.stroke(); }
+      if(o.labels){ ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font=`bold ${TS*0.2}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(FAC[f].key,TS/2,TS/2); }
+      ftex[f].needsUpdate=true; } }
+  function buildWalls(group,sim){ const h=(2/F)*0.5, thick=(2/F)*0.16, half=1/F, items=[];
+    for(let f=0;f<6;f++){ const fc=FAC[f], pt=(ra,ua)=>new V3().copy(fc.n).addScaledVector(fc.r,ra).addScaledVector(fc.u,ua);
+      for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const c=cid(f,i,j), a=((i+0.5)/F)*2-1, b=((j+0.5)/F)*2-1;
+        for(let d=0;d<4;d++){ const n=step(f,i,j,d); if(c>=n || !blocked(sim,c,n)) continue;
+          let p1,p2; if(d===0){p1=pt(a+half,b-half);p2=pt(a+half,b+half);} else if(d===1){p1=pt(a-half,b-half);p2=pt(a-half,b+half);}
+          else if(d===2){p1=pt(a-half,b+half);p2=pt(a+half,b+half);} else {p1=pt(a-half,b-half);p2=pt(a+half,b-half);}
+          const [nf]=dec(n); items.push({p1,p2,out:new V3().copy(fc.n).add(FAC[nf].n).normalize()}); } } }
+    const inst=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1), wallMat, Math.max(1,items.length));
+    const M=new THREE.Matrix4(),B=new THREE.Matrix4(),q=new THREE.Quaternion(),seg=new V3(),out=new V3(),td=new V3(),mid=new V3();
+    for(let k=0;k<items.length;k++){ const w=items[k]; seg.subVectors(w.p2,w.p1); const len=seg.length(); seg.normalize();
+      td.crossVectors(seg,w.out).normalize(); out.crossVectors(td,seg).normalize(); B.makeBasis(seg,out,td); q.setFromRotationMatrix(B);
+      mid.addVectors(w.p1,w.p2).multiplyScalar(0.5).addScaledVector(out,h/2); M.compose(mid,q,new V3(len,h,thick)); inst.setMatrixAt(k,M); }
+    inst.count=items.length; inst.instanceMatrix.needsUpdate=true; group.add(inst); }
+  function surfacePos(pc,nc,t,r){ const P=new V3().lerpVectors(center(pc),center(nc),t), pp=projCube(P),
+      ax=Math.abs(pp.x),ay=Math.abs(pp.y),az=Math.abs(pp.z);
+    if(ax>=ay&&ax>=az) pp.x+=Math.sign(pp.x)*r; else if(ay>=az) pp.y+=Math.sign(pp.y)*r; else pp.z+=Math.sign(pp.z)*r; return pp; }
+  const raycastTargets=()=>fmesh;
+  const pickFromHit=hit=>cid(hit.object.userData.faceIndex, Math.min(F-1,Math.floor(hit.uv.x*F)), Math.min(F-1,Math.floor(hit.uv.y*F)));
+  let ncs=8; const netRect=(f,i,j)=>{const [fc,fr]=FAC[f].net; return [(fc*F+i)*ncs,(fr*F+(F-1-j))*ncs];};
+  function netWalls(ctx,f,i,j,rx,ry,cs,sim){ const c=cid(f,i,j);
+    const sg=(x1,y1,x2,y2,n)=>{ if(!blocked(sim,c,n))return; ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke(); };
+    sg(rx+cs,ry,rx+cs,ry+cs,step(f,i,j,0)); sg(rx,ry,rx,ry+cs,step(f,i,j,1)); sg(rx,ry,rx+cs,ry,step(f,i,j,2)); sg(rx,ry+cs,rx+cs,ry+cs,step(f,i,j,3)); }
+  function draw2D(canvas,ctx,sim,t,o){ ncs=Math.max(5,Math.floor((canvas.clientWidth||520)/(4*F)));
+    canvas.width=4*F*ncs; canvas.height=3*F*ncs; canvas.style.height=canvas.height+'px';
+    const md=maxDist(sim.dist); ctx.fillStyle='#0b0f14'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let f=0;f<6;f++){ const [fc,fr]=FAC[f].net, ox=fc*F*ncs, oy=fr*F*ncs; ctx.fillStyle=FAC[f].color; ctx.fillRect(ox,oy,F*ncs,F*ncs);
+      if(o.field) for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const d=sim.dist[cid(f,i,j)]; if(d>=0){ const [x,y]=netRect(f,i,j); ctx.fillStyle=fieldColor(d,md); ctx.fillRect(x+1,y+1,ncs-2,ncs-2); } }
+      ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1;
+      for(let k=0;k<=F;k++){ ctx.beginPath();ctx.moveTo(ox+k*ncs,oy);ctx.lineTo(ox+k*ncs,oy+F*ncs);ctx.stroke(); ctx.beginPath();ctx.moveTo(ox,oy+k*ncs);ctx.lineTo(ox+F*ncs,oy+k*ncs);ctx.stroke(); }
+      ctx.strokeStyle='#e7ecf3'; ctx.lineWidth=Math.max(2,ncs*0.14); ctx.lineCap='round';
+      for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const [x,y]=netRect(f,i,j); netWalls(ctx,f,i,j,x,y,ncs,sim); }
+      ctx.strokeStyle='rgba(78,161,255,0.4)'; ctx.lineWidth=1.5; ctx.strokeRect(ox,oy,F*ncs,F*ncs);
+      if(o.labels){ ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.font=`bold ${F*ncs*0.2}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(FAC[f].key,ox+F*ncs/2,oy+F*ncs/2); } }
+    const nc=c=>{ const [f,i,j]=dec(c), [x,y]=netRect(f,i,j); return [x+ncs/2,y+ncs/2]; }, l2=(a,b)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+    for(const a of sim.agents){ const p=l2(nc(a.prev),nc(a.c)); ctx.fillStyle='#e7c14b'; ctx.beginPath(); ctx.arc(p[0],p[1],ncs*0.34,0,7); ctx.fill(); }
+    const tp=l2(nc(sim.target.prev),nc(sim.target.c)); ctx.fillStyle='#d36bd8'; ctx.beginPath(); ctx.arc(tp[0],tp[1],ncs*0.46,0,7); ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke(); }
+  const pick2D=(px,py)=>{ const col=Math.floor(px/ncs), row=Math.floor(py/ncs);
+    for(let f=0;f<6;f++){ const [fc,fr]=FAC[f].net; if(col>=fc*F&&col<(fc+1)*F&&row>=fr*F&&row<(fr+1)*F) return cid(f,col-fc*F,F-1-(row-fr*F)); } return -1; };
+  return {N,nbr,wallEdges,center,baseR,init3D,drawSurface,buildWalls,surfacePos,raycastTargets,pickFromHit,draw2D,pick2D};
+}
+
+/* ===== SPHERE adapter (equal-area octahedral map; geometric adjacency; painted walls) ===== */
+function buildSphere(F){
+  const sgn=x=>x<0?-1:1;
+  function s2s(s,t){ const u=2*s-1,v=2*t-1,au=Math.abs(u),av=Math.abs(v), d=1-(au+av), r=1-Math.abs(d);
+    const phi=r===0?0:(Math.PI/4)*((av-au)/r+1), k=r*Math.sqrt(Math.max(0,2-r*r));
+    return new V3(sgn(u)*Math.cos(phi)*k, sgn(v)*Math.sin(phi)*k, sgn(d)*(1-r*r)); }
+  const surf=(s,t)=>{ const p=s2s(s,t); return new V3(-p.x,p.z,p.y); };       // formula -> three coords
+  const N=F*F, cid=(i,j)=>j*F+i, dec=c=>[c%F,(c/F)|0];
+  const pos=[]; for(let c=0;c<N;c++){ const [i,j]=dec(c); pos[c]=surf((i+0.5)/F,(j+0.5)/F); }
+  const center=c=>pos[c], d2=(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2;
+  const nearest=(p,ex)=>{ let b=-1,bd=1e9; for(let k=0;k<N;k++){ if(k===ex)continue; const d=d2(p,pos[k]); if(d<bd){bd=d;b=k;} } return b; };
+  function bnbr(i,j,dir){ const here=pos[cid(i,j)]; let ii=i,jj=j;
+    if(dir===0)ii=i-1; else if(dir===1)ii=i+1; else if(dir===2)jj=j-1; else jj=j+1;
+    ii=Math.max(0,Math.min(F-1,ii)); jj=Math.max(0,Math.min(F-1,jj));
+    const inw=pos[cid(ii,jj)], tan=new V3().subVectors(here,inw), st=tan.length(); tan.normalize();
+    return nearest(new V3().copy(here).addScaledVector(tan,st).normalize(), cid(i,j)); }
+  const nbr=Array.from({length:N},()=>[]);
+  for(let j=0;j<F;j++) for(let i=0;i<F;i++){ const c=cid(i,j), l=[], push=a=>{ if(a!==c&&!l.includes(a)) l.push(a); };
+    push(i<F-1?cid(i+1,j):bnbr(i,j,0)); push(i>0?cid(i-1,j):bnbr(i,j,1)); push(j<F-1?cid(i,j+1):bnbr(i,j,2)); push(j>0?cid(i,j-1):bnbr(i,j,3)); nbr[c]=l; }
+  for(let c=0;c<N;c++) for(const n of nbr[c]) if(!nbr[n].includes(c)) nbr[n].push(c);     // symmetric closure
+  const wallEdges=[]; for(let j=0;j<F;j++) for(let i=0;i<F;i++){ if(i<F-1)wallEdges.push([cid(i,j),cid(i+1,j)]); if(j<F-1)wallEdges.push([cid(i,j),cid(i,j+1)]); }
+  const baseR=()=>1.25/F, TS=512, MR=Math.max(110,F*6); let texCanvas,texCtx,tex,sphereMesh;
+  function buildGeo(){ const g=new THREE.BufferGeometry(),vt=[],uv=[],nm=[];
+    for(let j=0;j<=MR;j++) for(let i=0;i<=MR;i++){ const s=i/MR,t=j/MR,p=surf(s,t); vt.push(p.x,p.y,p.z); nm.push(p.x,p.y,p.z); uv.push(s,t); }
+    const idx=[],row=MR+1; for(let j=0;j<MR;j++) for(let i=0;i<MR;i++){ const a=j*row+i,b=a+1,c=a+row,d=c+1; idx.push(a,c,b,b,c,d); }
+    g.setAttribute('position',new THREE.Float32BufferAttribute(vt,3)); g.setAttribute('normal',new THREE.Float32BufferAttribute(nm,3));
+    g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx); return g; }
+  function init3D(group){ texCanvas=document.createElement('canvas'); texCanvas.width=texCanvas.height=TS; texCtx=texCanvas.getContext('2d');
+    tex=new THREE.CanvasTexture(texCanvas); tex.flipY=false; tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
+    sphereMesh=new THREE.Mesh(buildGeo(), new THREE.MeshBasicMaterial({map:tex, side:THREE.DoubleSide})); group.add(sphereMesh); }
+  function drawSquare(ctx,size,sim,o,walls){ const md=maxDist(sim.dist), cs=size/F; ctx.fillStyle='#16202c'; ctx.fillRect(0,0,size,size);
+    if(o.field) for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const d=sim.dist[cid(i,j)]; if(d>=0){ ctx.fillStyle=fieldColor(d,md); ctx.fillRect(i*cs+0.4,j*cs+0.4,cs-0.8,cs-0.8); } }
+    ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.lineWidth=1;
+    for(let k=0;k<=F;k++){ ctx.beginPath();ctx.moveTo(k*cs,0);ctx.lineTo(k*cs,size);ctx.stroke(); ctx.beginPath();ctx.moveTo(0,k*cs);ctx.lineTo(size,k*cs);ctx.stroke(); }
+    if(walls){ ctx.strokeStyle='#e7ecf3'; ctx.lineWidth=Math.max(2,cs*0.16); ctx.lineCap='round';
+      for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const c=cid(i,j);
+        if(i<F-1&&blocked(sim,c,cid(i+1,j))){ ctx.beginPath();ctx.moveTo((i+1)*cs,j*cs);ctx.lineTo((i+1)*cs,(j+1)*cs);ctx.stroke(); }
+        if(j<F-1&&blocked(sim,c,cid(i,j+1))){ ctx.beginPath();ctx.moveTo(i*cs,(j+1)*cs);ctx.lineTo((i+1)*cs,(j+1)*cs);ctx.stroke(); } } }
+    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.font=`bold ${size*0.026}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('N pole', size/2, size/2); }
+  function drawSurface(sim,o){ drawSquare(texCtx,TS,sim,o,false); tex.needsUpdate=true; }
+  function buildWalls(group,sim){ const h=2.0/F, thick=0.5/F, items=[];
+    for(let i=0;i<F;i++) for(let j=0;j<F;j++){ const c=cid(i,j);
+      if(i<F-1 && blocked(sim,c,cid(i+1,j))) items.push([surf((i+1)/F,j/F), surf((i+1)/F,(j+1)/F)]);
+      if(j<F-1 && blocked(sim,c,cid(i,j+1))) items.push([surf(i/F,(j+1)/F), surf((i+1)/F,(j+1)/F)]); }
+    const inst=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1), wallMat, Math.max(1,items.length));
+    const M=new THREE.Matrix4(),B=new THREE.Matrix4(),q=new THREE.Quaternion(),seg=new V3(),out=new V3(),td=new V3(),mid=new V3();
+    for(let k=0;k<items.length;k++){ const p1=items[k][0],p2=items[k][1]; seg.subVectors(p2,p1); const len=seg.length(); seg.normalize();
+      mid.addVectors(p1,p2).multiplyScalar(0.5); out.copy(mid).normalize();
+      td.crossVectors(seg,out).normalize(); out.crossVectors(td,seg).normalize(); B.makeBasis(seg,out,td); q.setFromRotationMatrix(B);
+      mid.addScaledVector(out,h/2); M.compose(mid,q,new V3(len,h,thick)); inst.setMatrixAt(k,M); }
+    inst.count=items.length; inst.instanceMatrix.needsUpdate=true; group.add(inst); }
+  function surfacePos(pc,nc,t,r){ return new V3().lerpVectors(center(pc),center(nc),t).normalize().multiplyScalar(1+r); }
+  const raycastTargets=()=>[sphereMesh];
+  const pickFromHit=hit=>cid(Math.min(F-1,Math.floor(hit.uv.x*F)), Math.min(F-1,Math.floor(hit.uv.y*F)));
+  function draw2D(canvas,ctx,sim,t,o){ const size=Math.max(140,Math.min(560,canvas.clientWidth||520));
+    canvas.width=size; canvas.height=size; canvas.style.height=size+'px'; drawSquare(ctx,size,sim,o,true); const cs=size/F;
+    const nc=c=>{ const [i,j]=dec(c); return [(i+0.5)*cs,(j+0.5)*cs]; }, l2=(a,b)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+    for(const a of sim.agents){ const p=l2(nc(a.prev),nc(a.c)); ctx.fillStyle='#e7c14b'; ctx.beginPath(); ctx.arc(p[0],p[1],cs*0.34,0,7); ctx.fill(); }
+    const tp=l2(nc(sim.target.prev),nc(sim.target.c)); ctx.fillStyle='#d36bd8'; ctx.beginPath(); ctx.arc(tp[0],tp[1],cs*0.46,0,7); ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke(); }
+  const pick2D=(px,py,cw,ch)=>cid(Math.min(F-1,Math.floor(px/cw*F)), Math.min(F-1,Math.floor(py/ch*F)));
+  return {N,nbr,wallEdges,center,baseR,init3D,drawSurface,buildWalls,surfacePos,raycastTargets,pickFromHit,draw2D,pick2D};
+}
+
+/* ===== generic demo runner (one 3D canvas + one flat canvas) ===== */
+function makeDemo(opt){
+  const stage=document.getElementById(opt.stage); if(!stage) return;
+  const renderer=new THREE.WebGLRenderer({canvas:stage,antialias:true,alpha:true});
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(45,1,0.1,100); camera.position.set(opt.cam[0],opt.cam[1],opt.cam[2]);
+  const controls=new OrbitControls(camera,stage); controls.enableDamping=true; controls.enablePan=false; controls.minDistance=2.2; controls.maxDistance=9;
+  scene.add(new THREE.AmbientLight(0x8493a6,1.1)); const dl=new THREE.DirectionalLight(0xffffff,1.3); dl.position.set(3,5,4); scene.add(dl);
+  const flat=document.getElementById(opt.flat), fctx=flat.getContext('2d'), G=id=>document.getElementById(id);
+  let adapter,sim,group,agentMeshes=[],targetMesh, playing=true, speed=+G(opt.speed).value, acc=0, last=performance.now();
+  const opts=()=>({ field:G(opt.field).checked, labels:opt.labels?G(opt.labels).checked:false, move:G(opt.move).checked });
+  function rebuildPool(){ agentMeshes.forEach(m=>group.remove(m)); agentMeshes=[]; const r=adapter.baseR(), geo=new THREE.SphereGeometry(r,14,10);
+    for(let k=0;k<sim.agents.length;k++){ const m=new THREE.Mesh(geo,agentMat); group.add(m); agentMeshes.push(m); }
+    if(targetMesh) group.remove(targetMesh); targetMesh=new THREE.Mesh(new THREE.SphereGeometry(r*1.6,18,14),targetMat); group.add(targetMesh); }
+  function rebuild(){ if(group){ scene.remove(group); group.traverse(o=>{ if(o.geometry&&o.geometry.dispose) o.geometry.dispose(); }); }
+    group=new THREE.Group(); scene.add(group); adapter=opt.build(+G(opt.F).value); adapter.init3D(group);
+    sim={N:adapter.N,nbr:adapter.nbr,wallEdges:adapter.wallEdges,walls:new Set(),dist:null,agents:[],target:null,targetTick:0};
+    genWalls(sim,(+G(opt.walls).value)/100); sim.target={c:(Math.random()*sim.N)|0,prev:0}; sim.target.prev=sim.target.c;
+    seed(sim,+G(opt.agents).value); computeField(sim); if(adapter.buildWalls) adapter.buildWalls(group,sim); rebuildPool(); stats(); }
+  function setTarget(c){ if(c<0)return; sim.target.prev=c; sim.target.c=c; computeField(sim); stats(); }
+  function stats(){ let reach=0,caught=0; for(let k=0;k<sim.N;k++) if(sim.dist[k]>=0) reach++; for(const a of sim.agents) if(sim.dist[a.c]===0) caught++;
+    G(opt.stats).innerHTML=`cells: <span class="val">${sim.N}</span> · walls: ${sim.walls.size} · reachable: ${reach} · on target: ${caught}`; }
+  G(opt.play).onclick=function(){ playing=!playing; this.textContent=playing?'⏸ Pause':'▶ Play'; this.classList.toggle('primary',playing); };
+  G(opt.step).onclick=()=>{ tickSim(sim,opts().move); stats(); };
+  G(opt.reseed).onclick=()=>{ seed(sim,+G(opt.agents).value); rebuildPool(); };
+  G(opt.speed).addEventListener('input',e=>speed=+e.target.value);
+  G(opt.F).addEventListener('input',rebuild);
+  G(opt.walls).addEventListener('input',rebuild);
+  G(opt.agents).addEventListener('input',()=>{ seed(sim,+G(opt.agents).value); rebuildPool(); });
+  const ray=new THREE.Raycaster(), mv=new THREE.Vector2(); let dn=null;
+  stage.addEventListener('pointerdown',e=>dn=[e.clientX,e.clientY]);
+  stage.addEventListener('pointerup',e=>{ if(!dn)return; const moved=Math.hypot(e.clientX-dn[0],e.clientY-dn[1]); dn=null; if(moved>5)return;
+    const r=stage.getBoundingClientRect(); mv.x=((e.clientX-r.left)/r.width)*2-1; mv.y=-((e.clientY-r.top)/r.height)*2+1; ray.setFromCamera(mv,camera);
+    const hit=ray.intersectObjects(adapter.raycastTargets(),false)[0]; if(hit) setTarget(adapter.pickFromHit(hit)); });
+  flat.addEventListener('click',e=>{ const r=flat.getBoundingClientRect();
+    setTarget(adapter.pick2D((e.clientX-r.left)/r.width*flat.width, (e.clientY-r.top)/r.height*flat.height, flat.width, flat.height)); });
+  const rs=()=>{ const w=stage.clientWidth,h=stage.clientHeight; if(!w||!h)return; renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); };
+  new ResizeObserver(rs).observe(stage); rebuild(); rs();
+  function frame(now){ const dt=Math.min(0.1,(now-last)/1000); last=now; controls.update(); const itv=1/speed;
+    if(playing){ acc+=dt; let g=0; while(acc>=itv && g++<5){ tickSim(sim,opts().move); acc-=itv; } stats(); }
+    const t=playing?Math.min(1,acc/itv):1, o=opts(); adapter.drawSurface(sim,o); const r=adapter.baseR();
+    for(let k=0;k<sim.agents.length;k++) agentMeshes[k].position.copy(adapter.surfacePos(sim.agents[k].prev,sim.agents[k].c,t,r));
+    targetMesh.position.copy(adapter.surfacePos(sim.target.prev,sim.target.c,t,r*1.6));
+    adapter.draw2D(flat,fctx,sim,t,o); renderer.render(scene,camera); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+}
+
+makeDemo({stage:'cubeStage',flat:'cubeNet',play:'cubePlay',step:'cubeStep',reseed:'cubeReseed',speed:'cubeSpeed',F:'cubeF',
+  agents:'cubeAgents',walls:'cubeWalls',move:'cubeMove',field:'cubeField',labels:'cubeLabels',stats:'cubeStats',cam:[3,2.3,3.3],build:buildCube});
+makeDemo({stage:'sphStage',flat:'sphFlat',play:'sphPlay',step:'sphStep',reseed:'sphReseed',speed:'sphSpeed',F:'sphF',
+  agents:'sphAgents',walls:'sphWalls',move:'sphMove',field:'sphField',labels:null,stats:'sphStats',cam:[2.6,1.9,2.6],build:buildSphere});
+</script>
+</body>
+</html>
