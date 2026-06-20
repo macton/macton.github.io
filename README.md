@@ -1,2 +1,0 @@
-# macton.github.io
-macton

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Self-Avoiding Walks, by Picture — a teaching walkthrough</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <div class="brand">PROTOTEIN</div>
+  <div class="sub">a visual walkthrough,<br>grounded in the literature</div>
+  <ol>
+    <li><a href="#s1">The folding problem</a></li>
+    <li><a href="#s2">It's really about walks</a></li>
+    <li><a href="#s3">The endpoint diamond</a></li>
+    <li><a href="#s4">Symmetry: keep ⅛</a></li>
+    <li><a href="#s5">The boundary is Pascal</a></li>
+    <li><a href="#s6">Shells &amp; surplus</a></li>
+    <li><a href="#s7">Free vs. irreducible</a></li>
+    <li><a href="#s8">Patching a length</a></li>
+    <li><a href="#s9">Where difficulty lives</a></li>
+    <li><a href="#s10">Back to enumeration</a></li>
+    <li><a href="#sfl">Method 1: finite-lattice</a></li>
+    <li><a href="#slace">Method 2: lace expansion</a></li>
+    <li><a href="#srel">Related work</a></li>
+    <li><a href="#s11">Findings &amp; sources</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <span class="tag">a visual teaching walkthrough · grounded in the self-avoiding-walk literature</span>
+  <h1>Self-avoiding walks, by picture</h1>
+  <p class="lede">How the counts for shorter walks help compute the next length — and the precise, <em>known</em> reason there's a limit to how far they can take you. A guided tour that rebuilds, with interactive pictures, structure that is well established in the study of self-avoiding walks.</p>
+  <div class="note"><span class="h">What this is — and isn't</span> This is an <b>explainer, not a research claim.</b> It reconstructs by visualization things that are well established in the theory of self-avoiding walks: the two-point function, the random-walk-plus-correction decomposition (the <b>lace expansion</b>), incremental enumeration (the <b>finite-lattice</b> and <b>two-step</b> methods), and the proof that the generating function is <b>not D-finite</b>. A handful of small bookkeeping observations along the way are elementary and stated without a citation — these are flagged <span class="muted">(elementary — not from the literature)</span>. Nothing here is offered as new. The aim is intuition for one question, and an honest account of its known answer. Full references in <a href="#srel">§13</a>.</div>
+</header>
+
+<!-- 1 -->
+<section id="s1">
+  <h2><span class="num">01</span> The folding problem</h2>
+  <p>Imagine a tiny protein: a chain of beads. Each bead is one of two kinds — <b>H</b> (hydrophobic, "oily") or <b>P</b> (polar, "water-loving"). The chain lives on a square grid and folds so that no two beads sit on the same square. This is the <b>HP lattice model</b> — a stripped-down cartoon of real protein folding called a <em>prototein</em>. The model and that name come from a 1998 <em>American Scientist</em> column by Brian Hayes, <a href="https://www.americanscientist.org/article/prototeins" target="_blank">"Prototeins"</a> (<a href="https://faculty.cc.gatech.edu/~turk/bio_sim/articles/prototeins_am_sci.pdf" target="_blank">reprint</a>) — the original introduction that started this investigation.</p>
+  <p>The chain wants to fold so that H beads clump together, hiding from water. We <b>score</b> a fold by counting <b>H–H contacts</b>: pairs of H beads that sit next to each other on the grid but are <em>not</em> already neighbors along the chain. The best fold is the one with the most contacts.</p>
+  <div class="viz">
+    <div class="label">A folded prototein · H–H contacts highlighted</div>
+    <canvas id="cv-fold" width="760" height="360"></canvas>
+    <div class="caption" id="cap-fold"></div>
+  </div>
+  <p>The obvious program just tries <em>every</em> fold by brute-force recursion and keeps the best. That works for short chains and slams into an exponential wall for longer ones. To go further we have to understand the structure of <em>folds themselves</em>, independent of the H/P labels.</p>
+  <div class="note"><span class="h">Key move</span> Separate the <b>shape</b> of a fold from its <b>score</b>. Every fold is a self-avoiding path on the grid; the H/P labelling only matters when we score. So first: understand all the shapes.</div>
+  <div class="note hyp"><span class="h">The question we'll build intuition for</span> <b>Can the data for previous path lengths (&lt; N) accelerate computing the paths of length N?</b> The short, established answer is <em>yes — and this is exactly what the best enumeration methods do</em> (the finite-lattice and lace-expansion "two-step" methods, <a href="#sfl">§11–§12</a>). The rest of this page is a slow, visual unpacking of <em>how</em> that works — what carries over for free — and of the precise, proven reason it has a hard limit. We'll use the simplest possible version of the idea so the structure is visible; the research-grade methods are more powerful relatives of it.</div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <h2><span class="num">02</span> It's really about self-avoiding walks</h2>
+  <p>Strip away H and P. A fold is just a path that starts at the origin, takes unit steps up/down/left/right, and <b>never revisits a square</b>. That's a <b>self-avoiding walk</b> (SAW). The number of folds of a chain of length <i>n</i> is the number of SAWs of <i>n</i> steps.</p>
+  <p>Watch one get built. The walk grows step by step; when it paints itself into a corner it <b>backtracks</b>. Every distinct path that reaches full length is one fold.</p>
+  <div class="viz">
+    <div class="controls">
+      <button class="btn" id="btn-walk-play">▶ grow walks</button>
+      <button class="btn" id="btn-walk-step">step</button>
+      <label>length <input type="range" id="rng-walk-n" min="4" max="9" value="7"><span class="val" id="val-walk-n">7</span></label>
+      <span id="walk-count" style="font-family:var(--mono);color:#cfe0ee"></span>
+    </div>
+    <canvas id="cv-walk" width="760" height="420"></canvas>
+    <div class="caption" id="cap-walk"></div>
+  </div>
+  <p>The catch is how fast they multiply. The count of SAWs by length is the sequence <a href="https://oeis.org/A001411" target="_blank">A001411</a>:</p>
+  <div class="kpi" id="kpi-growth"></div>
+  <p class="muted">Each step multiplies the count by roughly <b>2.64</b> (the lattice's <em>connective constant</em> µ). Brute force is hopeless past a few dozen steps. We need to stop listing walks and start <em>counting</em> them cleverly — enumerating the distinct <em>shapes</em> once (exploiting their symmetry and packing them into lookup tables), separately from any scoring. This is a well-trodden path in the self-avoiding-walk literature (see §13).</p>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <h2><span class="num">03</span> The endpoint diamond</h2>
+  <p>Here's the compression that makes everything tractable. Instead of remembering every walk, ask a smaller question: <b>how many <i>n</i>-step walks end on each square?</b> Call that grid of counts <b>W<sub>n</sub>(x,y)</b>. It throws away the route and keeps only the destination. This object is not ad hoc — it is the <b>two-point function</b> of the self-avoiding walk, the central quantity of the mathematical theory (see Madras &amp; Slade, <em>The Self-Avoiding Walk</em>, <a href="#srel">§13</a>).</p>
+  <p>Drag the slider. Brighter = more walks end there. Two things pop out immediately: the counts live inside a <b>diamond</b> (you can't end farther than <i>n</i> steps away), and they sit on a <b>checkerboard</b> (after <i>n</i> steps you're always an even/odd distance from home — half the squares are unreachable).</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-d-n" min="1" max="16" value="10"><span class="val" id="val-d-n">10</span></label>
+      <button class="btn on" id="btn-d-log">log color</button>
+      <button class="btn" id="btn-d-num">show numbers</button>
+      <span class="muted" id="d-total"></span>
+    </div>
+    <canvas id="cv-diamond" width="760" height="600"></canvas>
+    <div class="caption" id="cap-diamond">Hover a square to read its exact count.</div>
+  </div>
+  <div class="note"><span class="h">Why this view</span> The whole problem now lives in one picture per length. The rest of the tour is about reading structure off this picture: which squares are <b>forced</b> by the previous lengths and which carry genuinely new information. That split — and its limits — is what the literature in <a href="#srel">§13</a> makes precise.</div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <h2><span class="num">04</span> Symmetry: you only ever need one eighth</h2>
+  <p>The grid has the symmetry of a square: 4 rotations × 2 mirror flips = <b>8 copies</b> of everything. A walk rotated or reflected is still a valid walk, so the diamond is identical under all 8 operations. That means you only need to compute <b>one wedge</b> — a single 45° octant — and stamp out the other seven for free.</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-sym-n" min="2" max="16" value="9"><span class="val" id="val-sym-n">9</span></label>
+      <button class="btn" id="btn-sym-fold">fold into the wedge ▸</button>
+      <span class="muted">click any square to see its 8 images</span>
+    </div>
+    <canvas id="cv-sym" width="760" height="600"></canvas>
+    <div class="caption" id="cap-sym">The highlighted wedge is all you ever compute. ×8 gives the rest.</div>
+  </div>
+  <div class="note"><span class="h">Standard practice</span> A provable <b>8×</b> reduction: compute only the wedge <code>0 ≤ y ≤ x</code>. This is the symmetry every SAW enumeration exploits (typically by fixing the first steps and skipping mirror images) — nothing special to here.</div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <h2><span class="num">05</span> The boundary is Pascal's triangle</h2>
+  <p>Look at the outer rim of the diamond — the squares exactly <i>n</i> steps away. To get that far you can never waste a move, so you can only ever step (say) <b>right or up</b>, never back. A walk that only goes right/up <em>cannot</em> cross itself. So reaching the rim is just "how many ways to arrange <i>k</i> ups among <i>n</i> steps" — a <b>binomial coefficient</b>. The boundary of the diamond is literally <b>Pascal's triangle</b>.</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-pas-n" min="2" max="14" value="8"><span class="val" id="val-pas-n">8</span></label>
+      <button class="btn" id="btn-pas-trace">trace a rim walk</button>
+    </div>
+    <canvas id="cv-pascal" width="760" height="600"></canvas>
+    <div class="caption" id="cap-pascal">Rim squares labelled with C(n,k). A monotone (right/up) walk traces the edge — it can't self-intersect, so its count is exact.</div>
+  </div>
+  <div class="note proof"><span class="h">Elementary &amp; classical</span> The entire boundary shell equals <b>C(n, k)</b> — a formula, no computation. These are exactly the <b>fully directed</b> (staircase) walks, the simplest exactly-solved case in lattice-walk combinatorics. So the rim of the diamond is free for textbook reasons.</div>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <h2><span class="num">06</span> Peeling shells: bands and "surplus"</h2>
+  <p>Generalise the rim idea. Peel the diamond into concentric <b>shells</b>, indexed by <b>c</b>: shell <code>c</code> is every square at distance <code>n − 2c</code> from the origin. The rim is <code>c = 0</code>; <code>c = 1</code> is the next ring in; and so on toward the centre.</p>
+  <p>The index <code>c</code> has a clean meaning: a walk ending on shell <code>c</code> used <b>2c more steps than the straight-line minimum</b>. We call <code>2c</code> the <b>surplus</b> — the number of "wasted" steps the walk spent doubling back. Small <code>c</code> (near the rim) = nearly straight walks. Large <code>c</code> (near the centre) = walks that coil back on themselves.</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-band-n" min="3" max="16" value="12"><span class="val" id="val-band-n">12</span></label>
+      <label>highlight shell c <input type="range" id="rng-band-c" min="0" max="8" value="0"><span class="val" id="val-band-c">0</span></label>
+    </div>
+    <canvas id="cv-bands" width="760" height="600"></canvas>
+    <div class="caption" id="cap-bands"></div>
+  </div>
+  <p class="muted">Surplus is the whole game: <b>self-avoidance only bites when the walk has spare steps to curl back</b>. Near the rim there's no room to collide; near the centre there's nothing but collisions to worry about.</p>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <h2><span class="num">07</span> What's free, and what is genuinely hard</h2>
+  <p>Now the heart of it. Read each shell <em>down the lengths</em> — fix <code>c</code>, watch the counts as <i>n</i> grows. Some shells follow a simple closed-form rule (you can extend them with arithmetic). Others don't, and provably never will.</p>
+
+  <h3>Near the rim: polynomials</h3>
+  <p>Along the axis, shell <code>c</code> behaves like a <b>polynomial of degree 2c</b> in <i>n</i>, with leading coefficient the <b>central binomial</b> <code>C(2c, c)</code> = 2, 6, 20, 70, 252, … A degree-2c polynomial is pinned down by 2c+1 numbers you already have from previous lengths, so these near-axis shells <b>extrapolate by arithmetic</b>. <span class="muted">(Elementary — not from the literature. I verified it numerically to length ~24; "bounded-surplus walks are eventually polynomial" is the kind of fact that is easy to believe and surely folklore, but I'm not citing a specific source.)</span></p>
+  <div class="viz">
+    <div class="label">On-axis shell sequences W<sub>n</sub>(n−2c, 0) and their finite differences</div>
+    <div id="diff-tables"></div>
+    <div class="caption">Watch the differences collapse to a constant (the central binomial) — the signature of a closed-form polynomial.</div>
+  </div>
+
+  <h3>Near the centre / diagonal: no closed form, ever</h3>
+  <p>Now read a <em>fixed</em> central square down the lengths — say "walks that end one step from home", <b>W<sub>n</sub>(1,0)</b>. That sequence is <a href="https://oeis.org/A225877" target="_blank">A225877</a>, and it equals <code>n ×</code> the number of <b>self-avoiding polygons</b> (<a href="https://oeis.org/A002931" target="_blank">A002931</a>) — closed loops on the grid. This is a famously hard object.</p>
+  <div class="viz">
+    <div class="label">Does any finite recurrence with polynomial coefficients fit? (65 exact terms)</div>
+    <canvas id="cv-holo" width="760" height="230"></canvas>
+    <div class="caption" id="cap-holo"></div>
+  </div>
+  <div class="note hard"><span class="h">A known wall — re-seen here</span> A quick rank test over 65 exact terms finds <b>no</b> finite linear recurrence with polynomial coefficients (order ≤ 6, degree ≤ 7): the central sequence is <b>non-holonomic</b>. This is not a discovery — it reflects the established result that the SAW/SAP generating functions are <b>not D-finite</b> (Conway &amp; Guttmann 1996; proven for self-avoiding polygons by Rechnitzer 2006, <a href="#srel">§13</a>). The takeaway for us: the endpoint counts are <b>not a sufficient statistic for their own continuation</b> — no fixed formula on the table can advance its centre, so genuinely new information enters there at every length.</div>
+  <div class="note"><span class="h">The dividing line (observed)</span> In this picture, closed-form structure holds for shells <b>c = 0 and c = 1</b> (binomial rim, then "one-defect" walks) and breaks at <b>c = 2</b> — the first shell roomy enough for a real self-avoiding detour. The hard, information-bearing part lives near the <b>centre/diagonal of shells c ≥ 2</b>. <span class="muted">(Where that boundary sits is an observation from these pictures; that the centre is hard is the cited result above.)</span></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <h2><span class="num">08</span> Patching a length — the lace expansion, by hand</h2>
+  <p>Suppose you have the diamonds for every length below <i>n</i>. Start with a <b>free guess</b>: pretend walks don't avoid themselves and push the previous diamond outward — every square gets the sum of its four neighbours from length <i>n</i>−1. Call this <b>U<sub>n</sub></b>. That's a plain random-walk step: pure arithmetic on data you already own.</p>
+  <p><b>U<sub>n</sub></b> overcounts — it includes walks that secretly collide. The overcount is the <b>correction</b> <code>C<sub>n</sub> = U<sub>n</sub> − W<sub>n</sub></code>, the part the random walk gets wrong because real walks avoid themselves. This split — <em>random-walk step minus a self-avoidance correction</em> — is exactly the decomposition the <b>lace expansion</b> formalizes (Brydges &amp; Spencer 1985; Madras &amp; Slade; <a href="#srel">§13</a>). What we're drawing by hand is its crudest, one-step form.</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-patch-n" min="3" max="16" value="11"><span class="val" id="val-patch-n">11</span></label>
+      <button class="btn on" id="btn-patch-U">free guess Uₙ</button>
+      <button class="btn" id="btn-patch-W">truth Wₙ</button>
+      <button class="btn" id="btn-patch-C">correction Cₙ</button>
+    </div>
+    <canvas id="cv-patch" width="760" height="600"></canvas>
+    <div class="caption" id="cap-patch"></div>
+  </div>
+  <div class="note proof"><span class="h">Elementary</span> A correction needs a walk that reaches a square <em>and</em> loops back to touch it — at least <code>|x|+|y|+1</code> steps. So <code>C<sub>n</sub> = 0</code> on the outermost shell: the <b>rim patches itself</b>, and the correction lives in the interior, on exactly <code>(n−1)²</code> squares. <span class="muted">(Both the bound and the (n−1)² count are elementary bookkeeping — stated here without a citation.)</span></div>
+  <div class="note"><span class="h">The catch that the lace expansion solves</span> Drawn this naïvely, <code>C<sub>n</sub></code> is small in <em>where</em> it lives but not in <em>how much it costs</em>: the colliding walks are a constant fraction of all walks, so computing <code>C<sub>n</sub></code> head-on is as hard as the whole count. The lace expansion's real content is a <b>resummation</b> that replaces this one-step correction with a <em>sparse, short-range</em> object (the lace coefficients), which is what buys an actual speedup — see §9–§12.</div>
+</section>
+
+<!-- 9 -->
+<section id="s9">
+  <h2><span class="num">09</span> Where the difficulty concentrates</h2>
+  <p>Stack the easy pieces and colour the diamond by how each square gets filled — symmetry copy, binomial rim, extrapolated near-axis shell, the random-walk push, or genuinely new:</p>
+  <div class="viz">
+    <div class="controls">
+      <label>length n <input type="range" id="rng-core-n" min="4" max="16" value="12"><span class="val" id="val-core-n">12</span></label>
+    </div>
+    <canvas id="cv-core" width="760" height="600"></canvas>
+    <div class="legend">
+      <span><span class="sw" style="background:#33414f"></span>symmetry copies (free ×8)</span>
+      <span><span class="sw" style="background:var(--c0)"></span>rim = Pascal (formula)</span>
+      <span><span class="sw" style="background:var(--c1)"></span>shell c=1 (closed form)</span>
+      <span><span class="sw" style="background:#6b7b8c"></span>near-axis (extrapolate)</span>
+      <span><span class="sw" style="background:var(--core)"></span>core · no closed-form rule</span>
+    </div>
+    <div class="caption" id="cap-core"></div>
+  </div>
+  <div class="kpi" id="kpi-core"></div>
+  <div class="note"><span class="h">A map, not a faster algorithm</span> The squares carrying genuinely new information are the <b>near-diagonal interior of shells c ≥ 2</b>, in one wedge. But read the count honestly: this is small in the <em>number of squares</em>, <b>not</b> in the work — each core square is a count as hard as the whole problem (§8). So this picture is a <b>map of where the difficulty concentrates</b>, not a speed-up by itself. The genuine acceleration of "use the shorter lengths" comes from the research methods that carry sparse extra state — the lace-expansion two-step method and length-doubling (<a href="#slace">§12</a>), which reach lengths 30–36 where naïve enumeration cannot.</div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+  <h2><span class="num">10</span> Back to the original question: enumerate length N</h2>
+  <p>We started at "fold this protein" and detoured through endpoint diamonds. Now unwind it. Every serious SAW-counting method shares one shape: don't attack <b>N</b> head-on — build up <b>by length</b>, carrying forward the smallest state that lets the next length be cheap. The endpoint-table patch below is the easy-to-picture version of that idea; the research methods carry richer state (cut-connectivity in the finite-lattice method, the lace coefficients in the two-step method), which is what makes them fast.</p>
+  <div class="pipeline" id="pipeline"></div>
+  <p>Run the build-up. The bar shows, at each length, how many diamond squares were <b>filled for free</b> (symmetry · formula · extrapolation · the outward push) versus how many were genuinely <b>enumerated</b>.</p>
+  <div class="viz">
+    <div class="controls">
+      <button class="btn" id="btn-build">▶ build 1 → 16</button>
+      <span class="muted" id="build-status"></span>
+    </div>
+    <canvas id="cv-build" width="760" height="300"></canvas>
+    <div class="caption">Squares fillable by a rule (symmetry, formulas, extrapolation, the random-walk push) vs. squares with no closed-form rule — the core — per length. Bars count <em>squares</em>, not work.</div>
+  </div>
+  <div class="note"><span class="h">The shape of the method</span> <b>Build lengths 1…N−1, carrying the table forward; then extend to N.</b> At each length: fold into one wedge, write the rim as binomials, extrapolate the near-axis shells, push the bulk outward, and spend real effort only on the core of shells c ≥ 2. That last part is where the field's machinery does the heavy lifting that this hand-version only sketches — the two methods that do it are unpacked next, in <b>§11</b> (finite-lattice) and <b>§12</b> (lace expansion). The HP folding score from §1 is then read off the finished shapes.</div>
+</section>
+
+<!-- 11 finite lattice -->
+<section id="sfl">
+  <h2><span class="num">11</span> Method 1: the finite-lattice / transfer-matrix method</h2>
+  <p>This is the workhorse behind the record-length enumerations. The idea: sweep an imaginary <b>cut line</b> across the lattice one site at a time, extending walks as you go. The cleverness is in what you remember. You do <em>not</em> store the filled-in part behind the line — only <b>how the partial walk's strands connect across it</b> (which loose ends are joined behind the line, drawn as a non-crossing pairing), plus a running count of how many fillings realise each pairing.</p>
+  <p>Why that's enough: anything to the <em>right</em> of the line only cares about which strands are available to connect to and how they are already paired — never about the exact shape on the left. So two completely different left-fillings with the same crossing pattern are interchangeable, and the method <b>collapses exponentially many configurations into one state</b>. Slide the cut and watch the stored pairing (orange) update:</p>
+  <div class="viz">
+    <div class="controls">
+      <label>cut position x <input type="range" id="rng-fl" min="0" max="3" value="2"><span class="val" id="val-fl">2.5</span></label>
+      <button class="btn" id="btn-fl-play">▶ sweep</button>
+    </div>
+    <canvas id="cv-fl" width="760" height="420"></canvas>
+    <div class="caption" id="cap-fl"></div>
+  </div>
+  <div class="note"><span class="h">How it relates to our question</span> This is "build up by length, carrying the minimal sufficient state" — exactly the hypothesis — but the state carried is the <b>cut-line connectivity</b>, not the endpoint table. That choice is forced by §7: the endpoint counts are not a sufficient statistic, so the right thing to remember is the interface. The number of interface states grows exponentially in the cut <em>width</em>, yet far slower than the number of walks — which is why it reaches lengths brute force cannot. Introduced by Enting; developed by Conway, Enting &amp; Guttmann (1993), Jensen, and Clisby &amp; Jensen, who counted self-avoiding polygons to <b>perimeter 130</b> (<a href="#srel">§13</a>).</div>
+</section>
+
+<!-- 12 lace expansion -->
+<section id="slace">
+  <h2><span class="num">12</span> Method 2: the lace expansion &amp; the two-step method</h2>
+  <p>Recall §8: <code>W<sub>n</sub> = (random-walk push) − (correction)</code>. That correction is honest but expensive — a constant fraction of walks self-collide, so it costs about as much as the whole count, at every length. The <b>lace expansion</b> rewrites the <em>same</em> correction in a far cheaper form.</p>
+  <p>It expresses the two-point function as a random-walk line <b>decorated with local self-avoidance corrections</b> — an exact series, like beads on a string. Each bead (a <b>lace coefficient</b>, π) is a small, signed inclusion–exclusion count of one <em>irreducible</em> self-intersection pattern. The key property is that these beads are <b>short-range</b>: only small ones matter and they decay quickly. So you enumerate the small irreducible pieces <em>once</em> and slide them along by convolution — instead of recomputing a fresh wholesale correction at every length. Add terms to build the series:</p>
+  <div class="viz">
+    <div class="controls">
+      <button class="btn" id="btn-lace-step">add a term ▸</button>
+      <button class="btn" id="btn-lace-reset">reset</button>
+    </div>
+    <canvas id="cv-lace" width="760" height="360"></canvas>
+    <div class="caption" id="cap-lace"></div>
+  </div>
+  <div class="note"><span class="h">The genuine speed-up — with an honest caveat</span> Because the correction becomes a small, reusable, local table, the cost collapses: the <b>two-step method</b> (Clisby, Liang &amp; Slade, 2007) reached length 30, and <b>length-doubling</b> (Clisby, 2013) reached 36 — orders of magnitude past naïve enumeration. This is the real, working form of "use the shorter lengths to get the next one." <span class="muted">The picture is schematic: the true lace coefficients are signed sums over diagrams, not literal single loops. But the essence is faithful — replace a wholesale correction with a small, reusable, local one.</span> References in <a href="#srel">§13</a>.</div>
+</section>
+
+<!-- related work -->
+<section id="srel">
+  <h2><span class="num">13</span> Related work</h2>
+  <p>Self-avoiding walks (SAWs) are one of the most-studied unsolved models in statistical mechanics, so the ideas on this page sit inside a large literature. The pieces most relevant to the hypothesis — <em>use the shorter lengths to get the next one</em> — are worth separating out.</p>
+
+  <h3>The model</h3>
+  <p>The HP lattice model of protein folding is due to <b>Lau &amp; Dill</b> (1989) — a two-letter (hydrophobic / polar) chain on a lattice whose energy counts H–H contacts. It became a standard testbed for folding algorithms. The popular framing used here — "prototeins" — is <b>Brian Hayes</b>, <a href="https://www.americanscientist.org/article/prototeins" target="_blank">"Prototeins,"</a> <em>American Scientist</em> 86(3), 1998, with a companion column on the walks themselves, <a href="https://www.americanscientist.org/article/how-to-avoid-yourself" target="_blank">"How to Avoid Yourself,"</a> 86(4), 1998.</p>
+
+  <h3>Counting the walks</h3>
+  <p>The totals (<a href="https://oeis.org/A001411" target="_blank">A001411</a>) grow like <code>µⁿ</code>; the square-lattice connective constant <code>µ ≈ 2.638</code> is <em>not</em> known in closed form (the honeycomb value <code>√(2+√2)</code> was proven only in 2012 by <b>Duminil-Copin &amp; Smirnov</b>). The conjectured critical exponents <code>γ = 43/32, ν = 3/4</code> come from Coulomb-gas arguments (<b>Nienhuis</b>, 1982) and the SLE<sub>8/3</sub> picture (<b>Lawler, Schramm &amp; Werner</b>). None of this yields an exact formula for the counts — it constrains their growth, exactly as our asymptotics did.</p>
+
+  <h3>Building longer walks from shorter ones — the closest kin to the hypothesis <span class="muted" style="font-weight:400">(walked through visually in <a href="#sfl">§11</a>–<a href="#slace">§12</a>)</span></h3>
+  <ul class="refs">
+    <li><b>Finite-lattice / transfer-matrix method.</b> Enting; <b>Conway, Enting &amp; Guttmann</b> (1993); <b>Jensen</b> (2003); <a href="https://arxiv.org/abs/1111.5877" target="_blank">Clisby &amp; Jensen</a> (2012). These advance length-by-length while tracking only the <em>connectivity of partial walks across a cut-line</em> — the field's answer to "what is the minimal incremental state." It is the same instinct as our patch, but the carried state is cut-connectivity, not the endpoint table. It reached self-avoiding polygons to perimeter 130.</li>
+    <li><b>Lace expansion + the "two-step" method</b> (Clisby, Liang &amp; Slade, 2007) and the <a href="https://arxiv.org/abs/1302.2796" target="_blank"><b>length-doubling method</b></a> (Clisby, 2013). These literally <em>reuse shorter-length data</em> — the two-point function / subset-visit counts — to reach longer walks (N = 30, then 36), a result that would take ~10³× longer by naïve enumeration. This is the established, working form of the hypothesis. The crucial caveat: they recurse on richer objects than the bare endpoint counts, because — as the next item shows — the counts alone are not enough.</li>
+  </ul>
+
+  <h3>Why a pure recurrence on the counts cannot exist</h3>
+  <ul class="refs">
+    <li><a href="https://journals.aps.org/prl/abstract/10.1103/PhysRevLett.77.5284" target="_blank"><b>Conway &amp; Guttmann</b> (1996)</a> — analysis of a 51-term series gives compelling evidence the SAW generating function is <b>not D-finite</b> (satisfies no linear ODE with polynomial coefficients ⇔ the counts satisfy no finite polynomial-coefficient recurrence).</li>
+    <li><b>Guttmann &amp; Enting</b>'s "solvability test" — a model's anisotropic generating function showing a <b>natural boundary</b> signals it is not D-finite.</li>
+    <li><a href="https://arxiv.org/abs/math/0406450" target="_blank"><b>Rechnitzer</b>, "Haruspicy 2"</a> (2006) — <em>proves</em> the anisotropic self-avoiding-polygon generating function is not D-finite, settling the Guttmann–Enting conjecture. This is the rigorous backbone behind the wall at the centre of the diamond (§7): the central counts (<a href="https://oeis.org/A225877" target="_blank">A225877</a> = n·<a href="https://oeis.org/A002931" target="_blank">A002931</a>) inherit that hardness.</li>
+  </ul>
+
+  <div class="note"><span class="h">What this walkthrough adds: exposition, not results</span> Everything load-bearing here is cited above. The page just draws those objects in one consistent picture — the two-point function as a diamond, the lace decomposition as a random-walk push plus a correction, non-D-finiteness as a wall at the centre — so the answer to the opening question is visible: "use the shorter lengths" works because the random-walk part is free, and it has a hard limit because the counts are <b>not a sufficient statistic</b> for their own continuation (which is why the real methods carry extra state). The only non-cited bits are elementary bookkeeping — the <code>(n−1)²</code> correction support and the degree-2c near-axis shells — flagged as such where they appear.</div>
+</section>
+
+<!-- 12 -->
+<section id="s11">
+  <h2><span class="num">14</span> What we saw — and where it comes from</h2>
+  <p>Each claim in the walkthrough, with its status. Nothing here is a new result; the entries marked <em>elementary</em> are bookkeeping observations made for this page and stated without a citation.</p>
+  <table class="seq" style="font-size:13.5px">
+    <tr><th style="text-align:left">Claim (where)</th><th style="text-align:left">Status</th></tr>
+    <tr><td style="text-align:left">Endpoint diamond = the SAW two-point function (§3)</td><td style="text-align:left">Established — Madras &amp; Slade</td></tr>
+    <tr><td style="text-align:left">8-fold symmetry → one wedge (§4)</td><td style="text-align:left">Standard practice</td></tr>
+    <tr><td style="text-align:left">Rim = C(n,k), directed/staircase walks (§5)</td><td style="text-align:left">Elementary / classical</td></tr>
+    <tr><td style="text-align:left">Near-axis shell c = degree-2c polynomial, lead C(2c,c) (§7)</td><td style="text-align:left">Elementary observation</td></tr>
+    <tr><td style="text-align:left">Centre is non-holonomic / no finite recurrence (§7)</td><td style="text-align:left">Established — Conway–Guttmann; Rechnitzer</td></tr>
+    <tr><td style="text-align:left">W<sub>n</sub> = (random-walk push) − correction (§8)</td><td style="text-align:left">Established — lace expansion</td></tr>
+    <tr><td style="text-align:left">Correction vanishes on rim; support = (n−1)² (§8)</td><td style="text-align:left">Elementary observation</td></tr>
+    <tr><td style="text-align:left">Incremental build-up carries minimal state (§10)</td><td style="text-align:left">Established — finite-lattice / two-step</td></tr>
+  </table>
+  <h3>How the pieces are computed (methods, not magic)</h3>
+  <ul class="refs">
+    <li><b>Brute force</b> — recurse over every fold, score, keep the best. Correct, exponential; the baseline §1 reacts against.</li>
+    <li><b>Shape enumeration</b> — list the distinct walk <em>shapes</em> once, fixing the first steps to kill mirror images and packing the local "does this step fit?" test into a lookup table; score afterwards. (A version of this was written for the PlayStation 3's Cell processor, with the shapes bit-packed into 128-bit vectors.) This is §2 + §4 in practice.</li>
+    <li><b>Difference tables</b> — lay the endpoint counts out by shell and repeatedly subtract Pascal's rule. The rim collapses to zero (it <em>is</em> Pascal); the near-axis shells collapse after a few rounds (polynomials); the centre never collapses. That last fact is the whole point of §7.</li>
+    <li><b>Endpoint generator</b> — a self-avoiding-walk counter that bins walks by their endpoint, producing the diamonds in §3 directly. (The exact counts shipped in <code>data.js</code> were produced this way for lengths 1–16.)</li>
+  </ul>
+  <h3>Number sequences</h3>
+  <p class="refs">OEIS <a href="https://oeis.org/A001411" target="_blank">A001411</a> (all SAWs, §2) · <a href="https://oeis.org/A225877" target="_blank">A225877</a> (walks to a neighbour, the diamond's centre) <code>= n ×</code> <a href="https://oeis.org/A002931" target="_blank">A002931</a> (self-avoiding polygons) <code>=</code> ¼ <a href="https://oeis.org/A010566" target="_blank">A010566</a> (§7). Full literature in §13.</p>
+  <footer>
+    All counts on this page are exact, generated by a self-avoiding-walk enumerator (<code>data.js</code>, lengths 1–16). Derived quantities (shells, surplus, U<sub>n</sub>, C<sub>n</sub>, differences) are computed live in your browser from those counts. No external libraries, no network; works offline. Self-contained: this page does not require any other files from the original project.
+  </footer>
+</section>
+</main>
+</div>
+<div class="tooltip" id="tip"></div>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

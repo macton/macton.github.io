@@ -1,5 +1,0 @@
-[  64/1030  0s] CopyTool ../../Builds/Wasm-GridCubeFollowNearestTeamTarget/Data/98c11f933c80548ada5175c52f43b915
-[  65/1030  0s] CopyTool ../../Builds/Wasm-GridCubeFollowNearestTeamTarget/Data/46b433b264c69cbd39f04ad2e5d12be8
-[  66/1030  0s] CopyTool ../../Builds/Wasm-GridCubeFollowNearestTeamTarget/Data/d5f929dc9a19c50f04103a248b4f724c
-[  68/1030  0s] CopyTool ../../Builds/Wasm-GridCubeFollowNearestTeamTarget/Data/a781de984fd8c4d9e96e556ec0a7da53
-*** Bee build success (0.44 seconds), 4 items updated
