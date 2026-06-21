@@ -16,6 +16,15 @@ a benefit — measured performance, a concrete size/layout/simplicity win — an
 record that evidence with the change. A deviation justified only by speculation
 is not justified: decide from facts, not dogma (including the "rules" here).
 
+When a rule cites a concrete artifact from this project (a specific table such
+as `cell_escape[cell*travel]`, a function such as `sim_grid_changed`), that
+artifact is an **illustration of the principle, not a required structure to
+reproduce** — apply the principle to the data you actually have, and let it
+produce whatever artifact fits. (An experiment that rebuilt chapter 1 from
+these rules alone reproduced the principles but invented different artifacts —
+a 300-byte away-from-walls vector field instead of the 9.6 KB
+`[cell][travel]` escape table; that is the rules working, not failing.)
+
 ---
 
 ## Maintenance protocol (this file maintains itself)
@@ -262,6 +271,31 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   - *From:* "We also need to separate simulation from render completely so we can
     have a simulation only build for testing (which can be built and run on
     host, does not need to be wasm)."
+  - *Corollary:* the sim struct holds **only data a simulation transform reads or
+    writes; presentation-only attributes do not belong in it.** A one-way
+    dependency (render reads the `World`) still lets render-only data leak *into*
+    the `World` — e.g. a per-tank RGBA `color`. No sim transform reads color, so
+    it is dead weight in the sim's working set and blurs the boundary the split
+    exists to make sharp; keep it in the render layer (a `const` palette beside
+    `build_instances`). Test: if you deleted the renderer, would the field still
+    have a reader? If not, it is render data.
+  - *From:* experiment (a clean-room rebuild from these rules placed `tank_color`
+    in the `World`). *Reason:* the simulation's data domain is what its
+    transforms act on; presentation is downstream.
+- **Pass a result between order-coupled transforms through the shared data —
+  write it once, read it next — instead of recomputing it in the consumer.**
+  When transform B needs an output of transform A (e.g. the auto-steer in
+  `tanks_turn` needs to know the move in `tanks_move` was blocked), have A record
+  it in a `World` field (`hit`) that B reads; do not re-run A's computation
+  inside B. Recomputing duplicates the logic (two copies to keep in agreement)
+  and does the work twice. The stored field is not "derivable data you shouldn't
+  store" — it is the explicit contract between two transforms, and the single
+  source of truth for that signal.
+  - *From:* experiment (a clean-room rebuild computed the whole resolved move a
+    second time in a `tank_is_boxed` query that the turn step called, instead of
+    reading a `hit` flag the move step had already produced). *Reason:* one
+    computation, one source of truth; coupled transforms communicate through the
+    data.
 - **Prune what a refactor orphans; a rename isn't done until every reference is
   updated.** Each change can leave dead surface (an export or function nothing
   calls any more) and stale comments/docs (a field renamed `cell_move` →
