@@ -56,6 +56,17 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   hardware) rather than scattering floats through the simulation.
   - *From:* "We don't need floating point. 16 bit fixed point is sufficient."
 
+## C / types & data layout
+
+- **Use the exact-width integer types from `<stdint.h>` (`uint8_t`, `int16_t`,
+  …) for any data with a defined width or layout.** Widths are part of the data
+  contract — the packed structs, the wasm↔JS protocol, the on-disk/on-wire
+  format — so make them explicit and guaranteed; do not hand-roll typedefs over
+  `char`/`short`/`int`, whose widths are not guaranteed by the language.
+  `<stdint.h>` is a freestanding header, so it is available even under
+  `-nostdlib`.
+  - *From:* "Use stdint.h."
+
 ## UI & presentation
 
 - **Design mobile-first; verify narrow widths before finishing.** A public web

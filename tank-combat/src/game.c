@@ -47,11 +47,16 @@
  * ---------------------------------------------------------------------------
  */
 
-typedef unsigned char  u8;
-typedef unsigned short u16;
-typedef unsigned int   u32;
-typedef signed   short i16;
-typedef signed   int   i32;
+#include <stdint.h>
+
+/* exact-width types are part of the data contract (layout, the wasm<->JS
+ * protocol, the packed Inst struct); take them from the standard header
+ * rather than assuming the width of char/short/int. */
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef int16_t  i16;
+typedef int32_t  i32;
 
 #define EXPORT(name) __attribute__((export_name(#name)))
 
