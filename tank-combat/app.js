@@ -92,6 +92,7 @@ async function main() {
     inp:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_input_ptr(), NT),
     vx:   () => new Int16Array(wasm.memory.buffer, wasm.tank_vx_ptr(), NT),
     vy:   () => new Int16Array(wasm.memory.buffer, wasm.tank_vy_ptr(), NT),
+    hit:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_hit_ptr(), NT),
     inst: (n) => new Uint8Array(wasm.memory.buffer, wasm.inst_ptr(), n * STRIDE),
   };
 
@@ -281,14 +282,14 @@ function buildPanel(wasm, view, dims) {
     if (focused() !== speed.input) speed.input.value = wasm.move_speed();
     if (focused() !== turn.input)  turn.input.value  = wasm.turn_rate();
 
-    const x = view.x(), y = view.y(), ang = view.ang(), inp = view.inp(), vx = view.vx(), vy = view.vy();
+    const x = view.x(), y = view.y(), ang = view.ang(), inp = view.inp(), vx = view.vx(), vy = view.vy(), hit = view.hit();
     for (let t = 0; t < NT; t++) {
       const r = rows[t];
       if (focused() !== r.fx.input) r.fx.input.value = (x[t] / SUB).toFixed(3);
       if (focused() !== r.fy.input) r.fy.input.value = (y[t] / SUB).toFixed(3);
       if (focused() !== r.fa.input) r.fa.input.value = ang[t];
       r.live.textContent =
-        `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})`;
+        `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})  hit ${hit[t]}`;
     }
     for (let i = 0; i < cells.length; i++)
       cells[i].classList.toggle("on", !!((g[(i / GW) | 0] >>> (i % GW)) & 1));

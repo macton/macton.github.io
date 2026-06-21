@@ -3,10 +3,11 @@
  * Goal of the project: demonstrate a data-oriented approach to building a
  * game. This file owns the world *data* and the exported boundary; the actual
  * transforms live next to the data they touch, each in its own file:
- *   tanks_turn.c  rotate headings          (independent)
- *   tanks_move.c  advance + resolve grid   (independent)
- *   render.c      world -> instance buffer (the renderer boundary)
- *   dirtab.c      baked Q14 cos/sin table  (shared by move + render)
+ *   tanks_turn.c  rotate headings by input         (independent)
+ *   tanks_move.c  advance + resolve grid collision (independent)
+ *   tanks_steer.c on collision, steer toward slide (consumes move output)
+ *   render.c      world -> instance buffer         (the renderer boundary)
+ *   dirtab.c      baked Q14 cos/sin table          (shared by move + render)
  * Splitting them makes the independence structural, not just a comment.
  *
  * NUMBERS ARE INTEGER FIXED POINT — no floating point anywhere in the sim.
@@ -39,7 +40,8 @@
  *
  *   pointers (into linear memory, read by JS each frame):
  *     inst_ptr  grid_ptr
- *     tank_x_ptr tank_y_ptr tank_angle_ptr tank_input_ptr tank_vx_ptr tank_vy_ptr
+ *     tank_x_ptr tank_y_ptr tank_angle_ptr tank_input_ptr
+ *     tank_vx_ptr tank_vy_ptr tank_hit_ptr
  *
  *   scalars: grid_w grid_h n_tanks n_dirs subcell inst_count inst_stride frame
  *
@@ -55,6 +57,7 @@
 #include "render.h"
 #include "tanks_turn.h"
 #include "tanks_move.h"
+#include "tanks_steer.h"
 
 #define EXPORT(name) __attribute__((export_name(#name)))
 
@@ -66,6 +69,7 @@ static uint16_t g_tank_ang [N_TANKS];   /* Q5.11 heading (see file header)   */
 static uint8_t  g_tank_in  [N_TANKS];
 static int16_t  g_tank_vx  [N_TANKS];   /* last tick's applied move, subcells */
 static int16_t  g_tank_vy  [N_TANKS];
+static uint8_t  g_tank_hit [N_TANKS];   /* 1 if it collided while moving      */
 
 /* grid as a bitset: one uint32_t per row, bit c == column c (LSB = col 0).  */
 _Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");
@@ -115,7 +119,7 @@ EXPORT(init) void init(void) {
   g_tank_x[1] = (int16_t)(17 * SUB + SUB / 2); g_tank_y[1] = (int16_t)(7 * SUB + SUB / 2);
   g_tank_ang[1] = 0x8000;   /* west */
   for (uint32_t i = 0; i < N_TANKS; i++) {
-    g_tank_in[i] = 0; g_tank_vx[i] = 0; g_tank_vy[i] = 0;
+    g_tank_in[i] = 0; g_tank_vx[i] = 0; g_tank_vy[i] = 0; g_tank_hit[i] = 0;
   }
   g_frame = 0;
   g_inst_count = rebuild_instances();
@@ -123,8 +127,10 @@ EXPORT(init) void init(void) {
 
 EXPORT(tick) uint32_t tick(void) {
   tanks_turn(g_tank_ang, g_tank_in, N_TANKS, g_turn_rate);
-  tanks_move(g_tank_x, g_tank_y, g_tank_vx, g_tank_vy,
+  tanks_move(g_tank_x, g_tank_y, g_tank_vx, g_tank_vy, g_tank_hit,
              g_tank_ang, g_tank_in, N_TANKS, (int32_t)g_move_speed, g_grid);
+  /* when a tank slid along a wall, steer it toward the slide direction */
+  tanks_steer(g_tank_ang, g_tank_vx, g_tank_vy, g_tank_hit, N_TANKS, g_turn_rate);
   g_inst_count = rebuild_instances();
   g_frame++;
   return g_inst_count;
@@ -143,6 +149,7 @@ EXPORT(tank_angle_ptr) uint16_t* tank_angle_ptr(void) { return g_tank_ang; }
 EXPORT(tank_input_ptr) uint8_t*  tank_input_ptr(void) { return g_tank_in; }
 EXPORT(tank_vx_ptr)    int16_t*  tank_vx_ptr(void)    { return g_tank_vx; }
 EXPORT(tank_vy_ptr)    int16_t*  tank_vy_ptr(void)    { return g_tank_vy; }
+EXPORT(tank_hit_ptr)   uint8_t*  tank_hit_ptr(void)   { return g_tank_hit; }
 
 /* scalars */
 EXPORT(grid_w)      uint32_t grid_w(void)      { return GRID_W; }

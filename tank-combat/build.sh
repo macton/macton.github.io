@@ -15,5 +15,5 @@ clang \
   -Wl,--max-memory=1048576 \
   -Wl,--stack-first \
   -o game.wasm \
-  src/game.c src/tanks_turn.c src/tanks_move.c src/render.c src/dirtab.c
+  src/game.c src/tanks_turn.c src/tanks_move.c src/tanks_steer.c src/render.c src/dirtab.c
 echo "built game.wasm: $(wc -c < game.wasm) bytes"

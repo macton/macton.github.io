@@ -15,7 +15,7 @@ static int32_t blocked(const uint32_t* grid, int32_t px, int32_t py) {
   return 0;
 }
 
-void tanks_move(int16_t* x, int16_t* y, int16_t* vx, int16_t* vy,
+void tanks_move(int16_t* x, int16_t* y, int16_t* vx, int16_t* vy, uint8_t* hit,
                 const uint16_t* ang, const uint8_t* in, uint32_t n,
                 int32_t speed, const uint32_t* grid) {
   for (uint32_t i = 0; i < n; i++) {
@@ -23,10 +23,11 @@ void tanks_move(int16_t* x, int16_t* y, int16_t* vx, int16_t* vy,
     uint32_t di = ang[i] >> ANGLE_SHIFT;
     int32_t mx = (DIR_COS[di] * speed * thr) >> TRIG_SHIFT;   /* subcells/tick */
     int32_t my = (DIR_SIN[di] * speed * thr) >> TRIG_SHIFT;
+    int32_t h = 0;
     int32_t nx = x[i] + mx;
-    if (blocked(grid, nx, y[i])) mx = 0; else x[i] = (int16_t)nx;
+    if (mx && blocked(grid, nx, y[i])) { mx = 0; h = 1; } else x[i] = (int16_t)nx;
     int32_t ny = y[i] + my;
-    if (blocked(grid, x[i], ny)) my = 0; else y[i] = (int16_t)ny;
-    vx[i] = (int16_t)mx; vy[i] = (int16_t)my;
+    if (my && blocked(grid, x[i], ny)) { my = 0; h = 1; } else y[i] = (int16_t)ny;
+    vx[i] = (int16_t)mx; vy[i] = (int16_t)my; hit[i] = (uint8_t)h;
   }
 }

@@ -67,6 +67,7 @@ Firefox Nightly).
 | `src/game.c` | world state (data), `init`/`tick`, the exported protocol |
 | `src/tanks_turn.c/.h` | independent transform: rotate headings |
 | `src/tanks_move.c/.h` | independent transform: advance + resolve grid collision |
+| `src/tanks_steer.c/.h` | on collision, steer heading toward the slide direction (consumes the move output) |
 | `src/render.c/.h` | renderer boundary: `Inst` contract + `build_instances` |
 | `src/dirtab.c/.h` | baked Q14 cos/sin table (shared by move + render) |
 
@@ -83,6 +84,7 @@ pointer functions are exported from the wasm (the internal transforms are not).
 | tank angle | `uint16_t[2]` | Q5.11 heading: 5-bit direction (`>>11` → 1 of 32) + 11-bit turn fraction |
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
+| tank hit | `uint8_t[2]` | 1 if it collided while moving this tick |
 | trig table | `int16_t[32]` ×2 | cos/sin in Q14 (`±16384`) |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
@@ -93,9 +95,14 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 1. `set_input(tank, bits)` — host writes keyboard/touch state into `input[]`
 2. `tanks_turn` — add/subtract `turn_rate` from each `angle` per LEFT/RIGHT (wraps)
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
-   collision one axis at a time so a tank slides along a wall it hits at an angle
-4. `build_instances` — world state → packed integer instance buffer
-5. host copies the instance buffer to the GPU and draws `inst_count` quads
+   collision one axis at a time so a tank slides along a wall it hits at an
+   angle; sets `hit` when an intended axis move was rejected
+4. `tanks_steer` — for any tank that `hit` a wall while moving, rotate its
+   heading toward the cardinal direction it actually slid (at `turn_rate`),
+   snapping when aligned. So a tank that noses into a wall at an angle turns to
+   run parallel with it; in open space this does nothing
+5. `build_instances` — world state → packed integer instance buffer
+6. host copies the instance buffer to the GPU and draws `inst_count` quads
 
 **Out-of-range / collision policy (explicit):** the arena edge and any wall
 cell count as blocked; a blocked axis move is *rejected* (the tank keeps its
