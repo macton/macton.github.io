@@ -11,6 +11,11 @@ Every rule below is meant to be consistent with that document. Precedence, when
 rules conflict: (1) an explicit instruction for the current task, (2) the
 data-oriented-design doc, (3) this file, (4) existing convention.
 
+The rules below are defaults, not mandates. Deviate when you can *demonstrate*
+a benefit — measured performance, a concrete size/layout/simplicity win — and
+record that evidence with the change. A deviation justified only by speculation
+is not justified: decide from facts, not dogma (including the "rules" here).
+
 ---
 
 ## Maintenance protocol (this file maintains itself)
@@ -112,13 +117,17 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   documentation, the stored value is the data.
   - *From:* "MAP does not need to exist. Values can be set in g_grid. This is an
     unnecessary extra step."
-- **Use the established conventional format for well-known data.** Color is a
-  packed `uint32_t` RGBA8888, not a 4-`uint8_t` struct: it is the conventional
-  representation, it matches the GPU's `unorm8x4` byte order on little-endian,
-  and it drops a bespoke type. Prefer the convention the consumer already
-  speaks over a hand-made layout.
+- **Prefer the established conventional format for well-known data — unless you
+  can demonstrate a reason to deviate.** Color is a packed `uint32_t` RGBA8888,
+  not a 4-`uint8_t` struct: it is the conventional representation, it matches
+  the GPU's `unorm8x4` byte order on little-endian, and it drops a bespoke type.
+  The convention is the default, not a mandate: deviate when there is a
+  *demonstrable* benefit — measured performance or a concrete size/layout win —
+  and record that evidence with the change. A deviation justified only by
+  speculation is not justified.
   - *From:* "rgb(a) can be stored as uint32_t - it's a well-established
-    conventional format."
+    conventional format." / "unless there's a demonstrable reason to do
+    something else (e.g. performance or size improvements)."
 
 ## Code structure & module boundaries
 
