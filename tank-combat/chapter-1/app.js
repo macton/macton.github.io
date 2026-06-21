@@ -62,15 +62,22 @@ addEventListener("keyup",   (e) => { if (KEYMAP[e.code]) { held.delete(e.code); 
 const touchBits = [0, 0];
 
 async function main() {
+  // Build version (stamped by build.sh into version.js). Shown on the page and
+  // appended to the wasm URL so a fresh build is never served from cache.
+  const VERSION = (typeof window !== "undefined" && window.TANK_VERSION) || "dev";
+  const vEl = document.getElementById("version");
+  if (vEl) vEl.textContent = "v" + VERSION;
+
   const statusEl = document.getElementById("status");
-  if (!navigator.gpu) { statusEl.textContent = "WebGPU not available in this browser."; return; }
+  if (!navigator.gpu) { if (statusEl) statusEl.textContent = "WebGPU not available in this browser."; return; }
 
   // --- wasm ---------------------------------------------------------------
+  const url = "game.wasm?v=" + encodeURIComponent(VERSION);
   let instance;
   try {
-    ({ instance } = await WebAssembly.instantiateStreaming(fetch("game.wasm")));
+    ({ instance } = await WebAssembly.instantiateStreaming(fetch(url)));
   } catch {
-    const bytes = await (await fetch("game.wasm")).arrayBuffer();
+    const bytes = await (await fetch(url)).arrayBuffer();
     ({ instance } = await WebAssembly.instantiate(bytes));
   }
   const wasm = instance.exports;
@@ -145,9 +152,9 @@ async function main() {
   resize();
 
   buildTouchPads(document.getElementById("map"), NT);
-  const dbg = buildPanel(wasm, view, { NT, GW, GH, SUB });
+  const dbg = mountWidgets(wasm, view, { NT, GW, GH, SUB });
 
-  statusEl.style.display = "none";   // done loading
+  if (statusEl) statusEl.style.display = "none";   // done loading
 
   // --- frame loop (fixed timestep) ---------------------------------------
   let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0;
@@ -216,89 +223,110 @@ function buildTouchPads(map, NT) {
   }
 }
 
-// Debug panel: reflects wasm memory live and pokes it on edit. Inputs that
-// currently have focus are not overwritten, so editing them works.
-function buildPanel(wasm, view, dims) {
+// Mount the debug widgets into whichever article containers are present, so the
+// live data sits next to the prose that explains it (an interactive book). Each
+// widget reflects wasm memory live and pokes it on edit; inputs that currently
+// have focus are not overwritten, so editing them works. Returns { update,
+// onPause, onStep, onReset }.
+function mountWidgets(wasm, view, dims) {
   const { NT, GW, GH, SUB } = dims;
-  const root = document.getElementById("panel");
-
-  const stats = el("div", "stats"); root.appendChild(stats);
-
-  const ctrls = el("div", "row");
-  const bPause = btn("Pause"), bStep = btn("Step"), bReset = btn("Reset");
-  ctrls.append(bPause, bStep, bReset); root.appendChild(ctrls);
-
-  const tun = el("div", "tunables");
-  const speed = numField("move_speed (sub/tick)", 0, 256, 1, wasm.move_speed());
-  const turn  = numField("turn_rate (ang/tick)", 0, 4000, 25, wasm.turn_rate());
-  speed.input.addEventListener("change", () => wasm.set_move_speed(parseInt(speed.input.value) | 0));
-  turn.input.addEventListener("change", () => wasm.set_turn_rate(parseInt(turn.input.value) | 0));
-  tun.append(speed.wrap, turn.wrap); root.appendChild(tun);
-
-  const tankWrap = el("div", "tanks");
-  const rows = [];
-  for (let t = 0; t < NT; t++) {
-    const box = el("div", "tankbox");
-    const title = el("div", "tt"); title.textContent = `tank ${t}`;
-    const fx = numField("x (cells)", 0, GW, 0.1, 0);
-    const fy = numField("y (cells)", 0, GH, 0.1, 0);
-    const fa = numField("angle (u16)", 0, 65535, 256, 0);
-    const live = el("div", "live");
-    const apply = () => wasm.set_tank_pose(t,
-      Math.round(parseFloat(fx.input.value) * SUB),
-      Math.round(parseFloat(fy.input.value) * SUB),
-      parseInt(fa.input.value) | 0);
-    fx.input.addEventListener("change", apply);
-    fy.input.addEventListener("change", apply);
-    fa.input.addEventListener("change", apply);
-    box.append(title, fx.wrap, fy.wrap, fa.wrap, live);
-    tankWrap.appendChild(box);
-    rows.push({ fx, fy, fa, live });
-  }
-  root.appendChild(tankWrap);
-
-  const gridLbl = el("div", "lbl"); gridLbl.textContent = "grid (click to toggle wall)";
-  root.appendChild(gridLbl);
-  const gridEl = el("div", "grid");
-  gridEl.style.gridTemplateColumns = `repeat(${GW}, 1fr)`;
-  const cells = [];
-  for (let i = 0; i < GW * GH; i++) {
-    const c = el("div", "cell");
-    c.addEventListener("click", () => wasm.toggle_wall(i % GW, (i / GW) | 0));
-    gridEl.appendChild(c); cells.push(c);
-  }
-  root.appendChild(gridEl);
-
+  const updaters = [];
+  const api = { update(info) { for (const u of updaters) u(info); } };
   const focused = () => document.activeElement;
   const inBits = (v) => ["F", "B", "L", "R"].map((c, i) => (v & (1 << i)) ? c : "·").join("");
+  const at = (id) => document.getElementById(id);
 
-  function update({ fps, dt, instCount }) {
-    const g = view.grid();   // row bitsets
-    let walls = 0; for (let r = 0; r < GH; r++) { let v = g[r]; while (v) { v &= v - 1; walls++; } }
-    stats.innerHTML =
-      `frame <b>${wasm.frame()}</b> &nbsp; ${(dt * 1000).toFixed(1)} ms &nbsp; ${fps.toFixed(0)} fps<br>` +
-      `instances <b>${instCount}</b> &nbsp; walls <b>${walls}</b> &nbsp; mem ${(wasm.memory.buffer.byteLength / 1024) | 0} KiB`;
-
-    if (focused() !== speed.input) speed.input.value = wasm.move_speed();
-    if (focused() !== turn.input)  turn.input.value  = wasm.turn_rate();
-
-    const x = view.x(), y = view.y(), ang = view.ang(), inp = view.inp(), vx = view.vx(), vy = view.vy(), hit = view.hit();
-    for (let t = 0; t < NT; t++) {
-      const r = rows[t];
-      if (focused() !== r.fx.input) r.fx.input.value = (x[t] / SUB).toFixed(3);
-      if (focused() !== r.fy.input) r.fy.input.value = (y[t] / SUB).toFixed(3);
-      if (focused() !== r.fa.input) r.fa.input.value = ang[t];
-      r.live.textContent =
-        `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})  hit ${hit[t]}`;
-    }
-    for (let i = 0; i < cells.length; i++)
-      cells[i].classList.toggle("on", !!((g[(i / GW) | 0] >>> (i % GW)) & 1));
+  // controls: pause / step / reset
+  const cc = at("w-controls");
+  if (cc) {
+    cc.classList.add("row");
+    const bPause = btn("Pause"), bStep = btn("Step"), bReset = btn("Reset");
+    cc.append(bPause, bStep, bReset);
+    bPause.addEventListener("click", () => { const v = bPause.textContent === "Pause"; bPause.textContent = v ? "Resume" : "Pause"; api.onPause && api.onPause(v); });
+    bStep.addEventListener("click", () => api.onStep && api.onStep());
+    bReset.addEventListener("click", () => api.onReset && api.onReset());
   }
 
-  const api = { update };
-  bPause.addEventListener("click", () => { const v = bPause.textContent === "Pause"; bPause.textContent = v ? "Resume" : "Pause"; api.onPause && api.onPause(v); });
-  bStep.addEventListener("click", () => api.onStep && api.onStep());
-  bReset.addEventListener("click", () => api.onReset && api.onReset());
+  // stats: frame / timing / instance + wall counts / memory
+  const sc = at("w-stats");
+  if (sc) {
+    sc.classList.add("stats");
+    updaters.push(({ fps, dt, instCount }) => {
+      const g = view.grid();
+      let walls = 0; for (let r = 0; r < GH; r++) { let v = g[r]; while (v) { v &= v - 1; walls++; } }
+      sc.innerHTML =
+        `frame <b>${wasm.frame()}</b> · ${(dt * 1000).toFixed(1)} ms · ${fps.toFixed(0)} fps<br>` +
+        `instances <b>${instCount}</b> · walls <b>${walls}</b> · mem ${(wasm.memory.buffer.byteLength / 1024) | 0} KiB`;
+    });
+  }
+
+  // tunables: move_speed / turn_rate (live-editable)
+  const tc = at("w-tunables");
+  if (tc) {
+    const speed = numField("move_speed (sub/tick)", 0, 256, 1, wasm.move_speed());
+    const turn  = numField("turn_rate (ang/tick)", 0, 4000, 25, wasm.turn_rate());
+    speed.input.addEventListener("change", () => wasm.set_move_speed(parseInt(speed.input.value) | 0));
+    turn.input.addEventListener("change", () => wasm.set_turn_rate(parseInt(turn.input.value) | 0));
+    tc.append(speed.wrap, turn.wrap);
+    updaters.push(() => {
+      if (focused() !== speed.input) speed.input.value = wasm.move_speed();
+      if (focused() !== turn.input)  turn.input.value  = wasm.turn_rate();
+    });
+  }
+
+  // tanks: per-tank pose editors + live readout
+  const kc = at("w-tanks");
+  if (kc) {
+    const rows = [];
+    for (let t = 0; t < NT; t++) {
+      const box = el("div", "tankbox");
+      const title = el("div", "tt"); title.textContent = `tank ${t}`;
+      const fx = numField("x (cells)", 0, GW, 0.1, 0);
+      const fy = numField("y (cells)", 0, GH, 0.1, 0);
+      const fa = numField("angle (u16)", 0, 65535, 256, 0);
+      const live = el("div", "live");
+      const apply = () => wasm.set_tank_pose(t,
+        Math.round(parseFloat(fx.input.value) * SUB),
+        Math.round(parseFloat(fy.input.value) * SUB),
+        parseInt(fa.input.value) | 0);
+      fx.input.addEventListener("change", apply);
+      fy.input.addEventListener("change", apply);
+      fa.input.addEventListener("change", apply);
+      box.append(title, fx.wrap, fy.wrap, fa.wrap, live);
+      kc.appendChild(box);
+      rows.push({ fx, fy, fa, live });
+    }
+    updaters.push(() => {
+      const x = view.x(), y = view.y(), ang = view.ang(), inp = view.inp(), vx = view.vx(), vy = view.vy(), hit = view.hit();
+      for (let t = 0; t < NT; t++) {
+        const r = rows[t];
+        if (focused() !== r.fx.input) r.fx.input.value = (x[t] / SUB).toFixed(3);
+        if (focused() !== r.fy.input) r.fy.input.value = (y[t] / SUB).toFixed(3);
+        if (focused() !== r.fa.input) r.fa.input.value = ang[t];
+        r.live.textContent =
+          `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})  hit ${hit[t]}`;
+      }
+    });
+  }
+
+  // grid: clickable wall bitset editor (one cell per bit)
+  const gc = at("w-grid");
+  if (gc) {
+    gc.classList.add("grid");
+    gc.style.gridTemplateColumns = `repeat(${GW}, 1fr)`;
+    const cells = [];
+    for (let i = 0; i < GW * GH; i++) {
+      const c = el("div", "cell");
+      c.addEventListener("click", () => wasm.toggle_wall(i % GW, (i / GW) | 0));
+      gc.appendChild(c); cells.push(c);
+    }
+    updaters.push(() => {
+      const g = view.grid();
+      for (let i = 0; i < cells.length; i++)
+        cells[i].classList.toggle("on", !!((g[(i / GW) | 0] >>> (i % GW)) & 1));
+    });
+  }
+
   return api;
 }
 

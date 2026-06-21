@@ -1,9 +1,11 @@
-# Tank Combat
+# Tank Combat — Chapter 1
 
-A tiny 2D tank game inspired by Atari *Combat*, built in C, compiled to
+Chapter 1 of *Data-Oriented Design, by picture* (the book index is one level
+up). A tiny 2D tank game inspired by Atari *Combat*, built in C, compiled to
 WebAssembly, rendered with WebGPU. **The point of the project is to demonstrate
 a data-oriented approach to building a game** — not the game itself. Features
-are added one step at a time.
+are added one step at a time. The page (`index.html`) presents the game above a
+write-up with every data structure live and editable in context.
 
 It is built following Mike Acton's data-oriented design rules:
 [**data-oriented-design.md**](https://github.com/macton/nagent/blob/master/context/data-oriented-design.md)

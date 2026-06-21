@@ -29,6 +29,7 @@ static void place(World* w, int t, double cx, double cy, unsigned dir) {
   w->tank_ang[t] = (uint16_t)(dir << ANGLE_SHIFT);
 }
 static double cellx(World* w, int t) { return (double)w->tank_x[t] / SUB; }
+static double celly(World* w, int t) { return (double)w->tank_y[t] / SUB; }
 
 /* run `ticks`, return the longest run of consecutive ticks with zero movement */
 static int run_max_stuck(World* w, int ticks) {
@@ -121,6 +122,24 @@ static void t_default_map_roam(void) {
   printf("  (longest stationary run: %d ticks)\n", stuck);
 }
 
+static void t_no_corner_trap(void) {
+  printf("default map, forward from the start, never trapped:\n");
+  World w; sim_init(&w);                      /* real level, start pose */
+  w.tank_in[0] = IN_FWD;
+  for (int i = 0; i < 1500; i++) sim_tick(&w);   /* settle into wall-following */
+  double xmin = 99, xmax = -99, ymin = 99, ymax = -99;
+  for (int i = 0; i < 2000; i++) {
+    sim_tick(&w);
+    double x = cellx(&w, 0), y = celly(&w, 0);
+    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+  }
+  /* if it were stuck in a corner the bbox would be tiny; it should roam widely */
+  check((xmax - xmin) > 10.0 && (ymax - ymin) > 8.0,
+        "roams the map (not trapped in a corner)");
+  printf("  (roaming bbox: %.1f x %.1f cells)\n", xmax - xmin, ymax - ymin);
+}
+
 static void t_no_throttle(void) {
   printf("against wall, no throttle:\n");
   World w; sim_init(&w); arena_open(&w);
@@ -143,6 +162,7 @@ int main(void) {
   t_pocket(1, "reverse");
   t_map_corner();
   t_default_map_roam();
+  t_no_corner_trap();
   t_no_throttle();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

@@ -19,4 +19,12 @@ clang \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_turn.c src/tanks_move.c src/tanks_steer.c \
   src/render.c src/dirtab.c src/collide.c
+
+# Stamp a version (build timestamp). version.js is loaded by the page and shown
+# in the corner, and app.js appends it to the game.wasm URL to defeat caching,
+# so a visitor can always confirm they are looking at the latest build.
+VER="$(date -u '+%Y.%m.%d-%H%M%S')"
+printf 'window.TANK_VERSION = "%s";\n' "$VER" > version.js
+
 echo "built game.wasm: $(wc -c < game.wasm) bytes"
+echo "version: $VER"

@@ -49,6 +49,17 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   silently leaving it on a side branch.
   - *From:* "Push to main; include wasm binary since GitHub.io is a live web
     page view." *Reason given:* the page is viewed live.
+- **Put a visible build version on a live page, and cache-bust its assets.**
+  Static hosts (and browsers) cache aggressively, so "I fixed it" and "the user
+  sees the fix" are different events — a reported bug may just be a stale build.
+  Stamp a version (build timestamp) into the page, show it, append it to asset
+  URLs (e.g. `game.wasm?v=…`) so the latest always loads, and report the version
+  when you publish so it can be confirmed visually.
+  - *From:* "add a version number to the page that it always updated so I can
+    visually confirm I am always looking at the latest version (and when you
+    publish, tell me the version number.)" (The reported "stuck in the corner"
+    bug did not reproduce in the current build — a stale cache was the likely
+    cause, which is exactly what a visible version + cache-bust prevents.)
 
 ## Numeric representation
 
