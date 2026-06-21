@@ -16,7 +16,7 @@
 #define ARENA_W_SUB (GRID_W * SUB)
 #define ARENA_H_SUB (GRID_H * SUB)
 #define TANK_R      92          /* collision half-extent, subcells (~0.36c)  */
-#define TRIG_SHIFT  14          /* DIR_COS/DIR_SIN are Q14                    */
+#define TRIG_SHIFT  14          /* the DIR_COS table is Q14                   */
 
 /* tank input bitfield */
 #define IN_FWD   1u

@@ -7,7 +7,7 @@
  *   tanks_move.c  advance + resolve grid collision (independent)
  *   tanks_steer.c on collision, steer toward slide (consumes move output)
  *   render.c      world -> instance buffer         (the renderer boundary)
- *   dirtab.c      baked Q14 cos/sin table          (shared by move + render)
+ *   dirtab.c      baked Q14 cos table (sin derived) (shared by move + render)
  * Splitting them makes the independence structural, not just a comment.
  *
  * NUMBERS ARE INTEGER FIXED POINT — no floating point anywhere in the sim.

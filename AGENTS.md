@@ -128,6 +128,13 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   - *From:* "rgb(a) can be stored as uint32_t - it's a well-established
     conventional format." / "unless there's a demonstrable reason to do
     something else (e.g. performance or size improvements)."
+- **Don't store data you can derive from data you already have.** sin is cos a
+  quarter-turn shifted (`sin x == cos(x - 90°)`), so one table serves both —
+  index it with an offset instead of baking a second table. A derivable copy is
+  redundant: extra memory to carry and a second thing to keep in sync. Derive it
+  at the single point that owns the relationship (a small inline accessor), which
+  is value-carrying, not zero-value indirection.
+  - *From:* "You don't need both a sin and cos table."
 
 ## Behavior & cases
 

@@ -29,7 +29,7 @@ uint32_t build_instances(Inst* out, const uint32_t* grid,
                       123, 123, 16384, 0, COL_WALL);
   for (uint32_t i = 0; i < n_tanks; i++) {
     uint32_t di = tank_ang[i] >> ANGLE_SHIFT;
-    int32_t co = DIR_COS[di], si = DIR_SIN[di];
+    int32_t co = dir_cos(di), si = dir_sin(di);
     int32_t cx = tank_x[i], cy = tank_y[i];
     k = push_quad(out, k, cx, cy, 87, 67, co, si, COL_BODY[i]);
     /* barrel: a short bar offset forward (0.34 cell == 87 subcells) */

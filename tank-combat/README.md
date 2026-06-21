@@ -49,7 +49,8 @@ Firefox Nightly).
   just `count == 2`; the transforms are written for the batch.
 - **Heading is discrete data, not runtime trig.** A tank's heading is a
   `uint16_t` *Q5.11* angle: the top 5 bits (`angle >> 11`) select 1 of 32
-  directions and index the baked cos/sin table; the low 11 bits are
+  directions and index the baked cos table (sin is the same table a
+  quarter-turn earlier); the low 11 bits are
   sub-direction precision so `turn_rate` can be finer than one direction per
   tick. No `sinf`, no libm.
 - **One transform produces the render data.** `build_instances()` turns world
@@ -69,7 +70,7 @@ Firefox Nightly).
 | `src/tanks_move.c/.h` | independent transform: advance + resolve grid collision |
 | `src/tanks_steer.c/.h` | on collision, steer heading toward the slide direction (consumes the move output) |
 | `src/render.c/.h` | renderer boundary: `Inst` contract + `build_instances` |
-| `src/dirtab.c/.h` | baked Q14 cos/sin table (shared by move + render) |
+| `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset (shared by move + render) |
 
 The transforms take their data as parameters and reference no globals, so the
 file boundaries are real: nothing leaks between them. Only the `init`/`tick`/
@@ -85,7 +86,7 @@ pointer functions are exported from the wasm (the internal transforms are not).
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
 | tank hit | `uint8_t[2]` | 1 if it collided while moving this tick |
-| trig table | `int16_t[32]` ×2 | cos/sin in Q14 (`±16384`) |
+| trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
 Arena is the grid: 20×15 cells, 256 subcells per cell.

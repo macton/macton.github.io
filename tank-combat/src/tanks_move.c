@@ -21,8 +21,8 @@ void tanks_move(int16_t* x, int16_t* y, int16_t* vx, int16_t* vy, uint8_t* hit,
   for (uint32_t i = 0; i < n; i++) {
     int32_t thr = (int32_t)((in[i] & IN_FWD) != 0) - (int32_t)((in[i] & IN_BACK) != 0);
     uint32_t di = ang[i] >> ANGLE_SHIFT;
-    int32_t mx = (DIR_COS[di] * speed * thr) >> TRIG_SHIFT;   /* subcells/tick */
-    int32_t my = (DIR_SIN[di] * speed * thr) >> TRIG_SHIFT;
+    int32_t mx = (dir_cos(di) * speed * thr) >> TRIG_SHIFT;   /* subcells/tick */
+    int32_t my = (dir_sin(di) * speed * thr) >> TRIG_SHIFT;
     int32_t h = 0;
     int32_t nx = x[i] + mx;
     if (mx && blocked(grid, nx, y[i])) { mx = 0; h = 1; } else x[i] = (int16_t)nx;
