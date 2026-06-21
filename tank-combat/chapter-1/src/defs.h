@@ -24,4 +24,9 @@
 #define IN_LEFT  4u
 #define IN_RIGHT 8u
 
+/* The arena is a torus: positions wrap. There is no hard edge — whether you can
+ * cross an edge depends only on the wall on the far side. */
+static inline int32_t wrap_x(int32_t x) { x %= ARENA_W_SUB; return x < 0 ? x + ARENA_W_SUB : x; }
+static inline int32_t wrap_y(int32_t y) { y %= ARENA_H_SUB; return y < 0 ? y + ARENA_H_SUB : y; }
+
 #endif

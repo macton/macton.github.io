@@ -33,7 +33,12 @@ Concretely, each tick the simulation:
 - **Convex corner** (two walls meeting, including the arena's own corners) — the
   tank turns out of the corner and follows the wall.
 - **Concave pocket** (U-shape / dead-end slot) — the tank drives in, rotates
-  around (up to ~180°) until it faces the opening, and drives back out.
+  around (up to ~180°) until it faces the opening, and drives back out, without
+  oscillating at the antipode.
+- **Wrap-around edges** — the arena is a torus. Driving into a gap in one edge
+  carries the tank through to the opposite edge if that side is open, or stops it
+  against the wall on that side if not (the collision is with the wrapped far
+  wall, and the tank turns away without oscillating).
 - **Not driving** — no auto-rotation; holding no throttle never moves or turns
   the tank.
 

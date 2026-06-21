@@ -12,11 +12,11 @@ It is built following Mike Acton's data-oriented design rules:
 — understand the real data first, then write the simplest machine that
 transforms the input you have into the output you need, at a cost you can state.
 
-**So far:** two tanks, obstacles on a grid, movement, rotation, and collision
-against walls and the arena edge, with an explicit, tested movement contract
-([`CONTRACT.md`](CONTRACT.md)): holding a throttle auto-rotates a tank out of
-walls, corners, and pockets so it never gets stuck. A debug panel exposes and
-edits every datum live.
+**So far:** two tanks, obstacles on a grid, movement, rotation, and wall
+collision on a wrap-around (toroidal) arena, with an explicit, tested movement
+contract ([`CONTRACT.md`](CONTRACT.md)): holding a throttle auto-rotates a tank
+out of walls, corners, and pockets so it never gets stuck. A debug panel exposes
+and edits every datum live.
 
 Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge, or
 Firefox Nightly).
@@ -129,12 +129,24 @@ integer instance buffer, and the host copies it to the GPU and draws
 `inst_count` quads. (In the wasm build, `tick()` runs the sim step and refills
 the instance buffer; the simulation itself contains no rendering.)
 
-**Out-of-range / collision policy (explicit):** the arena edge and any wall
-cell count as blocked; a blocked axis move is *rejected* (the tank keeps its
-old coordinate on that axis). This keeps every grid index in range. Collision
-is destination-only, not swept — at very high `move_speed` (editable in the
-panel) a tank can tunnel through a one-cell wall. Acceptable at the default
-speed; see `issues/`.
+**Toroidal arena (explicit):** there is no hard edge — the world wraps. A tank
+crossing an edge reappears on the opposite side; collision depends only on the
+wall on the far side, so two opposite open edges let it pass through, while an
+opposite wall stops it (collision tests the tank's footprint at wrapped
+coordinates). The default map has a full border, so it plays as a closed arena
+until you open a border cell. A blocked axis move is *rejected* (the tank keeps
+its old coordinate on that axis).
+
+**Steering handedness (explicit):** the escape turn always rotates in one
+consistent direction (the handedness the search found the opening), not the
+shortest signed turn — otherwise a 180° escape (e.g. backing into a dead-end
+that wraps onto a wall) would oscillate forever at the antipode. The escape
+search probes a *whole cell* ahead, so a direction that only admits a sub-cell
+wiggle into a dead-end is correctly rejected.
+
+Collision is destination-only, not swept — at very high `move_speed` (editable
+in the panel) a tank can tunnel through a one-cell wall. Acceptable at the
+default speed; see `issues/`.
 
 ## Build
 

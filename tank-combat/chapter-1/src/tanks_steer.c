@@ -2,49 +2,49 @@
 #include "dirtab.h"
 #include "collide.h"
 
-/* Can the tank at (x,y) move a full step along direction `d` with neither axis
- * blocked? (Sliding — one axis blocked — counts as not movable here, so the
- * tank keeps turning until it lines up cleanly with the opening or wall.) */
-static int dir_movable(const uint32_t* grid, int32_t x, int32_t y, uint32_t d, int32_t speed) {
-  int32_t dx = (dir_cos(d) * speed) >> TRIG_SHIFT;
-  int32_t dy = (dir_sin(d) * speed) >> TRIG_SHIFT;
+/* Is the neighbouring cell one full cell along direction `d` open? We probe a
+ * whole cell (not a sub-cell nudge) so a dead-end that only admits a tiny wiggle
+ * inside the current cell is correctly seen as NOT a way out. Coordinates wrap. */
+static int dir_movable(const uint32_t* grid, int32_t x, int32_t y, uint32_t d) {
+  int32_t dx = (dir_cos(d) * SUB) >> TRIG_SHIFT;
+  int32_t dy = (dir_sin(d) * SUB) >> TRIG_SHIFT;
   if (dx && blocked(grid, x + dx, y)) return 0;
   if (dy && blocked(grid, x, y + dy)) return 0;
   return 1;
 }
 
 void tanks_steer(const int16_t* x, const int16_t* y, uint16_t* ang,
-                 const uint8_t* in, uint32_t n, uint16_t rate,
-                 int32_t speed, const uint32_t* grid) {
+                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
+                 const uint32_t* grid) {
   for (uint32_t i = 0; i < n; i++) {
+    if (hit[i] == 0) continue;                    /* moving fine: leave heading */
     int32_t thr = (int32_t)((in[i] & IN_FWD) != 0) - (int32_t)((in[i] & IN_BACK) != 0);
-    if (thr == 0) continue;                       /* not driving: leave heading */
+    if (thr == 0) continue;
 
     /* travel = the direction the tank actually moves (forward: heading; back:
      * heading + half a turn). */
     uint32_t off    = (thr < 0) ? (N_DIRS / 2) : 0;
     uint32_t travel = ((ang[i] >> ANGLE_SHIFT) + off) & (N_DIRS - 1);
 
-    if (dir_movable(grid, x[i], y[i], travel, speed)) continue;  /* moving fine */
-
-    /* search outward for the nearest movable travel direction, preferring +k
-     * (a consistent handedness so symmetric pockets resolve and never oscillate). */
-    int found = 0; uint32_t best = travel;
+    /* search outward for the nearest travel direction whose next cell is open,
+     * preferring +k (a consistent handedness so symmetric traps never oscillate). */
+    int found = 0, plus = 1; uint32_t best = travel;
     for (uint32_t k = 1; k <= N_DIRS / 2 && !found; k++) {
       uint32_t a = (travel + k) & (N_DIRS - 1);
-      if (dir_movable(grid, x[i], y[i], a, speed)) { best = a; found = 1; break; }
+      if (dir_movable(grid, x[i], y[i], a)) { best = a; found = 1; plus = 1; break; }
       if (k == N_DIRS / 2) break;                 /* +k and -k coincide at a half turn */
       uint32_t b = (travel - k) & (N_DIRS - 1);
-      if (dir_movable(grid, x[i], y[i], b, speed)) { best = b; found = 1; break; }
+      if (dir_movable(grid, x[i], y[i], b)) { best = b; found = 1; plus = 0; break; }
     }
     if (!found) continue;                          /* fully enclosed: nowhere to go */
 
-    /* turn the heading so travel heads toward `best`, by up to `rate` */
+    /* Turn toward `best` in the SAME handedness the search found it, by up to
+     * `rate`. Turning by the handedness (not the shortest signed delta) is what
+     * keeps a 180-degree escape from oscillating: at the antipode the shortest
+     * delta flips sign every tick, but a fixed handedness sweeps cleanly. */
     uint16_t target = (uint16_t)(((best + off) & (N_DIRS - 1)) << ANGLE_SHIFT);
-    int32_t delta = (int16_t)(target - ang[i]);    /* shortest signed distance */
-    int32_t step = rate;
-    if (delta >  step) delta =  step;
-    else if (delta < -step) delta = -step;
-    ang[i] = (uint16_t)(ang[i] + delta);
+    uint16_t dist = (uint16_t)(plus ? (target - ang[i]) : (ang[i] - target));
+    uint16_t step = dist < rate ? dist : rate;     /* clamp so we snap, not overshoot */
+    ang[i] = (uint16_t)(plus ? (ang[i] + step) : (ang[i] - step));
   }
 }

@@ -78,7 +78,7 @@ EXPORT(set_turn_rate)  void set_turn_rate(uint32_t v)  { g_world.turn_rate = (ui
 /* debug pokes */
 EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_sub, uint32_t ang) {
   if (t >= N_TANKS) return;
-  g_world.tank_x[t] = (int16_t)x_sub; g_world.tank_y[t] = (int16_t)y_sub;
+  g_world.tank_x[t] = (int16_t)wrap_x(x_sub); g_world.tank_y[t] = (int16_t)wrap_y(y_sub);
   g_world.tank_ang[t] = (uint16_t)ang;
   g_inst_count = build_instances(&g_world, g_inst);
 }

@@ -140,6 +140,37 @@ static void t_no_corner_trap(void) {
   printf("  (roaming bbox: %.1f x %.1f cells)\n", xmax - xmin, ymax - ymin);
 }
 
+static void t_wrap_through(void) {
+  printf("opposite edges open, drive into the gap:\n");
+  World w; sim_init(&w); arena_open(&w);
+  for (int r = 0; r < GRID_H; r++) wall(&w, 10, r, 0);   /* clear all of column 10, incl. both borders */
+  place(&w, 0, 10.5, 7.0, 8);                             /* facing +y (down) */
+  w.tank_in[0] = IN_FWD;
+  int wrapped = 0;
+  for (int i = 0; i < 500 && !wrapped; i++) {
+    sim_tick(&w);
+    if (celly(&w, 0) < 1.0) wrapped = 1;                  /* reached the top => wrapped past the bottom */
+  }
+  check(wrapped, "passes through the bottom and reappears at the top");
+}
+
+static void t_wrap_blocked(void) {
+  printf("near edge open, far edge wall, drive into the gap:\n");
+  World w; sim_init(&w); arena_open(&w);
+  for (int r = 1; r <= 14; r++) wall(&w, 10, r, 0);       /* clear column 10 channel + bottom border */
+  /* top border (10,0) left as a wall: the far side of the wrap is solid */
+  place(&w, 0, 10.5, 7.0, 8);
+  w.tank_in[0] = IN_FWD;
+  double ymin = 99, ymax = -99;
+  for (int i = 0; i < 600; i++) {
+    sim_tick(&w);
+    double y = celly(&w, 0);
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+  }
+  check(ymin > 0.8, "collides with the wrapped far wall (never reaches the top)");
+  check((ymax - ymin) > 8.0, "no oscillation: bounces the channel instead of jittering in place");
+}
+
 static void t_no_throttle(void) {
   printf("against wall, no throttle:\n");
   World w; sim_init(&w); arena_open(&w);
@@ -163,6 +194,8 @@ int main(void) {
   t_map_corner();
   t_default_map_roam();
   t_no_corner_trap();
+  t_wrap_through();
+  t_wrap_blocked();
   t_no_throttle();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

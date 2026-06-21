@@ -44,7 +44,7 @@ void sim_tick(World* w) {
   tanks_move(w->tank_x, w->tank_y, w->tank_vx, w->tank_vy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
   /* keep a throttled tank from getting stuck against walls/corners/pockets */
-  tanks_steer(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, N_TANKS,
-              w->turn_rate, (int32_t)w->move_speed, w->grid);
+  tanks_steer(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
+              N_TANKS, w->turn_rate, w->grid);
   w->frame++;
 }

@@ -174,6 +174,19 @@ is not justified: decide from facts, not dogma (including the "rules" here).
     directly away from collision face." (Two iterations because the steer was
     keyed off velocity and patched per-case, instead of derived from the wall;
     the head-on case — zero velocity — stayed broken.)
+- **To rotate toward a target, pick a consistent handedness — not the shortest
+  signed turn — when the target can be ~180° away.** The shortest-signed delta
+  flips sign every tick at the antipode, so a half-turn escape jitters in place
+  forever. Turn the way you decided to (e.g. the handedness your search used) and
+  clamp so you snap on arrival.
+  - *From:* "you will oscillate without escaping."
+- **Probe at the granularity of the decision, not the step.** A "can I move?"
+  test that only checks a single sub-cell step reports a dead-end (a niche that
+  admits a tiny wiggle) as movable, so a greedy nearest-opening search gets
+  stuck there instead of finding the real way out. To decide "is this a way
+  out," probe a whole cell.
+  - *From:* "you will oscillate without escaping." (the wiggle-sized movable test
+    let the tank jitter in a one-cell pocket instead of turning 180° to leave.)
 
 ## Code structure & module boundaries
 
