@@ -2,64 +2,87 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Tank Combat — data-oriented, C + WASM + WebGPU</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  html, body { margin: 0; }
   body {
-    margin: 0; height: 100vh; display: flex; gap: 0;
     font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: #16181d; color: #d7dbe0;
+    display: flex; flex-direction: column;   /* mobile: map on top, debug below */
   }
-  #stage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-  #gpu { flex: 1 1 auto; width: 100%; height: 100%; display: block; background: #1a1c22; }
+
+  /* map (canvas + touch pads) */
+  #map { position: relative; width: 100%; aspect-ratio: 20 / 15; background: #1a1c22; }
+  #gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .pad { position: absolute; bottom: 8px; width: 132px; height: 132px;
+         display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+         gap: 6px; touch-action: none; }
+  .pad.left  { left: 8px; }
+  .pad.right { right: 8px; }
+  .padbtn {
+    border: 1px solid #ffffff33; background: #ffffff1c; color: #fff;
+    border-radius: 8px; font-size: 18px; line-height: 1; cursor: pointer;
+    touch-action: none; user-select: none; -webkit-user-select: none; padding: 0;
+  }
+  .padbtn:active { background: #f4b86066; }
+  .padbtn.u { grid-column: 2; grid-row: 1; }
+  .padbtn.l { grid-column: 1; grid-row: 2; }
+  .padbtn.r { grid-column: 3; grid-row: 2; }
+  .padbtn.d { grid-column: 2; grid-row: 3; }
+  .pad.left .padbtn  { border-color: #f29e2966; }
+  .pad.right .padbtn { border-color: #4db3e666; }
+
   #status { padding: 6px 10px; color: #f4b860; }
-  #help { padding: 6px 10px; color: #8b93a0; border-top: 1px solid #2a2d35; }
+  #help { padding: 6px 10px; color: #8b93a0; }
   #help b { color: #c7ccd4; }
 
-  #panel {
-    flex: 0 0 320px; overflow-y: auto; padding: 10px;
-    background: #1b1e25; border-left: 1px solid #2a2d35;
-  }
+  #panel { padding: 10px; background: #1b1e25; border-top: 1px solid #2a2d35; }
   #panel h2 { font-size: 13px; margin: 0 0 8px; color: #f4b860; letter-spacing: .04em; }
   .stats { padding: 8px; background: #0f1115; border-radius: 6px; margin-bottom: 10px; }
   .stats b { color: #fff; }
   .row { display: flex; gap: 6px; margin-bottom: 10px; }
-  button {
-    flex: 1; padding: 6px 4px; background: #2b2f3a; color: #d7dbe0;
-    border: 1px solid #3a3f4c; border-radius: 5px; cursor: pointer; font: inherit;
-  }
+  button { flex: 1; padding: 8px 4px; background: #2b2f3a; color: #d7dbe0;
+           border: 1px solid #3a3f4c; border-radius: 5px; cursor: pointer; font: inherit; }
   button:hover { background: #353a47; }
   .lbl, .tunables, .tanks { margin-bottom: 10px; }
   .lbl { color: #8b93a0; margin-bottom: 4px; }
   .nf { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 3px 0; }
   .nf span { color: #9aa2af; }
-  .nf input { width: 120px; padding: 3px 6px; background: #0f1115; color: #d7dbe0; border: 1px solid #3a3f4c; border-radius: 4px; font: inherit; }
+  .nf input { width: 120px; padding: 4px 6px; background: #0f1115; color: #d7dbe0;
+              border: 1px solid #3a3f4c; border-radius: 4px; font: inherit; }
   .tankbox { padding: 8px; background: #0f1115; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #555; }
   .tankbox:nth-of-type(1) { border-left-color: #f29e29; }
   .tankbox:nth-of-type(2) { border-left-color: #4db3e6; }
   .tt { color: #c7ccd4; font-weight: bold; margin-bottom: 4px; }
-  .live { margin-top: 5px; color: #8b93a0; white-space: pre; }
+  .live { margin-top: 5px; color: #8b93a0; white-space: pre-wrap; word-break: break-all; }
   .grid { display: grid; gap: 1px; background: #2a2d35; padding: 1px; border-radius: 4px; }
   .cell { aspect-ratio: 1; background: #14161b; cursor: pointer; }
   .cell.on { background: #525a68; }
   .cell:hover { outline: 1px solid #f4b860; outline-offset: -1px; }
+
+  /* wide screens: map on the left, debug panel on the right */
+  @media (min-width: 860px) {
+    body { flex-direction: row; height: 100vh; overflow: hidden; }
+    #stage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    #map { flex: 1 1 auto; aspect-ratio: auto; min-height: 0; }
+    #panel { flex: 0 0 360px; height: 100vh; overflow-y: auto; border-top: none; border-left: 1px solid #2a2d35; }
+  }
 </style>
 </head>
 <body>
   <div id="stage">
-    <div id="gpu-wrap" style="flex:1 1 auto; min-height:0; display:flex;">
-      <canvas id="gpu"></canvas>
-    </div>
+    <div id="map"><canvas id="gpu"></canvas></div>
     <div id="status">loading…</div>
     <div id="help">
-      <b>Tank 0 (amber):</b> W/S move · A/D turn &nbsp;&nbsp; <b>Tank 1 (cyan):</b> ↑/↓ move · ←/→ turn
-      &nbsp;— two tanks, grid obstacles, collision. Firing comes in a later step.
+      <b>Tank 0 (amber):</b> W/S move · A/D turn &nbsp;&nbsp; <b>Tank 1 (cyan):</b> ↑/↓ · ←/→ &nbsp;— or use the on-screen pads. Firing comes in a later step.
     </div>
   </div>
   <div id="panel">
-    <h2>DEBUG — live wasm memory</h2>
+    <h2>DEBUG — live wasm memory (integer fixed point)</h2>
   </div>
   <script type="module" src="app.js"></script>
 </body>
