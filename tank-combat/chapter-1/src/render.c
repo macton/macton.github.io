@@ -34,7 +34,7 @@ uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k) {
     int32_t thr = (int32_t)((w->tank_in[i] & IN_FWD) != 0)
                 - (int32_t)((w->tank_in[i] & IN_BACK) != 0);
     if (!thr) continue;                               /* only when moving */
-    int32_t x = w->tank_x[i], y = w->tank_y[i];
+    int32_t x = xy_lo(w->tank_xy[i]), y = xy_hi(w->tank_xy[i]);
     uint32_t di = w->tank_ang[i] >> ANGLE_SHIFT;
     int32_t mx = (dir_cos(di) * (int32_t)w->move_speed * thr) >> TRIG_SHIFT;
     int32_t my = (dir_sin(di) * (int32_t)w->move_speed * thr) >> TRIG_SHIFT;
@@ -72,7 +72,7 @@ uint32_t build_instances(const World* w, Inst* out) {
   for (uint32_t i = 0; i < N_TANKS; i++) {
     uint32_t di = w->tank_ang[i] >> ANGLE_SHIFT;
     int32_t co = dir_cos(di), si = dir_sin(di);
-    int32_t cx = w->tank_x[i], cy = w->tank_y[i];
+    int32_t cx = xy_lo(w->tank_xy[i]), cy = xy_hi(w->tank_xy[i]);
     k = push_quad(out, k, cx, cy, 87, 67, co, si, COL_BODY[i]);
     /* barrel: a short bar offset forward (0.34 cell == 87 subcells) */
     int32_t bx = cx + ((co * 87) >> TRIG_SHIFT);

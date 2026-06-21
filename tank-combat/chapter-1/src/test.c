@@ -27,19 +27,18 @@ static void wall(World* w, int c, int r, int v) {
   if (v) w->grid[r] |= (1u << c); else w->grid[r] &= ~(1u << c);
 }
 static void place(World* w, int t, double cx, double cy, unsigned dir) {
-  w->tank_x[t] = (int16_t)(cx * SUB);
-  w->tank_y[t] = (int16_t)(cy * SUB);
+  w->tank_xy[t] = xy_pack((int32_t)(cx * SUB), (int32_t)(cy * SUB));
   w->tank_ang[t] = (uint16_t)(dir << ANGLE_SHIFT);
 }
-static double cellx(World* w, int t) { return (double)w->tank_x[t] / SUB; }
-static double celly(World* w, int t) { return (double)w->tank_y[t] / SUB; }
+static double cellx(World* w, int t) { return (double)xy_lo(w->tank_xy[t]) / SUB; }
+static double celly(World* w, int t) { return (double)xy_hi(w->tank_xy[t]) / SUB; }
 
 /* run `ticks`, return the longest run of consecutive ticks with zero movement */
 static int run_max_stuck(World* w, int ticks) {
   int cur = 0, mx = 0;
   for (int i = 0; i < ticks; i++) {
     sim_tick(w);
-    if (w->tank_vx[0] == 0 && w->tank_vy[0] == 0) { cur++; if (cur > mx) mx = cur; }
+    if (w->tank_vxy[0] == 0) { cur++; if (cur > mx) mx = cur; }  /* both axes zero */
     else cur = 0;
   }
   return mx;
@@ -65,7 +64,7 @@ static void t_flat_wall_slide(void) {
   place(&w, 0, 9.5, 7.9, 4);                          /* NE into the wall */
   w.tank_in[0] = IN_FWD;
   for (int i = 0; i < 40; i++) sim_tick(&w);
-  check(w.tank_vx[0] != 0 && w.tank_vy[0] == 0, "ends sliding along wall (x only)");
+  check(xy_lo(w.tank_vxy[0]) != 0 && xy_hi(w.tank_vxy[0]) == 0, "ends sliding along wall (x only)");
 }
 
 static void t_headon(unsigned dir, int back, const char* label) {
@@ -77,7 +76,7 @@ static void t_headon(unsigned dir, int back, const char* label) {
   w.tank_in[0] = back ? IN_BACK : IN_FWD;
   int stuck = run_max_stuck(&w, 200);
   check(stuck < 150, "rotates off the wall (not permanently stuck)");
-  check(w.tank_vx[0] != 0 || w.tank_vy[0] != 0, "moving by the end");
+  check(w.tank_vxy[0] != 0, "moving by the end");
 }
 
 static void t_convex_corner(void) {
@@ -180,10 +179,10 @@ static void t_no_throttle(void) {
   for (int c = 1; c <= 18; c++) wall(&w, c, 9, 1);
   place(&w, 0, 9.5, 8.4, 8);                  /* facing into the wall, no input */
   w.tank_in[0] = 0;
-  uint16_t a0 = w.tank_ang[0]; int16_t x0 = w.tank_x[0], y0 = w.tank_y[0];
+  uint16_t a0 = w.tank_ang[0]; uint32_t xy0 = w.tank_xy[0];
   for (int i = 0; i < 30; i++) sim_tick(&w);
   check(w.tank_ang[0] == a0, "no auto-steer when not driving");
-  check(w.tank_x[0] == x0 && w.tank_y[0] == y0, "stays put when not driving");
+  check(w.tank_xy[0] == xy0, "stays put when not driving");
 }
 
 int main(void) {

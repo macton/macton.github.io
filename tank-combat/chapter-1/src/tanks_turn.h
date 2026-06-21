@@ -18,7 +18,7 @@
  * `rate` toward an open direction. The escape direction is one lookup in
  * `pattern_escape` indexed [pattern*N_DIRS + travel_dir], where `pattern` is the
  * tank cell's 4-neighbour pattern (read live from `grid`, 4 bits). */
-void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
+void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
                 const uint32_t* grid, const uint8_t* pattern_escape);
 

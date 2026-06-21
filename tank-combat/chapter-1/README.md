@@ -62,9 +62,14 @@ Firefox Nightly).
 - **Fixed timestep, so there is no `dt` to multiply.** `tick()` advances one
   simulation step; the per-tick deltas (`move_speed`, `turn_rate`) *are* the
   data. The host runs ticks from a real-time accumulator at 60 Hz.
-- **Tanks are structure-of-arrays.** `x[]`, `y[]`, `angle[]`, `input[]`,
-  `vx[]`, `vy[]` — each transform streams the one field it needs. Two tanks is
-  just `count == 2`; the transforms are written for the batch.
+- **Tanks are structure-of-arrays — but fields always used together are merged.**
+  SoA (`angle[]`, `input[]`, `hit[]`, …) lets each transform stream the one field
+  it needs. The exception is data that is *never* touched apart: `x` and `y` are
+  read together by every transform (collision, pattern lookup, render), so they
+  are one packed `tank_xy` (`x | y<<16`) — one load gets both, one fewer potential
+  cache miss; likewise the applied move `tank_vxy`. Heading stays separate because
+  it has a *different writer* (turn writes heading, move writes position). Two
+  tanks is just `count == 2`; the transforms are written for the batch.
 - **Heading is discrete data, not runtime trig.** A tank's heading is a
   `uint16_t` *Q5.11* angle: the top 5 bits (`angle >> 11`) select 1 of 32
   directions and index the baked cos table (sin is the same table a
@@ -110,10 +115,10 @@ are exported from the wasm (the internal transforms are not).
 | data | type | notes |
 |------|------|-------|
 | grid | `uint32_t[15]` | bitset: one word per row, bit c = column c (1 = wall) |
-| tank x, y | `int16_t[2]` each | subcells, 256 = 1 cell (Q8.8) |
+| tank xy | `uint32_t[2]` | packed position `x | y<<16`, subcells (Q8.8); x,y never used apart |
 | tank angle | `uint16_t[2]` | Q5.11 heading: 5-bit direction (`>>11` → 1 of 32) + 11-bit turn fraction |
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT |
-| tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
+| tank vxy | `uint32_t[2]` | packed last-tick applied move `vx | vy<<16`, subcells |
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
 | pattern_escape | `uint8_t[16*32]` | steer lookup `[pattern*32 + travel]`: precomputed nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). `pattern` = the cell's 4-neighbour wall code, read live. Grid-independent → built once, never rebuilt |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |

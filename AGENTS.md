@@ -110,6 +110,17 @@ is just there to explain why.
 
 ## Data packing & the shape of the input
 
+- **Write down each transform's exact read/write set (its access footprint) as a
+  routine first step — before choosing data layout or a table's key, not after a
+  bug.** For every transform list precisely which fields and which cells it reads
+  and which it writes. This one habit hands you the two biggest layout decisions
+  for free: it exposes a lookup's *true* key (the minimal inputs the result
+  depends on — next bullet) and which fields are always touched together (so they
+  should share a record — SoA-merge below). If the footprint isn't obvious,
+  instrument or hand-trace the reads; don't guess. *Origin: the steer's footprint
+  — it only ever reads a cell's 4 neighbours — was there to be read all along; we
+  found the 16-pattern table only when finally asked to highlight the sampled
+  cells. Doing the footprint analysis up front would have found it unprompted.*
 - **Find the minimal data the answer actually depends on — it is often a small
   local pattern, not the whole structure.** Before you index a big table by "the
   whole world," check what the computation truly reads. The steer's escape
@@ -123,6 +134,19 @@ is just there to explain why.
   (cells sharing a pattern must give identical results) — see `analyze.sh`.
   *Origin: highlighting the cells sampled while moving revealed the response was a
   lookup into a small set of local patterns.*
+- **Default to structure-of-arrays; merge fields that are (near-)always accessed
+  together into one record.** SoA lets each transform stream only the field it
+  needs — the right default. But splitting two fields that every transform
+  touching either reads/writes *together* just adds a second potential cache miss
+  for no gain: store them in one word (`tank_x`+`tank_y` → packed `uint32_t
+  tank_xy`; `vx`+`vy` → `tank_vxy`), through one named pack/unpack owner
+  (`xy_pack`/`xy_lo`/`xy_hi`), not ad-hoc shifts at each site. The bar is
+  demonstrable independent use: keep them apart only if one is realistically used
+  without the other — and a different *writer* or frequency-of-change is itself
+  such a reason (heading is written by turn, position by move, so they stay
+  separate even though render reads them together). This falls straight out of the
+  access-footprint analysis above. *Origin: x and y are never used apart, so they
+  belong in one load.*
 - **Pack data to the bits its real domain needs; don't spend a byte (or an `int`)
   on a boolean or tiny enum.** A grid of wall/empty cells is a bitset — one word
   per row, one bit per cell — not one byte per cell. Tight packing cuts memory

@@ -28,7 +28,7 @@ void tanks_build_escape(uint8_t* pattern_escape, const uint32_t* pattern_open) {
   }
 }
 
-void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
+void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
                 const uint32_t* grid, const uint8_t* pattern_escape) {
   for (uint32_t i = 0; i < n; i++) {
@@ -51,7 +51,7 @@ void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
 
     /* the tank cell's 4-neighbour pattern, read live (4 bits) — that is all the
      * steer needs; the escape per (pattern,travel) is the precomputed table */
-    uint32_t pat    = cell_pattern(grid, x[i] >> SUB_SHIFT, y[i] >> SUB_SHIFT);
+    uint32_t pat    = cell_pattern(grid, xy_lo(xy[i]) >> SUB_SHIFT, xy_hi(xy[i]) >> SUB_SHIFT);
     uint32_t travel = ((ang[i] >> ANGLE_SHIFT) + travel_off) & (N_DIRS - 1);
 
     /* one lookup: the precomputed nearest-open escape for this pattern + travel */

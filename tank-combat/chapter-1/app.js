@@ -93,12 +93,11 @@ async function main() {
   // views into wasm memory (stable: memory never grows)
   const view = {
     grid: () => new Uint32Array(wasm.memory.buffer, wasm.grid_ptr(), GH),  // one word per row, bit c == col c
-    x:    () => new Int16Array(wasm.memory.buffer, wasm.tank_x_ptr(), NT),
-    y:    () => new Int16Array(wasm.memory.buffer, wasm.tank_y_ptr(), NT),
+    // position/velocity are packed (x|y<<16): read as interleaved int16, [2t]=x [2t+1]=y
+    xy:   () => new Int16Array(wasm.memory.buffer, wasm.tank_xy_ptr(), NT * 2),
     ang:  () => new Uint16Array(wasm.memory.buffer, wasm.tank_angle_ptr(), NT),
     inp:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_input_ptr(), NT),
-    vx:   () => new Int16Array(wasm.memory.buffer, wasm.tank_vx_ptr(), NT),
-    vy:   () => new Int16Array(wasm.memory.buffer, wasm.tank_vy_ptr(), NT),
+    vxy:  () => new Int16Array(wasm.memory.buffer, wasm.tank_vxy_ptr(), NT * 2),
     hit:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_hit_ptr(), NT),
     inst: (n) => new Uint8Array(wasm.memory.buffer, wasm.inst_ptr(), n * STRIDE),
   };
@@ -305,14 +304,14 @@ function mountWidgets(wasm, view, dims) {
       rows.push({ fx, fy, fa, live });
     }
     updaters.push(() => {
-      const x = view.x(), y = view.y(), ang = view.ang(), inp = view.inp(), vx = view.vx(), vy = view.vy(), hit = view.hit();
+      const xy = view.xy(), ang = view.ang(), inp = view.inp(), vxy = view.vxy(), hit = view.hit();
       for (let t = 0; t < NT; t++) {
-        const r = rows[t];
-        if (focused() !== r.fx.input) r.fx.input.value = (x[t] / SUB).toFixed(3);
-        if (focused() !== r.fy.input) r.fy.input.value = (y[t] / SUB).toFixed(3);
+        const r = rows[t], x = xy[2 * t], y = xy[2 * t + 1], vx = vxy[2 * t], vy = vxy[2 * t + 1];
+        if (focused() !== r.fx.input) r.fx.input.value = (x / SUB).toFixed(3);
+        if (focused() !== r.fy.input) r.fy.input.value = (y / SUB).toFixed(3);
         if (focused() !== r.fa.input) r.fa.input.value = ang[t];
         r.live.textContent =
-          `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})  hit ${hit[t]}`;
+          `sub(${x},${y})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx},${vy})  hit ${hit[t]}`;
       }
     });
   }

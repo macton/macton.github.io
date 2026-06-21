@@ -15,14 +15,16 @@
 #include "defs.h"
 
 /* All simulation state, flat. Tanks are structure-of-arrays so each transform
- * streams the one field it needs. */
+ * streams the one field it needs — except fields always touched together, which
+ * are merged into one word so a single load gets both (see xy_pack in defs.h):
+ * x and y are never used apart (collision, pattern, render all read the pair),
+ * so they are one `tank_xy`; likewise the applied move `tank_vxy`. Heading stays
+ * separate: it has a different writer (turn writes it, move writes position). */
 typedef struct {
-  int16_t  tank_x  [N_TANKS];   /* subcells */
-  int16_t  tank_y  [N_TANKS];   /* subcells */
+  uint32_t tank_xy [N_TANKS];   /* packed position: x | y<<16, subcells (Q8.8) */
   uint16_t tank_ang[N_TANKS];   /* Q5.11 heading */
   uint8_t  tank_in [N_TANKS];   /* input bitfield (IN_*) */
-  int16_t  tank_vx [N_TANKS];   /* last tick's applied move, subcells */
-  int16_t  tank_vy [N_TANKS];
+  uint32_t tank_vxy[N_TANKS];   /* packed last-tick applied move: vx | vy<<16 */
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
   uint32_t grid    [GRID_H];    /* wall bitset, one row per word */
   uint8_t  pattern_escape[N_PATTERNS * N_DIRS];  /* steer lookup, indexed

@@ -112,10 +112,11 @@
     wall grid, and two tunable numbers. There is no dynamic allocation at all:
     every byte lives in fixed, static memory, decided at compile time.</p>
     <p>The simulation runs on a <strong>fixed timestep</strong>: one
-    <code>tick</code> is one frame, and each tick is three small transforms run
-    in order — turn, move, steer. Because the step is fixed, there is no
-    delta-time to multiply through the math; the per-tick amounts <em>are</em> the
-    data. Watch the frame counter, and step one tick at a time:</p>
+    <code>tick</code> is one frame, and each tick is two small transforms run in
+    order — <strong>turn</strong> (which also auto-steers out of collisions), then
+    <strong>move</strong>. Because the step is fixed, there is no delta-time to
+    multiply through the math; the per-tick amounts <em>are</em> the data. Watch
+    the frame counter, and step one tick at a time:</p>
     <div class="fig">
       <p class="cap">live world counters · pause then step to advance one tick</p>
       <div id="w-stats"></div>
@@ -163,9 +164,16 @@
     at an offset. One table, no redundant data to keep in sync.</p>
 
     <h2>Transforms over batches, not objects</h2>
-    <p>The tanks are stored as a "structure of arrays" — all the x's together,
-    all the y's together — so each transform streams just the one field it needs.
-    The transforms are written for a batch; two tanks is simply a batch of two.
+    <p>The tanks are stored as a "structure of arrays" — all the headings
+    together, all the inputs together — so each transform streams just the one
+    field it needs. There is one deliberate exception: a tank's <em>x</em> and
+    <em>y</em> are never used apart (collision, the pattern lookup, and rendering
+    all read the pair), so they are packed together in a single word and fetched
+    in one load — splitting them would only add a second possible cache miss for
+    no benefit. Heading stays in its own array, because a different transform
+    writes it. (That's the rule: structure-of-arrays by default; merge only what
+    is always used together.) The transforms are written for a batch; two tanks is
+    simply a batch of two.
     Each tick there are two: <strong>turn</strong> rotates the heading, and
     <strong>move</strong> steps each tank along it, resolving collision one axis
     at a time so a tank slides along a wall it meets at an angle. The collision

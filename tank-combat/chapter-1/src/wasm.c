@@ -15,8 +15,8 @@
  *
  *   pointers (into linear memory, read by JS each frame):
  *     inst_ptr  grid_ptr
- *     tank_x_ptr tank_y_ptr tank_angle_ptr tank_input_ptr
- *     tank_vx_ptr tank_vy_ptr tank_hit_ptr
+ *     tank_xy_ptr (packed x|y<<16) tank_angle_ptr tank_input_ptr
+ *     tank_vxy_ptr (packed vx|vy<<16) tank_hit_ptr
  *
  *   scalars: grid_w grid_h n_tanks subcell inst_count inst_max inst_stride frame
  *   tunables: move_speed/set_move_speed   turn_rate/set_turn_rate
@@ -59,12 +59,10 @@ EXPORT(set_input) void set_input(uint32_t tank, uint32_t bits) {
 /* pointers */
 EXPORT(inst_ptr)       Inst*     inst_ptr(void)       { return g_inst; }
 EXPORT(grid_ptr)       uint32_t* grid_ptr(void)       { return g_world.grid; }
-EXPORT(tank_x_ptr)     int16_t*  tank_x_ptr(void)     { return g_world.tank_x; }
-EXPORT(tank_y_ptr)     int16_t*  tank_y_ptr(void)     { return g_world.tank_y; }
+EXPORT(tank_xy_ptr)    uint32_t* tank_xy_ptr(void)    { return g_world.tank_xy; }   /* x|y<<16 */
 EXPORT(tank_angle_ptr) uint16_t* tank_angle_ptr(void) { return g_world.tank_ang; }
 EXPORT(tank_input_ptr) uint8_t*  tank_input_ptr(void) { return g_world.tank_in; }
-EXPORT(tank_vx_ptr)    int16_t*  tank_vx_ptr(void)    { return g_world.tank_vx; }
-EXPORT(tank_vy_ptr)    int16_t*  tank_vy_ptr(void)    { return g_world.tank_vy; }
+EXPORT(tank_vxy_ptr)   uint32_t* tank_vxy_ptr(void)   { return g_world.tank_vxy; }  /* vx|vy<<16 */
 EXPORT(tank_hit_ptr)   uint8_t*  tank_hit_ptr(void)   { return g_world.tank_hit; }
 
 /* scalars */
@@ -87,7 +85,7 @@ EXPORT(set_turn_rate)  void set_turn_rate(uint32_t v)  { g_world.turn_rate = (ui
 EXPORT(set_show_samples) void set_show_samples(uint32_t on) { g_show_samples = on ? 1u : 0u; g_inst_count = rebuild(); }
 EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_sub, uint32_t ang) {
   if (t >= N_TANKS) return;
-  g_world.tank_x[t] = (int16_t)wrap_x(x_sub); g_world.tank_y[t] = (int16_t)wrap_y(y_sub);
+  g_world.tank_xy[t] = xy_pack(wrap_x(x_sub), wrap_y(y_sub));
   g_world.tank_ang[t] = (uint16_t)ang;
   g_inst_count = rebuild();
 }

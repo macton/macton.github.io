@@ -30,4 +30,13 @@
 static inline int32_t wrap_x(int32_t x) { x %= ARENA_W_SUB; return x < 0 ? x + ARENA_W_SUB : x; }
 static inline int32_t wrap_y(int32_t y) { y %= ARENA_H_SUB; return y < 0 ? y + ARENA_H_SUB : y; }
 
+/* Two int16 always-together values packed in one uint32_t (low = a, high = b).
+ * One named owner of the layout, so call sites pack/unpack by intent, not by
+ * ad-hoc shifts. Used for tank_xy (position) and tank_vxy (last applied move). */
+static inline uint32_t xy_pack(int32_t a, int32_t b) {
+  return (uint32_t)(uint16_t)(int16_t)a | ((uint32_t)(uint16_t)(int16_t)b << 16);
+}
+static inline int32_t xy_lo(uint32_t p) { return (int16_t)(uint16_t)(p & 0xFFFFu); }
+static inline int32_t xy_hi(uint32_t p) { return (int16_t)(uint16_t)(p >> 16); }
+
 #endif
