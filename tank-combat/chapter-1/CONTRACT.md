@@ -12,12 +12,11 @@ auto-rotates to find a direction it can move.
 
 Concretely, each tick the simulation:
 
-1. applies the player's turn input (`tanks_turn`),
+1. rotates the heading (`tanks_turn`): the player's turn input, plus — if the
+   tank collided last tick while driving — an auto-steer that turns it (at
+   `turn_rate`) toward the nearest of the 32 directions it *can* move,
 2. moves the tank along its heading, resolving collision one axis at a time so
-   it slides along a wall it meets at an angle (`tanks_move`),
-3. if the tank is driving but its travel direction is blocked, rotates it (at
-   `turn_rate`) toward the nearest of the 32 directions it *can* move
-   (`tanks_steer`).
+   it slides along a wall it meets at an angle (`tanks_move`).
 
 "Travel direction" is the heading when moving forward, and the heading turned
 180° when reversing (a reversing tank faces opposite its motion).

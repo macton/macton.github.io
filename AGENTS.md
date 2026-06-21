@@ -202,6 +202,11 @@ is not justified: decide from facts, not dogma (including the "rules" here).
     own files, to structurally reinforce independence. similarly, the
     boundary/data contract with the renderer can be structurally reinforced by
     putting those related data/function in their own files e.g. build_instances."
+  - *Corollary:* the split is by **independence, not by activity**. Transforms
+    that write the same field and are order-coupled belong together — player-turn
+    and collision-auto-steer both rotate the heading, so they are one transform
+    (`tanks_turn`), not two. Don't separate what is one concern.
+  - *From:* "Merge steer and turn."
 - **Separate the core logic/simulation from I/O (render, GPU, wasm, network) so
   the core builds and runs on the host under test.** Make the dependency
   one-way: render/wasm depend on the sim; the sim depends on neither. Then tests

@@ -163,19 +163,20 @@
     <p>The tanks are stored as a "structure of arrays" — all the x's together,
     all the y's together — so each transform streams just the one field it needs.
     The transforms are written for a batch; two tanks is simply a batch of two.
-    Each tick:</p>
-    <p><strong>turn</strong> adds the player's left/right input to each heading.
-    <strong>move</strong> steps each tank along its heading, resolving collision
-    one axis at a time so a tank slides along a wall it meets at an angle.
-    <strong>steer</strong> is the interesting one — see below.</p>
+    Each tick there are two: <strong>turn</strong> rotates the heading, and
+    <strong>move</strong> steps each tank along it, resolving collision one axis
+    at a time so a tank slides along a wall it meets at an angle.</p>
+    <p>Rotation is one transform because it is all the same thing — writing the
+    heading. It does the player's left/right input, and the auto-steer below. The
+    interesting one is the auto-steer.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making
-    progress whenever any escape exists. If its travel direction is blocked, the
-    <strong>steer</strong> transform rotates it toward the nearest direction it
-    can actually move — so it slides along flat walls, turns out of corners
-    (including the arena's own), and rotates around to the mouth of a dead-end
-    pocket. It never stays permanently stuck unless it is truly sealed in.</p>
+    progress whenever any escape exists. If it collided, the <strong>turn</strong>
+    transform's auto-steer rotates it toward the nearest direction it can actually
+    move — so it slides along flat walls, turns out of corners (including the
+    arena's own), and rotates around to the mouth of a dead-end pocket. It never
+    stays permanently stuck unless it is truly sealed in.</p>
     <p>This promise is written down in <a href="CONTRACT.md">CONTRACT.md</a> and
     checked by a suite of native tests (more below). Crank the speed and turn
     rate and drive into walls to feel it — turning is gradual at
@@ -230,7 +231,8 @@
 
     <p class="note">Source for this chapter:
     <a href="src/sim.c">sim.c</a> ·
-    <a href="src/tanks_steer.c">tanks_steer.c</a> ·
+    <a href="src/tanks_turn.c">tanks_turn.c</a> ·
+    <a href="src/tanks_move.c">tanks_move.c</a> ·
     <a href="src/render.c">render.c</a> ·
     <a href="src/wasm.c">wasm.c</a> ·
     <a href="src/test.c">test.c</a> ·

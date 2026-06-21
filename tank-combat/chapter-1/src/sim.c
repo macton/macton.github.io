@@ -1,7 +1,6 @@
 #include "sim.h"
 #include "tanks_turn.h"
 #include "tanks_move.h"
-#include "tanks_steer.h"
 
 /* initial level, stored directly as row bit-words (no parse step). The ASCII
  * picture in each comment is just documentation; the word is the data.       */
@@ -40,11 +39,10 @@ void sim_init(World* w) {
 }
 
 void sim_tick(World* w) {
-  tanks_turn(w->tank_ang, w->tank_in, N_TANKS, w->turn_rate);
+  /* rotate: player turn + auto-steer out of last tick's collision */
+  tanks_turn(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
+             N_TANKS, w->turn_rate, w->grid);
   tanks_move(w->tank_x, w->tank_y, w->tank_vx, w->tank_vy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
-  /* keep a throttled tank from getting stuck against walls/corners/pockets */
-  tanks_steer(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
-              N_TANKS, w->turn_rate, w->grid);
   w->frame++;
 }

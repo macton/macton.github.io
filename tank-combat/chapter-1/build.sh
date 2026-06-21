@@ -17,7 +17,7 @@ clang \
   -Wl,--max-memory=1048576 \
   -Wl,--stack-first \
   -o game.wasm \
-  src/wasm.c src/sim.c src/tanks_turn.c src/tanks_move.c src/tanks_steer.c \
+  src/wasm.c src/sim.c src/tanks_turn.c src/tanks_move.c \
   src/render.c src/dirtab.c src/collide.c
 
 # Stamp a version (build timestamp). version.js is loaded by the page and shown

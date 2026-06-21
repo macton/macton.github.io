@@ -35,10 +35,10 @@ Firefox Nightly).
   no GPU (see *Testing* and `CONTRACT.md`).
 - **All state is data, flat and static.** The `World` is a handful of arrays.
   No objects, no hidden state.
-- **Independent transforms are separate files**, so the independence is
-  structural rather than a comment: `tanks_turn.c`, `tanks_move.c`, and
-  `tanks_steer.c` each touch only their data; `collide.c` is the shared grid
-  query; `dirtab.c` is the baked trig table. See *Source layout* below.
+- **Transforms are separate files by concern.** `tanks_turn.c` owns all heading
+  rotation (player turn + auto-steer, since both write the heading) and
+  `tanks_move.c` owns position; `collide.c` is the shared grid query; `dirtab.c`
+  is the baked trig table. See *Source layout* below.
 - **No dynamic allocation.** The module is freestanding wasm32 (`-nostdlib`,
   no libc, no libm). Every byte lives in static linear memory, sized at compile
   time. WASM memory is never grown, so the JS-side typed-array views over it
@@ -75,9 +75,8 @@ Simulation core (portable C, no render, no wasm):
 |------|----------------|
 | `src/defs.h` | shared sizes, input bits, exact-width types |
 | `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
-| `src/tanks_turn.c/.h` | transform: rotate headings by turn input |
+| `src/tanks_turn.c/.h` | transform: all heading rotation — player turn + auto-steer out of collisions |
 | `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
-| `src/tanks_steer.c/.h` | transform: steer a stuck throttled tank toward an opening |
 | `src/collide.c/.h` | shared grid collision query (`blocked`) |
 | `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
 
@@ -112,17 +111,16 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 ## Per-tick transform
 
 1. `set_input(tank, bits)` — host writes keyboard/touch state into `input[]`
-2. `tanks_turn` — add/subtract `turn_rate` from each `angle` per LEFT/RIGHT (wraps)
+2. `tanks_turn` — rotate the heading. First the player's turn: ±`turn_rate` per
+   LEFT/RIGHT (wraps). Then, if the tank collided last tick (`hit`) while
+   driving, **auto-steer**: rotate (at `turn_rate`) toward the nearest of the 32
+   directions whose neighbouring cell is open. That slides it along flat walls,
+   turns it out of convex corners, and rotates it around to the opening of a
+   concave pocket — so holding a throttle never leaves it permanently stuck. This
+   is the **movement contract** (`CONTRACT.md`), enforced by the native tests.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
-   angle; sets `hit` when an intended axis move was rejected
-4. `tanks_steer` — if a tank is driving (forward/back) but its travel direction
-   is blocked, rotate it (at `turn_rate`) toward the nearest of the 32
-   directions it can actually move. This slides it along flat walls, turns it
-   out of convex corners, and rotates it around to the opening of a concave
-   pocket — so holding a throttle never leaves it permanently stuck. This is the
-   **movement contract** (`CONTRACT.md`), enforced by the native tests. In open
-   space it does nothing.
+   angle; sets `hit` when an intended axis move was rejected.
 
 The render/host then: `build_instances` turns the `World` into the packed
 integer instance buffer, and the host copies it to the GPU and draws
