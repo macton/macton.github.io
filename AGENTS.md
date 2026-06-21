@@ -94,6 +94,14 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   removing work; an abstraction must earn its place.)
   - *From:* "You're adding indirection and abstraction that is zero value; all
     of the value has already been managed by the existence of stdint."
+- **Solve only the problem you have; don't build for hypothetical future needs.**
+  No fields, flags, enum values, parameters, or hooks for features that don't
+  exist yet — not even "reserved/unused, for a later step." Add them in the step
+  that needs them. A placeholder you carry now is dead weight and a lie about
+  what the code does (e.g. an `IN_FIRE` input bit with no firing). Note the
+  deferral in the README's "deferred" list, not in the code.
+  - *From:* "IN_FIRE should not be defined. Do not solve for problems you do not
+    have."
 
 ## Data packing
 

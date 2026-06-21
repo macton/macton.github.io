@@ -23,6 +23,5 @@
 #define IN_BACK  2u
 #define IN_LEFT  4u
 #define IN_RIGHT 8u
-#define IN_FIRE  16u            /* reserved for a later step; carried, unused */
 
 #endif

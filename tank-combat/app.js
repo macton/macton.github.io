@@ -47,11 +47,11 @@ fn vs(@builtin(vertex_index) vi: u32,
 fn fs(i: VOut) -> @location(0) vec4f { return i.col; }
 `;
 
-const IN_FWD = 1, IN_BACK = 2, IN_LEFT = 4, IN_RIGHT = 8, IN_FIRE = 16;
-// keycode -> [tank, bit]. Tank 0: WASD/Space. Tank 1: arrows/Enter.
+const IN_FWD = 1, IN_BACK = 2, IN_LEFT = 4, IN_RIGHT = 8;
+// keycode -> [tank, bit]. Tank 0: WASD. Tank 1: arrows.
 const KEYMAP = {
-  KeyW: [0, IN_FWD], KeyS: [0, IN_BACK], KeyA: [0, IN_LEFT], KeyD: [0, IN_RIGHT], Space: [0, IN_FIRE],
-  ArrowUp: [1, IN_FWD], ArrowDown: [1, IN_BACK], ArrowLeft: [1, IN_LEFT], ArrowRight: [1, IN_RIGHT], Enter: [1, IN_FIRE],
+  KeyW: [0, IN_FWD], KeyS: [0, IN_BACK], KeyA: [0, IN_LEFT], KeyD: [0, IN_RIGHT],
+  ArrowUp: [1, IN_FWD], ArrowDown: [1, IN_BACK], ArrowLeft: [1, IN_LEFT], ArrowRight: [1, IN_RIGHT],
 };
 
 const held = new Set();
@@ -270,7 +270,7 @@ function buildPanel(wasm, view, dims) {
   root.appendChild(gridEl);
 
   const focused = () => document.activeElement;
-  const inBits = (v) => ["F", "B", "L", "R", "*"].map((c, i) => (v & (1 << i)) ? c : "·").join("");
+  const inBits = (v) => ["F", "B", "L", "R"].map((c, i) => (v & (1 << i)) ? c : "·").join("");
 
   function update({ fps, dt, instCount }) {
     const g = view.grid();   // row bitsets

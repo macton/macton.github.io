@@ -99,7 +99,7 @@ are exported from the wasm (the internal transforms are not).
 | grid | `uint32_t[15]` | bitset: one word per row, bit c = column c (1 = wall) |
 | tank x, y | `int16_t[2]` each | subcells, 256 = 1 cell (Q8.8) |
 | tank angle | `uint16_t[2]` | Q5.11 heading: 5-bit direction (`>>11` → 1 of 32) + 11-bit turn fraction |
-| tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
+| tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
