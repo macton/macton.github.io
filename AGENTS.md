@@ -138,15 +138,23 @@ is not justified: decide from facts, not dogma (including the "rules" here).
 
 ## Behavior & cases
 
-- **Enumerate the real cases of a transform's inputs; don't silently design for
-  only the common one.** When you notice a secondary case (reversing as well as
-  going forward) whose correct behavior isn't obvious, handle it explicitly and
-  correctly — or surface the assumption and ask — rather than letting the common
-  path fall through to it. Watch for quantities that look interchangeable but
-  aren't: direction-of-motion is not direction-of-facing — under reverse they
-  differ by 180°, so a heading derived from velocity must use the throttle sign.
-  - *From:* "if moving backward, it's 180 degrees." (collision steering aimed at
-    the slide direction even when reversing, instead of 180° from it.)
+- **Derive a behavior's target from the persistent constraint that defines it,
+  not from a transient that can degenerate.** Collision steering should align a
+  tank to the *wall* — an orientation that is always known (from which axis was
+  blocked) — not to the *resolved velocity*, which is zero in the head-on case
+  and left the tank stuck facing straight away. Keying off a derived quantity
+  forces patches (a +180 for reverse) and still breaks the case where that
+  quantity vanishes.
+- **Enumerate the degenerate cases, not just the common one.** Zero-length
+  vectors, head-on / perpendicular approaches, both-axes-blocked corners: name
+  each and check the rule still holds (and don't let `continue`-on-zero quietly
+  swallow one). When a secondary case's correct behavior isn't obvious, surface
+  it and ask rather than guessing.
+  - *From:* "if moving backward, it's 180 degrees." then "backward movement
+    while colliding is still incorrect, it's rotated 90 degrees ... facing
+    directly away from collision face." (Two iterations because the steer was
+    keyed off velocity and patched per-case, instead of derived from the wall;
+    the head-on case — zero velocity — stayed broken.)
 
 ## Code structure & module boundaries
 

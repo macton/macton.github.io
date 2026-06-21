@@ -5,7 +5,7 @@
  * transforms live next to the data they touch, each in its own file:
  *   tanks_turn.c  rotate headings by input         (independent)
  *   tanks_move.c  advance + resolve grid collision (independent)
- *   tanks_steer.c on collision, steer toward slide (consumes move output)
+ *   tanks_steer.c on collision, steer parallel to wall (consumes move output)
  *   render.c      world -> instance buffer         (the renderer boundary)
  *   dirtab.c      baked Q14 cos table (sin derived) (shared by move + render)
  * Splitting them makes the independence structural, not just a comment.
@@ -129,8 +129,8 @@ EXPORT(tick) uint32_t tick(void) {
   tanks_turn(g_tank_ang, g_tank_in, N_TANKS, g_turn_rate);
   tanks_move(g_tank_x, g_tank_y, g_tank_vx, g_tank_vy, g_tank_hit,
              g_tank_ang, g_tank_in, N_TANKS, (int32_t)g_move_speed, g_grid);
-  /* when a tank slid along a wall, steer it to face along the slide */
-  tanks_steer(g_tank_ang, g_tank_vx, g_tank_vy, g_tank_hit, g_tank_in, N_TANKS, g_turn_rate);
+  /* when a tank is driving into a wall, steer it to run parallel with it */
+  tanks_steer(g_tank_ang, g_tank_hit, N_TANKS, g_turn_rate);
   g_inst_count = rebuild_instances();
   g_frame++;
   return g_inst_count;

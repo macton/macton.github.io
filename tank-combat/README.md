@@ -85,7 +85,7 @@ pointer functions are exported from the wasm (the internal transforms are not).
 | tank angle | `uint16_t[2]` | Q5.11 heading: 5-bit direction (`>>11` → 1 of 32) + 11-bit turn fraction |
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
-| tank hit | `uint8_t[2]` | 1 if it collided while moving this tick |
+| tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
@@ -99,11 +99,11 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected
 4. `tanks_steer` — for any tank that `hit` a wall while moving, rotate its
-   heading toward the cardinal direction it should *face* (at `turn_rate`),
-   snapping when aligned: the slide direction when moving forward, or 180° from
-   it when reversing (the tank faces opposite its motion). So a tank that noses
-   into a wall at an angle turns to run parallel with it; in open space this
-   does nothing
+   heading (at `turn_rate`) toward the nearer of the two directions parallel to
+   that wall. The wall orientation comes from which axis was blocked (`hit`
+   bit0 = x, bit1 = y), so it works at any approach angle, forward or reverse,
+   including head-on (a tank backing straight into a wall pivots to slide along
+   it instead of sticking facing away). In open space this does nothing
 5. `build_instances` — world state → packed integer instance buffer
 6. host copies the instance buffer to the GPU and draws `inst_count` quads
 

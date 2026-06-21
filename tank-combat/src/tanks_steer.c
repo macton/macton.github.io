@@ -1,25 +1,26 @@
 #include "tanks_steer.h"
 
-void tanks_steer(uint16_t* ang, const int16_t* vx, const int16_t* vy,
-                 const uint8_t* hit, const uint8_t* in, uint32_t n, uint16_t rate) {
+void tanks_steer(uint16_t* ang, const uint8_t* hit, uint32_t n, uint16_t rate) {
   for (uint32_t i = 0; i < n; i++) {
-    if (!hit[i]) continue;
-    int32_t mvx = vx[i], mvy = vy[i];
-    if (mvx == 0 && mvy == 0) continue;   /* both axes blocked: no slide dir  */
+    uint32_t h = hit[i];
+    if (h == 0 || h == 3) continue;   /* not blocked, or wedged in a corner   */
 
-    /* per-axis collision leaves the resolved velocity axis-aligned, so the
-     * slide direction is one of the four cardinals. */
-    uint32_t dir;
-    if (mvy == 0) dir = (mvx > 0) ? 0u : (N_DIRS / 2);
-    else          dir = (mvy > 0) ? (N_DIRS / 4) : (3 * N_DIRS / 4);
-    uint16_t target = (uint16_t)(dir << ANGLE_SHIFT);
-    /* reversing: the tank faces opposite its motion, so aim 180 deg away. */
-    if (in[i] & IN_BACK) target = (uint16_t)(target + 0x8000u);
+    /* The blocked axis names the wall; the two headings parallel to it are the
+     * candidates. Horizontal wall (y blocked) -> run along x (E or W); vertical
+     * wall (x blocked) -> run along y (the two y cardinals). */
+    uint16_t ca, cb;
+    if (h & 2) { ca = (uint16_t)(0u << ANGLE_SHIFT);            cb = (uint16_t)((N_DIRS / 2) << ANGLE_SHIFT); }
+    else       { ca = (uint16_t)((N_DIRS / 4) << ANGLE_SHIFT); cb = (uint16_t)((3 * N_DIRS / 4) << ANGLE_SHIFT); }
 
-    int32_t delta = (int16_t)(target - ang[i]);   /* shortest signed distance */
-    int32_t step  = rate;
-    if (delta >  step) delta =  step;             /* clamp so we don't overshoot */
+    int32_t da = (int16_t)(ca - ang[i]);   /* shortest signed distance to each  */
+    int32_t db = (int16_t)(cb - ang[i]);
+    int32_t ada = da < 0 ? -da : da;
+    int32_t adb = db < 0 ? -db : db;
+    int32_t delta = (ada <= adb) ? da : db;   /* turn toward the nearer parallel */
+
+    int32_t step = rate;
+    if (delta >  step) delta =  step;          /* clamp so we don't overshoot    */
     else if (delta < -step) delta = -step;
-    ang[i] = (uint16_t)(ang[i] + delta);          /* snaps to target when |delta|<=rate */
+    ang[i] = (uint16_t)(ang[i] + delta);       /* snaps when |delta| <= rate      */
   }
 }
