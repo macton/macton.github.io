@@ -59,13 +59,28 @@ data-oriented-design doc, (3) this file, (4) existing convention.
 ## C / types & data layout
 
 - **Use the exact-width integer types from `<stdint.h>` (`uint8_t`, `int16_t`,
-  …) for any data with a defined width or layout.** Widths are part of the data
-  contract — the packed structs, the wasm↔JS protocol, the on-disk/on-wire
-  format — so make them explicit and guaranteed; do not hand-roll typedefs over
-  `char`/`short`/`int`, whose widths are not guaranteed by the language.
-  `<stdint.h>` is a freestanding header, so it is available even under
-  `-nostdlib`.
-  - *From:* "Use stdint.h."
+  …) directly for any data with a defined width or layout.** Widths are part of
+  the data contract — the packed structs, the wasm↔JS protocol, the
+  on-disk/on-wire format — so make them explicit and guaranteed; do not
+  hand-roll typedefs over `char`/`short`/`int`, whose widths are not guaranteed
+  by the language. **Do not alias the stdint types to shorter names** (`typedef
+  uint8_t u8;`): the alias adds an indirection that carries no information
+  stdint hasn't already captured — it is pure cost. `<stdint.h>` is a
+  freestanding header, available even under `-nostdlib`.
+  - *From:* "Use stdint.h." / "Remove the typedef'd int types, just use stdint
+    types directly … indirection and abstraction that is zero value; all of the
+    value has already been managed by the existence of stdint."
+
+## Design / abstraction
+
+- **Do not add an abstraction (typedef, wrapper, layer, indirection) unless it
+  carries value the underlying thing does not already provide.** Before
+  introducing one, state concretely what it organizes and what it costs; if the
+  value is already captured upstream, the wrapper is pure cost — omit it.
+  Renaming something that is already clear is negative value. (Simplicity is
+  removing work; an abstraction must earn its place.)
+  - *From:* "You're adding indirection and abstraction that is zero value; all
+    of the value has already been managed by the existence of stdint."
 
 ## UI & presentation
 
