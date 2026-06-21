@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tank Combat — data-oriented, C + WASM + WebGPU</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; gap: 0;
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #16181d; color: #d7dbe0;
+  }
+  #stage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+  #gpu { flex: 1 1 auto; width: 100%; height: 100%; display: block; background: #1a1c22; }
+  #status { padding: 6px 10px; color: #f4b860; }
+  #help { padding: 6px 10px; color: #8b93a0; border-top: 1px solid #2a2d35; }
+  #help b { color: #c7ccd4; }
+
+  #panel {
+    flex: 0 0 320px; overflow-y: auto; padding: 10px;
+    background: #1b1e25; border-left: 1px solid #2a2d35;
+  }
+  #panel h2 { font-size: 13px; margin: 0 0 8px; color: #f4b860; letter-spacing: .04em; }
+  .stats { padding: 8px; background: #0f1115; border-radius: 6px; margin-bottom: 10px; }
+  .stats b { color: #fff; }
+  .row { display: flex; gap: 6px; margin-bottom: 10px; }
+  button {
+    flex: 1; padding: 6px 4px; background: #2b2f3a; color: #d7dbe0;
+    border: 1px solid #3a3f4c; border-radius: 5px; cursor: pointer; font: inherit;
+  }
+  button:hover { background: #353a47; }
+  .lbl, .tunables, .tanks { margin-bottom: 10px; }
+  .lbl { color: #8b93a0; margin-bottom: 4px; }
+  .nf { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 3px 0; }
+  .nf span { color: #9aa2af; }
+  .nf input { width: 120px; padding: 3px 6px; background: #0f1115; color: #d7dbe0; border: 1px solid #3a3f4c; border-radius: 4px; font: inherit; }
+  .tankbox { padding: 8px; background: #0f1115; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid #555; }
+  .tankbox:nth-of-type(1) { border-left-color: #f29e29; }
+  .tankbox:nth-of-type(2) { border-left-color: #4db3e6; }
+  .tt { color: #c7ccd4; font-weight: bold; margin-bottom: 4px; }
+  .live { margin-top: 5px; color: #8b93a0; white-space: pre; }
+  .grid { display: grid; gap: 1px; background: #2a2d35; padding: 1px; border-radius: 4px; }
+  .cell { aspect-ratio: 1; background: #14161b; cursor: pointer; }
+  .cell.on { background: #525a68; }
+  .cell:hover { outline: 1px solid #f4b860; outline-offset: -1px; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="gpu-wrap" style="flex:1 1 auto; min-height:0; display:flex;">
+      <canvas id="gpu"></canvas>
+    </div>
+    <div id="status">loading…</div>
+    <div id="help">
+      <b>Tank 0 (amber):</b> W/S move · A/D turn &nbsp;&nbsp; <b>Tank 1 (cyan):</b> ↑/↓ move · ←/→ turn
+      &nbsp;— two tanks, grid obstacles, collision. Firing comes in a later step.
+    </div>
+  </div>
+  <div id="panel">
+    <h2>DEBUG — live wasm memory</h2>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
