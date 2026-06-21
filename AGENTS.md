@@ -136,6 +136,15 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   documentation, the stored value is the data.
   - *From:* "MAP does not need to exist. Values can be set in g_grid. This is an
     unnecessary extra step."
+- **Replace branchy per-element logic with a small lookup table when the mapping
+  is fixed.** Decoding an input bitfield into a turn/throttle, or a fixed scan
+  order, is a table indexed by the input — not a chain of `(x & BIT)` tests. The
+  table is the data; the only thing left to compute is what genuinely depends on
+  live state (e.g. the grid query). This does not conflict with "don't store
+  derivable data": that warns against a second *large, runtime-synced* copy (a
+  sin table beside cos); a tiny const decode table that removes branches is the
+  simplification pass's "can we use a small lookup table?", and is welcome.
+  - *From:* "Replace the logic in tanks_turn with lookup table(s)."
 - **Prefer the established conventional format for well-known data — unless you
   can demonstrate a reason to deviate.** Color is a packed `uint32_t` RGBA8888,
   not a 4-`uint8_t` struct: it is the conventional representation, it matches

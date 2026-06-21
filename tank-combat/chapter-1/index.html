@@ -169,6 +169,11 @@
     <p>Rotation is one transform because it is all the same thing — writing the
     heading. It does the player's left/right input, and the auto-steer below. The
     interesting one is the auto-steer.</p>
+    <p>Its fixed mappings are tables, not branches: a 16-entry table turns the
+    input bits straight into a turn direction and throttle, and the order to scan
+    for an escape direction is a list. The only thing actually computed is the
+    grid question — "is the next cell that way open?" — because that's the part
+    that depends on live data.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making

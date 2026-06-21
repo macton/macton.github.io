@@ -2,6 +2,36 @@
 #include "dirtab.h"
 #include "collide.h"
 
+/* Input decode, by table. The input bitfield (FWD=1 BACK=2 LEFT=4 RIGHT=8)
+ * indexes this directly: `turn` is the manual turn direction, `thr` the throttle
+ * sign, `travel_off` the heading->travel offset (half a turn when reversing). */
+typedef struct { int8_t turn; int8_t thr; uint8_t travel_off; } TurnInput;
+static const TurnInput INPUT[16] = {
+  /* 0 ....*/ { +0, +0, 0 },
+  /* 1 F...*/ { +0, +1, 0 },
+  /* 2 .B..*/ { +0, -1, N_DIRS/2 },
+  /* 3 FB..*/ { +0, +0, 0 },
+  /* 4 ..L.*/ { -1, +0, 0 },
+  /* 5 F.L.*/ { -1, +1, 0 },
+  /* 6 .BL.*/ { -1, -1, N_DIRS/2 },
+  /* 7 FBL.*/ { -1, +0, 0 },
+  /* 8 ...R*/ { +1, +0, 0 },
+  /* 9 F..R*/ { +1, +1, 0 },
+  /*10 .B.R*/ { +1, -1, N_DIRS/2 },
+  /*11 FB.R*/ { +1, +0, 0 },
+  /*12 ..LR*/ { +0, +0, 0 },
+  /*13 F.LR*/ { +0, +1, 0 },
+  /*14 .BLR*/ { +0, -1, N_DIRS/2 },
+  /*15 FBLR*/ { +0, +0, 0 },
+};
+
+/* Escape-search order, by table: directions to try relative to `travel`, nearest
+ * first, +k before -k (a consistent handedness). +16 (half turn) appears once. */
+static const int8_t STEER_SCAN[31] = {
+  1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
+  9, -9, 10, -10, 11, -11, 12, -12, 13, -13, 14, -14, 15, -15, 16,
+};
+
 /* Is the neighbouring cell one full cell along direction `d` open? We probe a
  * whole cell (not a sub-cell nudge) so a dead-end that only admits a tiny wiggle
  * inside the current cell is correctly seen as NOT a way out. Coordinates wrap. */
@@ -17,37 +47,29 @@ void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
                 const uint32_t* grid) {
   for (uint32_t i = 0; i < n; i++) {
+    TurnInput d = INPUT[in[i] & 0xF];
+
     /* player's manual turn */
-    int32_t d = (int32_t)((in[i] & IN_RIGHT) != 0) - (int32_t)((in[i] & IN_LEFT) != 0);
-    ang[i] = (uint16_t)((int32_t)ang[i] + (int32_t)rate * d);   /* wraps mod 65536 */
+    ang[i] = (uint16_t)((int32_t)ang[i] + (int32_t)rate * d.turn);   /* wraps mod 65536 */
 
     /* auto-steer out of a collision seen last tick (else nothing to do) */
-    if (hit[i] == 0) continue;
-    int32_t thr = (int32_t)((in[i] & IN_FWD) != 0) - (int32_t)((in[i] & IN_BACK) != 0);
-    if (thr == 0) continue;
+    if (hit[i] == 0 || d.thr == 0) continue;
 
-    /* travel = the direction the tank actually moves (forward: heading; back:
-     * heading + half a turn). */
-    uint32_t off    = (thr < 0) ? (N_DIRS / 2) : 0;
-    uint32_t travel = ((ang[i] >> ANGLE_SHIFT) + off) & (N_DIRS - 1);
+    uint32_t travel = ((ang[i] >> ANGLE_SHIFT) + d.travel_off) & (N_DIRS - 1);
 
-    /* search outward for the nearest travel direction whose next cell is open,
-     * preferring +k (a consistent handedness so symmetric traps never oscillate). */
+    /* scan the search order for the nearest direction whose next cell is open */
     int found = 0, plus = 1; uint32_t best = travel;
-    for (uint32_t k = 1; k <= N_DIRS / 2 && !found; k++) {
-      uint32_t a = (travel + k) & (N_DIRS - 1);
-      if (dir_movable(grid, x[i], y[i], a)) { best = a; found = 1; plus = 1; break; }
-      if (k == N_DIRS / 2) break;                 /* +k and -k coincide at a half turn */
-      uint32_t b = (travel - k) & (N_DIRS - 1);
-      if (dir_movable(grid, x[i], y[i], b)) { best = b; found = 1; plus = 0; break; }
+    for (uint32_t j = 0; j < sizeof STEER_SCAN; j++) {
+      uint32_t cand = (travel + (uint32_t)(int32_t)STEER_SCAN[j]) & (N_DIRS - 1);
+      if (dir_movable(grid, x[i], y[i], cand)) { best = cand; plus = STEER_SCAN[j] > 0; found = 1; break; }
     }
     if (!found) continue;                          /* fully enclosed: nowhere to go */
 
-    /* Turn toward `best` in the SAME handedness the search found it, by up to
-     * `rate`. Turning by the handedness (not the shortest signed delta) keeps a
+    /* Turn toward `best` in the handedness the scan found it (its sign), by up to
+     * `rate`. Using the handedness rather than the shortest signed delta keeps a
      * 180-degree escape from oscillating: at the antipode the shortest delta
      * flips sign every tick, but a fixed handedness sweeps cleanly. */
-    uint16_t target = (uint16_t)(((best + off) & (N_DIRS - 1)) << ANGLE_SHIFT);
+    uint16_t target = (uint16_t)(((best + d.travel_off) & (N_DIRS - 1)) << ANGLE_SHIFT);
     uint16_t dist = (uint16_t)(plus ? (target - ang[i]) : (ang[i] - target));
     uint16_t step = dist < rate ? dist : rate;     /* clamp so we snap, not overshoot */
     ang[i] = (uint16_t)(plus ? (ang[i] + step) : (ang[i] - step));
