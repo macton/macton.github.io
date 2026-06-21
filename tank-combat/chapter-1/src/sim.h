@@ -25,6 +25,10 @@ typedef struct {
   int16_t  tank_vy [N_TANKS];
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
   uint32_t grid    [GRID_H];    /* wall bitset, one row per word */
+  uint32_t cell_move[N_CELLS];  /* per-cell escape-direction cache, derived from
+                                 * grid: bit d = a tank in this cell can step one
+                                 * cell along direction d. Rebuilt only when the
+                                 * grid changes (sim_grid_changed). */
   uint32_t frame;
   uint16_t move_speed;          /* subcells per tick */
   uint16_t turn_rate;           /* angle units per tick */
@@ -32,7 +36,8 @@ typedef struct {
 
 _Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");
 
-void sim_init(World* w);   /* load the level, place tanks, reset counters */
-void sim_tick(World* w);   /* advance one fixed step: turn, move, steer */
+void sim_init(World* w);         /* load the level, place tanks, reset counters */
+void sim_tick(World* w);         /* advance one fixed step: turn then move */
+void sim_grid_changed(World* w); /* rebuild cell_move; call after editing grid */
 
 #endif

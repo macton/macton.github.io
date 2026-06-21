@@ -145,6 +145,17 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   sin table beside cos); a tiny const decode table that removes branches is the
   simplification pass's "can we use a small lookup table?", and is welcome.
   - *From:* "Replace the logic in tanks_turn with lookup table(s)."
+- **Match the work to the frequency of change: precompute against rarely-changing
+  data, read it in the hot loop.** If a per-tick computation depends on data that
+  changes far less often (the wall grid changes rarely; tanks turn many times a
+  second), hoist it into a cache derived from that data and rebuild the cache
+  only when the data changes — don't recompute it every tick. The escape "is the
+  next cell open?" query became a per-cell direction table built once per grid
+  edit (`sim_grid_changed`) and read by the steer each tick. Make the rebuild
+  trigger explicit at every point the source data is edited.
+  - *From:* "Grid query can be a table at the point of tanks turn. The frequency
+    of change of the grid is very low by comparison to the frequency of change of
+    tank turn. Table can be computed when grid data changes."
 - **Prefer the established conventional format for well-known data — unless you
   can demonstrate a reason to deviate.** Color is a packed `uint32_t` RGBA8888,
   not a 4-`uint8_t` struct: it is the conventional representation, it matches

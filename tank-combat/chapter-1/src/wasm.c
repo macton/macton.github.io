@@ -85,12 +85,14 @@ EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_su
 EXPORT(set_wall) void set_wall(uint32_t cx, uint32_t cy, uint32_t v) {
   if (cx < GRID_W && cy < GRID_H) {
     if (v) g_world.grid[cy] |= (1u << cx); else g_world.grid[cy] &= ~(1u << cx);
+    sim_grid_changed(&g_world);   /* refresh the escape cache */
     g_inst_count = build_instances(&g_world, g_inst);
   }
 }
 EXPORT(toggle_wall) void toggle_wall(uint32_t cx, uint32_t cy) {
   if (cx < GRID_W && cy < GRID_H) {
     g_world.grid[cy] ^= (1u << cx);
+    sim_grid_changed(&g_world);   /* refresh the escape cache */
     g_inst_count = build_instances(&g_world, g_inst);
   }
 }

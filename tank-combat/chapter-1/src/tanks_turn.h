@@ -14,9 +14,11 @@
 
 /* For each of n tanks: apply the player's left/right turn (±rate, wrapping),
  * then, if it collided last tick (hit[i] != 0) while driving, rotate by up to
- * `rate` toward the nearest direction whose neighbouring cell is open. */
+ * `rate` toward the nearest direction whose neighbouring cell is open. The open
+ * directions come from `cell_move` (the precomputed per-cell escape cache,
+ * indexed by the tank's cell), not a live grid query. */
 void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
-                const uint32_t* grid);
+                const uint32_t* cell_move);
 
 #endif

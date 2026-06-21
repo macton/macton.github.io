@@ -171,9 +171,12 @@
     interesting one is the auto-steer.</p>
     <p>Its fixed mappings are tables, not branches: a 16-entry table turns the
     input bits straight into a turn direction and throttle, and the order to scan
-    for an escape direction is a list. The only thing actually computed is the
-    grid question — "is the next cell that way open?" — because that's the part
-    that depends on live data.</p>
+    for an escape direction is a list. Even the grid question — "is the next cell
+    that way open?" — is a table: a per-cell list of which of the 32 directions
+    lead somewhere. That depends on the walls, but <em>the walls almost never
+    change while the tanks turn many times a second</em>, so it is computed once
+    when the grid changes (start up, or editing a wall) and just read every tick.
+    Match the work to how often the data actually changes.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making

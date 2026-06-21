@@ -1,4 +1,5 @@
 #include "collide.h"
+#include "dirtab.h"
 
 /* TANK_R < SUB, so the footprint spans at most two columns and two rows; wrap
  * each into the grid (GRID_W/GRID_H are not powers of two, so add/sub-wrap). */
@@ -15,4 +16,21 @@ int blocked(const uint32_t* grid, int32_t px, int32_t py) {
   if (grid[r0] & cmask) return 1;
   if (r1 != r0 && (grid[r1] & cmask)) return 1;
   return 0;
+}
+
+void cells_build_move(uint32_t* cell_move, const uint32_t* grid) {
+  for (int32_t cy = 0; cy < GRID_H; cy++) {
+    for (int32_t cx = 0; cx < GRID_W; cx++) {
+      int32_t px = cx * SUB + SUB / 2, py = cy * SUB + SUB / 2;   /* cell centre */
+      uint32_t mask = 0;
+      for (uint32_t d = 0; d < N_DIRS; d++) {
+        int32_t dx = (dir_cos(d) * SUB) >> TRIG_SHIFT;            /* one cell over */
+        int32_t dy = (dir_sin(d) * SUB) >> TRIG_SHIFT;
+        if (dx && blocked(grid, px + dx, py)) continue;
+        if (dy && blocked(grid, px, py + dy)) continue;
+        mask |= (1u << d);
+      }
+      cell_move[cy * GRID_W + cx] = mask;
+    }
+  }
 }

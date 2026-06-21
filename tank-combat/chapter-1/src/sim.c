@@ -1,6 +1,7 @@
 #include "sim.h"
 #include "tanks_turn.h"
 #include "tanks_move.h"
+#include "collide.h"
 
 /* initial level, stored directly as row bit-words (no parse step). The ASCII
  * picture in each comment is just documentation; the word is the data.       */
@@ -36,12 +37,19 @@ void sim_init(World* w) {
   w->frame = 0;
   w->move_speed = 20;   /* subcells per tick (~4.7 cells/sec at 60 Hz) */
   w->turn_rate  = 400;  /* angle units per tick                        */
+  sim_grid_changed(w);  /* build the escape-direction cache from the grid */
+}
+
+/* Rebuild the per-cell escape cache. Call after any change to the grid — far
+ * less often than the steer reads it (every tick). */
+void sim_grid_changed(World* w) {
+  cells_build_move(w->cell_move, w->grid);
 }
 
 void sim_tick(World* w) {
   /* rotate: player turn + auto-steer out of last tick's collision */
   tanks_turn(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
-             N_TANKS, w->turn_rate, w->grid);
+             N_TANKS, w->turn_rate, w->cell_move);
   tanks_move(w->tank_x, w->tank_y, w->tank_vx, w->tank_vy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
   w->frame++;
