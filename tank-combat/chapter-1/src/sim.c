@@ -40,16 +40,20 @@ void sim_init(World* w) {
   sim_grid_changed(w);  /* build the escape-direction cache from the grid */
 }
 
-/* Rebuild the per-cell escape cache. Call after any change to the grid — far
- * less often than the steer reads it (every tick). */
+/* Rebuild the steer's escape table. Call after any change to the grid — far
+ * less often than the steer reads it (every tick). Two stages: grid -> per-cell
+ * open-direction masks (collision topology), then masks -> per-(cell,travel)
+ * escape (the steer's scan, precomputed). The masks are a transient. */
 void sim_grid_changed(World* w) {
-  cells_build_move(w->cell_move, w->grid);
+  uint32_t cell_move[N_CELLS];
+  cells_build_move(cell_move, w->grid);
+  tanks_build_escape(w->cell_escape, cell_move);
 }
 
 void sim_tick(World* w) {
   /* rotate: player turn + auto-steer out of last tick's collision */
   tanks_turn(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
-             N_TANKS, w->turn_rate, w->cell_move);
+             N_TANKS, w->turn_rate, w->cell_escape);
   tanks_move(w->tank_x, w->tank_y, w->tank_vx, w->tank_vy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
   w->frame++;

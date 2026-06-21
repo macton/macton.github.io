@@ -25,10 +25,11 @@ typedef struct {
   int16_t  tank_vy [N_TANKS];
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
   uint32_t grid    [GRID_H];    /* wall bitset, one row per word */
-  uint32_t cell_move[N_CELLS];  /* per-cell escape-direction cache, derived from
-                                 * grid: bit d = a tank in this cell can step one
-                                 * cell along direction d. Rebuilt only when the
-                                 * grid changes (sim_grid_changed). */
+  uint8_t  cell_escape[N_CELLS * N_DIRS];  /* steer lookup, derived from grid:
+                                 * indexed [cell*N_DIRS + travel_dir], gives the
+                                 * precomputed escape (bit5 = handedness, bits0-4
+                                 * = direction; 0xFF = none). The whole scan, done
+                                 * once per grid change instead of every tick. */
   uint32_t frame;
   uint16_t move_speed;          /* subcells per tick */
   uint16_t turn_rate;           /* angle units per tick */

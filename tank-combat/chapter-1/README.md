@@ -75,9 +75,9 @@ Simulation core (portable C, no render, no wasm):
 |------|----------------|
 | `src/defs.h` | shared sizes, input bits, exact-width types |
 | `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
-| `src/tanks_turn.c/.h` | transform: all heading rotation — player turn + auto-steer out of collisions |
+| `src/tanks_turn.c/.h` | transform: all heading rotation (player turn + auto-steer); builds the escape table (`tanks_build_escape`) |
 | `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
-| `src/collide.c/.h` | grid collision query (`blocked`) + the per-cell escape cache builder (`cells_build_move`) |
+| `src/collide.c/.h` | grid collision query (`blocked`) + per-cell open-direction masks (`cells_build_move`) |
 | `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
 
 Boundaries on top of the core:
@@ -103,7 +103,7 @@ are exported from the wasm (the internal transforms are not).
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
-| cell_move | `uint32_t[20*15]` | per-cell escape cache: bit d = can step one cell toward direction d. Derived from grid, rebuilt only on grid change |
+| cell_escape | `uint8_t[20*15*32]` | steer lookup `[cell*32 + travel]`: precomputed nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). Rebuilt only on grid change |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
@@ -115,15 +115,16 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 2. `tanks_turn` — rotate the heading, entirely from lookup tables. A 16-entry
    `INPUT` table decodes the input bits into a turn direction and throttle; the
    player's turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank
-   collided last tick (`hit`) while driving, **auto-steer**: scan a fixed order
-   (`STEER_SCAN`) for the nearest direction that is open *for this cell* — read
-   from the `cell_move` cache, not a live grid query — and rotate (at
-   `turn_rate`) toward it. That slides it along flat walls, turns it out of
-   convex corners, and rotates it around to the opening of a concave pocket — so
-   holding a throttle never leaves it permanently stuck. This is the **movement
-   contract** (`CONTRACT.md`), enforced by the native tests. The `cell_move`
-   cache is rebuilt by `sim_grid_changed` only when the grid changes (`init`,
-   `set_wall`, `toggle_wall`) — rare, versus reading it every tick.
+   collided last tick (`hit`) while driving, **auto-steer** is a single lookup:
+   `cell_escape[cell*32 + travel]` gives the nearest open direction (and the
+   handedness to turn), and it rotates (at `turn_rate`) toward it. That slides it
+   along flat walls, turns it out of convex corners, and rotates it around to the
+   opening of a concave pocket — so holding a throttle never leaves it
+   permanently stuck. This is the **movement contract** (`CONTRACT.md`), enforced
+   by the native tests. `cell_escape` is rebuilt by `sim_grid_changed` only when
+   the grid changes (`init`, `set_wall`, `toggle_wall`): the nearest-open *scan*
+   itself is precomputed for every cell × travel direction, so the per-tick path
+   never searches — it reads one byte.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected.

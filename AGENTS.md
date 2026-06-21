@@ -152,10 +152,14 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   only when the data changes — don't recompute it every tick. The escape "is the
   next cell open?" query became a per-cell direction table built once per grid
   edit (`sim_grid_changed`) and read by the steer each tick. Make the rebuild
-  trigger explicit at every point the source data is edited.
-  - *From:* "Grid query can be a table at the point of tanks turn. The frequency
-    of change of the grid is very low by comparison to the frequency of change of
-    tank turn. Table can be computed when grid data changes."
+  trigger explicit at every point the source data is edited. This includes
+  precomputing a *search* over rarely-changing data, not just the data: the
+  nearest-open scan depends only on the per-cell open mask (rare) and the travel
+  direction (32 values), so the whole scan result is baked into a `[cell][travel]`
+  table and the per-tick path does one lookup, never a loop.
+  - *From:* "Grid query can be a table at the point of tanks turn ... Table can be
+    computed when grid data changes." then "'Scan search order for nearest open
+    direction' should be a table."
 - **Prefer the established conventional format for well-known data — unless you
   can demonstrate a reason to deviate.** Color is a packed `uint32_t` RGBA8888,
   not a 4-`uint8_t` struct: it is the conventional representation, it matches

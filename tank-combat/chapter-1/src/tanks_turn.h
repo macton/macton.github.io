@@ -14,11 +14,16 @@
 
 /* For each of n tanks: apply the player's left/right turn (±rate, wrapping),
  * then, if it collided last tick (hit[i] != 0) while driving, rotate by up to
- * `rate` toward the nearest direction whose neighbouring cell is open. The open
- * directions come from `cell_move` (the precomputed per-cell escape cache,
- * indexed by the tank's cell), not a live grid query. */
+ * `rate` toward an open direction. The escape direction is a single lookup in
+ * `cell_escape` (indexed [cell*N_DIRS + travel_dir]) — the whole nearest-open
+ * scan, precomputed per grid change by tanks_build_escape. */
 void tanks_turn(const int16_t* x, const int16_t* y, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
-                const uint32_t* cell_move);
+                const uint8_t* cell_escape);
+
+/* Precompute the escape table from the per-cell open-direction masks: for every
+ * cell and every travel direction, run the nearest-open scan once and store the
+ * result. cell_escape must hold N_CELLS*N_DIRS bytes. Call on grid change. */
+void tanks_build_escape(uint8_t* cell_escape, const uint32_t* cell_move);
 
 #endif
