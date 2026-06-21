@@ -1,0 +1,83 @@
+# AGENTS.md
+
+Working agreements for agents in this repository. This file is built up
+empirically: **each entry exists because a correction was needed once, and the
+entry is the rule that would have avoided it.** Read it before starting work
+here.
+
+This repository follows Mike Acton's data-oriented design rules in
+[data-oriented-design.md](https://github.com/macton/nagent/blob/master/context/data-oriented-design.md).
+Every rule below is meant to be consistent with that document. Precedence, when
+rules conflict: (1) an explicit instruction for the current task, (2) the
+data-oriented-design doc, (3) this file, (4) existing convention.
+
+---
+
+## Maintenance protocol (this file maintains itself)
+
+- **After every user correction or modification, add an instruction here that,
+  had it been followed, would have avoided the correction.** Phrase it as a
+  concrete rule ("do X"), consistent with data-oriented-design.
+- **Generalize from the sample.** A correction is one data point; record the
+  pattern it reveals, not just the one-off fix. (Where there is one, there are
+  many.)
+- **If it is unclear *why* the user asked for the change, ask before recording
+  it.** A wrong generalization is worse than none. Capture the user's stated
+  reason next to the rule so the intent survives.
+- **Edit, don't duplicate.** When a new correction refines an existing entry,
+  rewrite that entry instead of adding a near-duplicate. Removing redundancy is
+  the work (simplicity is removing work).
+- This maintenance protocol is itself one of the instructions; keep it here.
+- General corollary, beyond this file: **when a request's intent or rationale
+  is unclear, ask before acting or generalizing** — don't guess at the "why."
+
+---
+
+## Platform & deployment
+
+- **Determine the serving/deployment model before declaring work done, and
+  design within it.** Reality is the platform, not the toolchain. This repo is
+  served live by GitHub Pages straight from a branch with **no build step on
+  the host** — so any built artifact the page needs (e.g. compiled `.wasm`)
+  must be committed, and user-facing work must reach the live branch. Confirm
+  the target branch for anything the user means to *see live* rather than
+  silently leaving it on a side branch.
+  - *From:* "Push to main; include wasm binary since GitHub.io is a live web
+    page view." *Reason given:* the page is viewed live.
+
+## Numeric representation
+
+- **Default to integer / fixed point. Treat floating point as a deliberate
+  choice that must be justified by the data**, not as the unexamined default —
+  most so in data-oriented code. Choose the representation from the data's real
+  range and precision (e.g. positions as Q8.8 subcells in a fixed-size arena),
+  state that choice and its range, and keep it consistent end-to-end. Push any
+  unavoidable conversion to a single boundary (e.g. the GPU, which is float
+  hardware) rather than scattering floats through the simulation.
+  - *From:* "We don't need floating point. 16 bit fixed point is sufficient."
+
+## UI & presentation
+
+- **Design mobile-first; verify narrow widths before finishing.** A public web
+  page is opened on phones. Order the layout by importance for the small
+  screen: the **primary subject — the thing the project exists to demonstrate —
+  comes first / on top**; secondary panels (debug, controls, help) follow.
+  - *From:* "Put game map above debug so it's easier to work with on mobile."
+    *Reason given:* easier to work with on mobile.
+- **Provide input for every target platform.** If it ships to the web, it ships
+  to touch devices: supply pointer/touch controls alongside keyboard, don't
+  assume a keyboard exists.
+  - *From:* "Support mobile controls (tap)."
+- **Every transient UI state needs an explicit exit.** Model UI state
+  explicitly and handle each transition (e.g. loading → ready → running); a
+  status/placeholder indicator must be cleared by the transition that ends it.
+  Out-of-range and placeholder states are resolved deliberately, never left
+  dangling — the same explicit-state rule applied to the UI.
+  - *From:* "'Loading…' is continuously displayed."
+
+## Documentation
+
+- **Link the source spec.** When a project is built to follow a referenced
+  document or standard, link that document from its README so the contract is
+  discoverable.
+  - *From:* "Link data oriented design doc in readme."
