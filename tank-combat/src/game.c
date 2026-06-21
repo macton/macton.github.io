@@ -129,8 +129,8 @@ EXPORT(tick) uint32_t tick(void) {
   tanks_turn(g_tank_ang, g_tank_in, N_TANKS, g_turn_rate);
   tanks_move(g_tank_x, g_tank_y, g_tank_vx, g_tank_vy, g_tank_hit,
              g_tank_ang, g_tank_in, N_TANKS, (int32_t)g_move_speed, g_grid);
-  /* when a tank slid along a wall, steer it toward the slide direction */
-  tanks_steer(g_tank_ang, g_tank_vx, g_tank_vy, g_tank_hit, N_TANKS, g_turn_rate);
+  /* when a tank slid along a wall, steer it to face along the slide */
+  tanks_steer(g_tank_ang, g_tank_vx, g_tank_vy, g_tank_hit, g_tank_in, N_TANKS, g_turn_rate);
   g_inst_count = rebuild_instances();
   g_frame++;
   return g_inst_count;

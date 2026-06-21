@@ -129,6 +129,18 @@ is not justified: decide from facts, not dogma (including the "rules" here).
     conventional format." / "unless there's a demonstrable reason to do
     something else (e.g. performance or size improvements)."
 
+## Behavior & cases
+
+- **Enumerate the real cases of a transform's inputs; don't silently design for
+  only the common one.** When you notice a secondary case (reversing as well as
+  going forward) whose correct behavior isn't obvious, handle it explicitly and
+  correctly — or surface the assumption and ask — rather than letting the common
+  path fall through to it. Watch for quantities that look interchangeable but
+  aren't: direction-of-motion is not direction-of-facing — under reverse they
+  differ by 180°, so a heading derived from velocity must use the throttle sign.
+  - *From:* "if moving backward, it's 180 degrees." (collision steering aimed at
+    the slide direction even when reversing, instead of 180° from it.)
+
 ## Code structure & module boundaries
 
 - **Make independence and boundaries structural, not just commented — put them

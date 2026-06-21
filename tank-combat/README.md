@@ -98,9 +98,11 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected
 4. `tanks_steer` — for any tank that `hit` a wall while moving, rotate its
-   heading toward the cardinal direction it actually slid (at `turn_rate`),
-   snapping when aligned. So a tank that noses into a wall at an angle turns to
-   run parallel with it; in open space this does nothing
+   heading toward the cardinal direction it should *face* (at `turn_rate`),
+   snapping when aligned: the slide direction when moving forward, or 180° from
+   it when reversing (the tank faces opposite its motion). So a tank that noses
+   into a wall at an angle turns to run parallel with it; in open space this
+   does nothing
 5. `build_instances` — world state → packed integer instance buffer
 6. host copies the instance buffer to the GPU and draws `inst_count` quads
 
