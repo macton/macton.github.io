@@ -77,7 +77,7 @@ Simulation core (portable C, no render, no wasm):
 | `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
 | `src/tanks_turn.c/.h` | transform: all heading rotation (player turn + auto-steer); builds the escape table (`tanks_build_escape`) |
 | `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
-| `src/collide.c/.h` | grid collision query (`blocked`) + per-cell open-direction masks (`cells_build_move`) |
+| `src/collide.c/.h` | per-axis leading-edge collision (`blocked_x`/`blocked_y`) + per-cell open-direction masks (`cells_build_move`) |
 | `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
 
 Boundaries on top of the core:
@@ -138,10 +138,16 @@ the instance buffer; the simulation itself contains no rendering.)
 **Toroidal arena (explicit):** there is no hard edge — the world wraps. A tank
 crossing an edge reappears on the opposite side; collision depends only on the
 wall on the far side, so two opposite open edges let it pass through, while an
-opposite wall stops it (collision tests the tank's footprint at wrapped
-coordinates). The default map has a full border, so it plays as a closed arena
-until you open a border cell. A blocked axis move is *rejected* (the tank keeps
-its old coordinate on that axis).
+opposite wall stops it (at wrapped coordinates). The default map has a full
+border, so it plays as a closed arena until you open a border cell. A blocked
+axis move is *rejected* (the tank keeps its old coordinate on that axis).
+
+**Leading-edge collision (explicit):** because a tank steps less than one cell
+per tick and its previous cell was already clear, only the leading edge can hit
+something new. So the move test (`blocked_x`/`blocked_y`) checks just the one
+column/row the leading edge enters (at the cells the tank spans on the other
+axis), not the whole footprint — exploiting the invariant to do less work. This
+is exactly equivalent to a full-footprint test at normal speeds.
 
 **Steering handedness (explicit):** the escape turn always rotates in one
 consistent direction (the handedness the search found the opening), not the

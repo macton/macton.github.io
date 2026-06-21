@@ -1,15 +1,20 @@
-/* collide.h — grid collision queries shared by the move and steer transforms.
- * Pure functions over the grid bitset; no state. The arena is toroidal: there
- * is no edge to hit, only walls — coordinates and the tank's footprint wrap, so
- * a position near one edge is tested against the cells on the opposite edge. */
+/* collide.h — per-axis grid collision for incremental tank moves.
+ *
+ * A tank steps less than one cell per tick, and its previous cell was already
+ * clear, so on each axis only the LEADING edge (in the move direction) can newly
+ * hit a wall. We therefore test just the one column (x-move) or row (y-move) the
+ * leading edge enters, at the rows/columns the tank spans on the other axis —
+ * not the whole footprint. The arena is toroidal: coordinates wrap. */
 #ifndef TANK_COLLIDE_H
 #define TANK_COLLIDE_H
 
 #include "defs.h"
 
-/* Is a tank's square centred at (px,py) subcells overlapping a wall? px,py and
- * the footprint wrap around the arena, so this works across the seam. */
-int blocked(const uint32_t* grid, int32_t px, int32_t py);
+/* Tank centre moving to (nx,y) by step mx (sign gives the leading edge): does
+ * the leading x edge enter a wall, at the rows the tank spans at y? */
+int blocked_x(const uint32_t* grid, int32_t nx, int32_t y, int32_t mx);
+/* Symmetric for a y step. */
+int blocked_y(const uint32_t* grid, int32_t x, int32_t ny, int32_t my);
 
 /* Build the per-cell open-direction masks: cell_move[cy*GRID_W+cx] gets bit d
  * set if a tank centred in that cell can step one cell along direction d without

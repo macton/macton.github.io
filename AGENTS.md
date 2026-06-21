@@ -173,6 +173,16 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   - *From:* "Grid query can be a table at the point of tanks turn ... Table can be
     computed when grid data changes." then "'Scan search order for nearest open
     direction' should be a table."
+- **Exploit invariants to check only what a change can affect, not the whole
+  state.** When a change is incremental and the prior state was valid, re-validate
+  only the part the change could have touched. A tank steps less than one cell
+  per tick from an already-clear cell, so its collision test checks only the
+  leading edge it enters (one column or row), not its whole footprint — the
+  trailing side was valid a moment ago and didn't move into anything. State the
+  invariant the shortcut relies on, and confirm equivalence (here: byte-identical
+  trajectories vs the full-footprint test at normal speed).
+  - *From:* "Can we simplify blocked and tanks_move? Since tanks cannot move more
+    than one grid element, ... we can just test if that one is blocked."
 - **Prefer the established conventional format for well-known data — unless you
   can demonstrate a reason to deviate.** Color is a packed `uint32_t` RGBA8888,
   not a 4-`uint8_t` struct: it is the conventional representation, it matches
