@@ -1,5 +1,6 @@
 /* tanks_turn — all heading rotation, in one transform: the player's turn input
- * AND the auto-steer that keeps a throttled tank from getting stuck. Both write
+ * (decoded branch-free from the input bits) AND the auto-steer that keeps a
+ * throttled tank from getting stuck (one lookup in the escape table). Both write
  * the heading, so they live together. Runs before tanks_move (so a turn takes
  * effect the same tick) and reacts to the previous tick's collision flag.
  *

@@ -169,15 +169,20 @@
     <p>Rotation is one transform because it is all the same thing — writing the
     heading. It does the player's left/right input, and the auto-steer below. The
     interesting one is the auto-steer.</p>
-    <p>Its fixed mappings are tables, not branches: a 16-entry table turns the
-    input bits straight into a turn direction and throttle. And the escape itself
-    is a table: "I want to go this way but I'm stuck — which way should I turn?"
-    is one lookup by (cell, direction). Even the <em>search</em> for the nearest
-    open direction is precomputed — for every cell and every facing — because it
-    only depends on the walls, and <em>the walls almost never change while the
-    tanks turn many times a second</em>. So it's all computed once when the grid
-    changes (start up, or editing a wall) and just read every tick. Match the
-    work to how often the data actually changes.</p>
+    <p>A table is also a way to <em>see</em> the data. We first wrote the input
+    decode as a 16-row table — one row per combination of the four buttons —
+    listing the turn, throttle, and reverse flag for each. Laid out like that, the
+    pattern was obvious: every column is just a simple function of the bits (turn
+    is right-minus-left, and so on), so the table wasn't needed at all — a few
+    branch-free operations compute it. Tabulating first showed us which values we
+    actually need; then the data told us we could drop the table.</p>
+    <p>The escape, though, genuinely earns a table. "I want to go this way but I'm
+    stuck — which way should I turn?" is one lookup by (cell, direction). Even the
+    <em>search</em> for the nearest open direction is precomputed — for every cell
+    and every facing — because it only depends on the walls, and <em>the walls
+    almost never change while the tanks turn many times a second</em>. So it's
+    computed once when the grid changes (start up, or editing a wall) and just
+    read every tick. Match the work to how often the data actually changes.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making

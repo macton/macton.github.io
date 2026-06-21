@@ -112,9 +112,10 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 ## Per-tick transform
 
 1. `set_input(tank, bits)` — host writes keyboard/touch state into `input[]`
-2. `tanks_turn` — rotate the heading, entirely from lookup tables. A 16-entry
-   `INPUT` table decodes the input bits into a turn direction and throttle; the
-   player's turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank
+2. `tanks_turn` — rotate the heading. The input bits decode branch-free into a
+   turn direction, a throttle sign, and (when reversing) a half-turn travel
+   offset — these are simple bit functions, so no table is needed. The player's
+   turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank
    collided last tick (`hit`) while driving, **auto-steer** is a single lookup:
    `cell_escape[cell*32 + travel]` gives the nearest open direction (and the
    handedness to turn), and it rotates (at `turn_rate`) toward it. That slides it

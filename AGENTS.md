@@ -145,6 +145,19 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   sin table beside cos); a tiny const decode table that removes branches is the
   simplification pass's "can we use a small lookup table?", and is welcome.
   - *From:* "Replace the logic in tanks_turn with lookup table(s)."
+- **A table is also an analysis tool: tabulate to see the structure, then drop
+  the table if the data is trivially derivable from the index.** Laying a mapping
+  out as an explicit table makes the pattern in the data visible — you can read
+  off which outputs you actually need and how they relate to the input. If, once
+  visible, each column is a simple function of the index bits (turn = right−left,
+  etc.), compute it branch-free and delete the table; the bits already hold it.
+  Reserve the stored table for mappings that are *not* cheaply derivable (the
+  per-cell escape table). Tabulating-then-deciding is the organizing move; keep
+  or drop the table based on the pattern the data reveals.
+  - *From:* "Now that we can see data for INPUT table, we can replace some
+    lookups since the data is trivially contained in the input ... Putting data
+    into a table whenever possible is both an optimization strategy and an
+    organizational strategy, we can see what variables we really need."
 - **Match the work to the frequency of change: precompute against rarely-changing
   data, read it in the hot loop.** If a per-tick computation depends on data that
   changes far less often (the wall grid changes rarely; tanks turn many times a
