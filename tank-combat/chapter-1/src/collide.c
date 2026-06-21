@@ -1,5 +1,4 @@
 #include "collide.h"
-#include "dirtab.h"
 
 /* TANK_R < SUB, so the footprint spans at most two cells per axis; wrap each
  * index into the grid (GRID_W/GRID_H aren't powers of two, so add/sub-wrap). */
@@ -27,29 +26,4 @@ uint32_t cell_pattern(const uint32_t* grid, int32_t cx, int32_t cy) {
        | (((grid[WRAPR(cy)] >> WRAPC(cx + 1)) & 1u) << 1)   /* E */
        | (((grid[WRAPR(cy + 1)] >> WRAPC(cx)) & 1u) << 2)   /* S */
        | (((grid[WRAPR(cy)] >> WRAPC(cx - 1)) & 1u) << 3);  /* W */
-}
-
-void patterns_build_open(uint32_t pattern_open[N_PATTERNS]) {
-  /* The probe only reads the 4 orthogonal neighbours, so we synthesise a tiny
-   * grid that holds exactly the pattern's neighbours around one interior cell
-   * and run the same centre-origin probe collide uses everywhere. One source of
-   * truth for the geometry; 16 patterns instead of 300 cells. */
-  int32_t cx = GRID_W / 2, cy = GRID_H / 2;        /* interior: no wrap overlap */
-  int32_t px = cx * SUB + SUB / 2, py = cy * SUB + SUB / 2;
-  for (uint32_t p = 0; p < N_PATTERNS; p++) {
-    uint32_t g[GRID_H] = {0};
-    if (p & 1u) g[cy - 1] |= 1u << cx;             /* N */
-    if (p & 2u) g[cy]     |= 1u << (cx + 1);       /* E */
-    if (p & 4u) g[cy + 1] |= 1u << cx;             /* S */
-    if (p & 8u) g[cy]     |= 1u << (cx - 1);       /* W */
-    uint32_t mask = 0;
-    for (uint32_t d = 0; d < N_DIRS; d++) {
-      int32_t dx = (dir_cos(d) * SUB) >> TRIG_SHIFT;             /* one cell over */
-      int32_t dy = (dir_sin(d) * SUB) >> TRIG_SHIFT;
-      if (dx && blocked_x(g, wrap_x(px + dx), py, dx)) continue;
-      if (dy && blocked_y(g, px, wrap_y(py + dy), dy)) continue;
-      mask |= (1u << d);
-    }
-    pattern_open[p] = mask;
-  }
 }

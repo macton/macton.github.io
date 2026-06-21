@@ -22,11 +22,4 @@ void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
                 const uint32_t* grid, const uint8_t* pattern_escape);
 
-/* Precompute the escape table from the 16 per-pattern open-direction masks: for
- * every local pattern and every travel direction, run the nearest-open scan once
- * and store the result. pattern_escape must hold N_PATTERNS*N_DIRS bytes. The
- * table is grid-independent (a pattern is a pattern), so it is built once — not
- * per grid change. */
-void tanks_build_escape(uint8_t* pattern_escape, const uint32_t* pattern_open);
-
 #endif

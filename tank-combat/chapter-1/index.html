@@ -215,12 +215,15 @@
     for every cell and every facing" (300 cells × 32 facings ≈ 9.6&nbsp;KB) is
     really only <strong>16 patterns × 32 facings = 512 bytes</strong> — and
     because a pattern is a pattern regardless of <em>where</em> it sits, the table
-    no longer depends on the map at all. It's built once, never rebuilt when you
-    edit a wall. Each tick the steer reads the tank cell's four neighbours (four
-    bit-tests), forms the 4-bit pattern, and does one lookup. The big realization
-    of data-oriented design in miniature: we thought the input was "the whole
-    grid," but the response only ever depended on a tiny local pattern, so the
-    real input — and the table — is tiny.</p>
+    depends on nothing but the fixed geometry. So it isn't computed at runtime at
+    all: a small host program generates it and it is <strong>baked into the binary
+    as data</strong> (like the trig table) — the game builds nothing on startup.
+    Each tick the steer reads the tank cell's four neighbours (four bit-tests),
+    forms the 4-bit pattern, and does one lookup. The big realization of
+    data-oriented design in miniature: we thought the input was "the whole grid,"
+    but the response only ever depended on a tiny local pattern — so the real
+    input is tiny, and the fully-determined table belongs in the build, not the
+    runtime.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making

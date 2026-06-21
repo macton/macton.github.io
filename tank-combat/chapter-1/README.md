@@ -43,11 +43,13 @@ Firefox Nightly).
   only ever reads a cell's **4 orthogonal neighbours** (never diagonals), so a
   cell's whole set of open directions is a function of a **4-bit pattern** (wall
   N/E/S/W) — only 16 possibilities. The escape table is therefore `16 × 32`
-  (pattern × facing) = **512 bytes**, not one row per cell (≈9.6 KB), and it is
-  **grid-independent**: built once, never rebuilt on a wall edit. Each tick the
-  steer reads the tank cell's 4 neighbours live and does one lookup. Proven on
-  the host by `analyze.sh` (cells sharing a pattern always yield the identical
-  open set). This is the project's central lesson: the response depended not on
+  (pattern × facing) = **512 bytes**, not one row per cell (≈9.6 KB). It depends
+  only on compile-time geometry (no grid, no runtime state), so it isn't built at
+  runtime at all: it is **generated on the host** (`gen.sh` → `tools/gen_escape.c`)
+  and committed as **`src/escape_table.c`**, then compiled in — the same way the
+  trig table is baked. Each tick the steer reads the tank cell's 4 neighbours live
+  and does one lookup. Proven on the host by `analyze.sh` (cells sharing a pattern
+  always yield the identical open set). This is the project's central lesson: the response depended not on
   "the grid" but on a tiny local pattern, so the real input — and the table — is
   tiny.
 - **No dynamic allocation.** The module is freestanding wasm32 (`-nostdlib`,
@@ -93,8 +95,9 @@ Simulation core (portable C, no render, no wasm):
 | `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
 | `src/tanks_turn.c/.h` | transform: all heading rotation (player turn + auto-steer); builds the escape table (`tanks_build_escape`) |
 | `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
-| `src/collide.c/.h` | per-axis leading-edge collision (`blocked_x`/`blocked_y`); a cell's 4-neighbour pattern (`cell_pattern`); the 16 per-pattern open-direction masks (`patterns_build_open`) |
+| `src/collide.c/.h` | per-axis leading-edge collision (`blocked_x`/`blocked_y`); a cell's 4-neighbour pattern (`cell_pattern`) |
 | `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
+| `src/escape_table.c/.h` | the steer's `PATTERN_ESCAPE` lookup — **generated** by `tools/gen_escape.c`, committed, baked in |
 
 Boundaries on top of the core:
 
@@ -103,6 +106,13 @@ Boundaries on top of the core:
 | `src/render.c/.h` | reads `World` → `Inst` instance buffer (`build_instances`); debug `build_sample_overlay` marks the cells sampled this tick |
 | `src/wasm.c` | the wasm boundary: static `World`, exports the data protocol |
 | `src/test.c` | native tests of the sim core (the movement contract) |
+
+Host-only tools (never compiled into the wasm):
+
+| file | responsibility |
+|------|----------------|
+| `tools/escape_build.c/.h` | the escape-table generation logic (`patterns_build_open`, `build_escape_table`); shared by the generator and the analysis |
+| `tools/gen_escape.c` | emits `src/escape_table.c` (run by `gen.sh`, called from `build.sh`/`test.sh`) |
 | `tools/analyze_samples.c` | host analysis: which cells are sampled, and the 16-pattern collapse (`analyze.sh`) |
 
 `sim.c` does not include `render.h` or anything wasm — the dependency is
@@ -120,7 +130,7 @@ are exported from the wasm (the internal transforms are not).
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT |
 | tank vxy | `uint32_t[2]` | packed last-tick applied move `vx | vy<<16`, subcells |
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
-| pattern_escape | `uint8_t[16*32]` | steer lookup `[pattern*32 + travel]`: precomputed nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). `pattern` = the cell's 4-neighbour wall code, read live. Grid-independent → built once, never rebuilt |
+| PATTERN_ESCAPE | `const uint8_t[16*32]` | steer lookup `[pattern*32 + travel]`: nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). `pattern` = the cell's 4-neighbour wall code, read live. A compile-time constant — **generated on the host, baked into the binary** (`src/escape_table.c`), not in `World` |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
@@ -140,10 +150,10 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    it along flat walls, turns it out of convex corners, and rotates it around to
    the opening of a concave pocket — so holding a throttle never leaves it
    permanently stuck. This is the **movement contract** (`CONTRACT.md`), enforced
-   by the native tests. `pattern_escape` is built once (`sim_init`): the
-   nearest-open *scan* is precomputed for every pattern × travel direction, and
-   because the open set depends only on the 4-bit pattern it is grid-independent
-   — a wall edit changes which pattern a cell reads, not the table.
+   by the native tests. `PATTERN_ESCAPE` is not built at runtime at all: the
+   nearest-open *scan* for every pattern × travel direction depends only on
+   compile-time geometry, so it is generated on the host and baked into the binary
+   (`src/escape_table.c`). A wall edit just changes which pattern a cell reads.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected.
@@ -184,10 +194,13 @@ Requires `clang` with the `wasm32` target and `wasm-ld` (LLVM ≥ 15). No
 emscripten.
 
 ```sh
-./build.sh        # writes game.wasm (~5.7 KB)
+./build.sh        # regenerates src/escape_table.c, then writes game.wasm (~5.4 KB)
 ```
 
-`game.wasm` is committed so GitHub Pages serves it without a build step.
+`build.sh` first runs `gen.sh` to regenerate the baked escape table from the
+current geometry, then compiles. Both `game.wasm` and the generated
+`src/escape_table.c` are committed so GitHub Pages serves them without a build
+step.
 
 ## Testing
 

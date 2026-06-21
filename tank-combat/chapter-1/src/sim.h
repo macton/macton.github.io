@@ -27,14 +27,6 @@ typedef struct {
   uint32_t tank_vxy[N_TANKS];   /* packed last-tick applied move: vx | vy<<16 */
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
   uint32_t grid    [GRID_H];    /* wall bitset, one row per word */
-  uint8_t  pattern_escape[N_PATTERNS * N_DIRS];  /* steer lookup, indexed
-                                 * [pattern*N_DIRS + travel_dir]: the precomputed
-                                 * nearest-open escape (bit5 = handedness, bits0-4
-                                 * = direction; 0xFF = none). `pattern` is a cell's
-                                 * 4-neighbour wall code, read live. The escape is
-                                 * a pure function of that pattern, so this table
-                                 * is grid-independent — built once, never per
-                                 * grid edit (16 rows, not one per cell). */
   uint32_t frame;
   uint16_t move_speed;          /* subcells per tick */
   uint16_t turn_rate;           /* angle units per tick */

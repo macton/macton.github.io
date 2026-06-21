@@ -1,32 +1,6 @@
 #include "tanks_turn.h"
 #include "collide.h"
-
-/* Escape-search order: directions to try relative to `travel`, nearest first,
- * +k before -k (a consistent handedness). +16 (half turn) appears once. Used
- * only to build the escape table; the per-tick path never scans. */
-static const int8_t STEER_SCAN[31] = {
-  1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
-  9, -9, 10, -10, 11, -11, 12, -12, 13, -13, 14, -14, 15, -15, 16,
-};
-
-#define ESC_NONE 0xFFu   /* no open direction reachable from this pattern+travel */
-
-void tanks_build_escape(uint8_t* pattern_escape, const uint32_t* pattern_open) {
-  for (uint32_t p = 0; p < N_PATTERNS; p++) {
-    uint32_t open = pattern_open[p];
-    for (uint32_t travel = 0; travel < N_DIRS; travel++) {
-      uint8_t out = ESC_NONE;
-      for (uint32_t j = 0; j < sizeof STEER_SCAN; j++) {
-        uint32_t cand = (uint32_t)((int32_t)travel + STEER_SCAN[j]) & (N_DIRS - 1);
-        if ((open >> cand) & 1u) {                 /* nearest open: dir + handedness */
-          out = (uint8_t)(((STEER_SCAN[j] > 0) << 5) | cand);
-          break;
-        }
-      }
-      pattern_escape[p * N_DIRS + travel] = out;
-    }
-  }
-}
+#include "escape_table.h"   /* ESC_NONE (the table itself is passed in) */
 
 void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,

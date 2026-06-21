@@ -5,8 +5,7 @@ set -e
 cd "$(dirname "$0")"
 out="$(mktemp)"
 clang -O2 -Wall -Wextra -std=c11 -o "$out" \
-  tools/analyze_samples.c src/sim.c src/tanks_turn.c src/tanks_move.c \
-  src/dirtab.c src/collide.c
+  tools/analyze_samples.c tools/escape_build.c src/dirtab.c src/collide.c
 "$out"
 status=$?
 rm -f "$out"

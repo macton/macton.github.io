@@ -11,7 +11,7 @@
 #include "../src/defs.h"
 #include "../src/dirtab.h"
 #include "../src/collide.h"
-#include "../src/sim.h"
+#include "escape_build.h"   /* patterns_build_open (host-only) */
 
 /* The default level, copied from sim.c so the analysis sees the shipped map. */
 static const uint32_t GRID_INIT[GRID_H] = {

@@ -1,7 +1,7 @@
 #include "sim.h"
 #include "tanks_turn.h"
 #include "tanks_move.h"
-#include "collide.h"
+#include "escape_table.h"   /* PATTERN_ESCAPE — generated, baked in */
 
 /* initial level, stored directly as row bit-words (no parse step). The ASCII
  * picture in each comment is just documentation; the word is the data.       */
@@ -37,21 +37,14 @@ void sim_init(World* w) {
   w->frame = 0;
   w->move_speed = 20;   /* subcells per tick (~4.7 cells/sec at 60 Hz) */
   w->turn_rate  = 400;  /* angle units per tick                        */
-
-  /* Build the steer's escape table once. Two stages: the 16 local patterns ->
-   * per-pattern open-direction masks (collision topology), then masks ->
-   * per-(pattern,travel) escape (the steer's scan, precomputed). Both stages are
-   * grid-independent, so unlike a per-cell cache there is nothing to rebuild when
-   * the grid is edited — the per-tick lookup reads the cell's pattern live. */
-  uint32_t pattern_open[N_PATTERNS];
-  patterns_build_open(pattern_open);
-  tanks_build_escape(w->pattern_escape, pattern_open);
+  /* No escape table to build: PATTERN_ESCAPE is generated on the host and baked
+   * into the binary (src/escape_table.c). The per-tick steer reads it directly. */
 }
 
 void sim_tick(World* w) {
   /* rotate: player turn + auto-steer out of last tick's collision */
   tanks_turn(w->tank_xy, w->tank_ang, w->tank_in, w->tank_hit,
-             N_TANKS, w->turn_rate, w->grid, w->pattern_escape);
+             N_TANKS, w->turn_rate, w->grid, PATTERN_ESCAPE);
   tanks_move(w->tank_xy, w->tank_vxy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
   w->frame++;

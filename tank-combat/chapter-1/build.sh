@@ -5,6 +5,10 @@
 # renderer (see test.sh for the native simulation-only build).
 set -e
 cd "$(dirname "$0")"
+
+# Regenerate the precomputed escape table (committed source, baked into the wasm).
+./gen.sh
+
 clang \
   --target=wasm32 \
   -nostdlib \
@@ -18,7 +22,7 @@ clang \
   -Wl,--stack-first \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_turn.c src/tanks_move.c \
-  src/render.c src/dirtab.c src/collide.c
+  src/render.c src/dirtab.c src/collide.c src/escape_table.c
 
 # Stamp a version (build timestamp). version.js is loaded by the page and shown
 # in the corner, and app.js appends it to the game.wasm URL to defeat caching,

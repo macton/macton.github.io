@@ -18,15 +18,9 @@ int blocked_y(const uint32_t* grid, int32_t x, int32_t ny, int32_t my);
 
 /* A cell's local pattern: the 4 orthogonal neighbours' wall bits, N E S W in
  * bits 0..3 (toroidal). This 4-bit value is ALL the steer needs to know about a
- * cell — see patterns_build_open. */
+ * cell — it indexes the precomputed escape table (see src/escape_table.h). The
+ * per-pattern open masks and the escape table are generated on the host
+ * (tools/escape_build.c, tools/gen_escape.c), not built at runtime. */
 uint32_t cell_pattern(const uint32_t* grid, int32_t cx, int32_t cy);
-
-/* Build the open-direction mask for every one of the 16 local patterns:
- * pattern_open[p] gets bit d set if a tank centred in a cell with neighbour
- * pattern p can step one cell along direction d without hitting a wall. The
- * centre-origin probe only ever reads the 4 orthogonal neighbours, so the mask
- * is a pure function of the 4-bit pattern — grid-independent and only 16 rows
- * (it was once one row per cell). Built once; the escape table derives from it. */
-void patterns_build_open(uint32_t pattern_open[N_PATTERNS]);
 
 #endif
