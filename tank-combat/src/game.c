@@ -10,6 +10,7 @@
  *                      of 32 discrete directions.
  *   - trig:            DIR_COS/DIR_SIN baked in Q14 (value == trig * 16384).
  *   - colors:          uint8_t per channel.
+ *   - grid:            bitset, one uint32_t per row, bit c == column c.
  * The sim runs on a FIXED timestep (one tick == one frame), so there is no
  * dt to multiply: per-tick deltas (move_speed, turn_rate) are the data.
  *
@@ -101,7 +102,9 @@ static uint8_t  g_tank_in  [N_TANKS];
 static int16_t g_tank_vx  [N_TANKS];   /* last frame's applied move, subcells   */
 static int16_t g_tank_vy  [N_TANKS];
 
-static uint8_t  g_grid [N_CELLS];       /* 0 empty, 1 wall                       */
+/* grid as a bitset: one uint32_t per row, bit c == column c (LSB = col 0).  */
+_Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");
+static uint32_t g_grid [GRID_H];        /* 1 bit per cell, wall = 1              */
 
 static Inst g_inst [N_CELLS + N_TANKS * 2];
 static uint32_t  g_inst_count;
@@ -145,14 +148,14 @@ static void tanks_turn(uint16_t* ang, const uint8_t* in, uint32_t n, uint16_t st
 /* is the tank's square at (px,py) subcells blocked by a wall or the edge?  */
 /* out-of-range policy: edge counts as blocked (reject), so the tank stays  */
 /* inside [TANK_R, ARENA-TANK_R] and grid indices are always valid.         */
-static int32_t blocked(const uint8_t* grid, int32_t px, int32_t py) {
+static int32_t blocked(const uint32_t* grid, int32_t px, int32_t py) {
   if (px < TANK_R || py < TANK_R ||
       px > ARENA_W_SUB - TANK_R || py > ARENA_H_SUB - TANK_R) return 1;
   int32_t c0 = (px - TANK_R) >> SUB_SHIFT, c1 = (px + TANK_R) >> SUB_SHIFT;
   int32_t r0 = (py - TANK_R) >> SUB_SHIFT, r1 = (py + TANK_R) >> SUB_SHIFT;
+  uint32_t span = ((1u << (c1 - c0 + 1)) - 1u) << c0;   /* the columns the tank covers */
   for (int32_t r = r0; r <= r1; r++)
-    for (int32_t c = c0; c <= c1; c++)
-      if (grid[r * GRID_W + c]) return 1;
+    if (grid[r] & span) return 1;                        /* any wall in those columns?  */
   return 0;
 }
 
@@ -160,7 +163,7 @@ static int32_t blocked(const uint8_t* grid, int32_t px, int32_t py) {
 /* grid one axis at a time so a tank slides along a wall it hits at an angle.*/
 static void tanks_move(int16_t* x, int16_t* y, int16_t* vx, int16_t* vy,
                        const uint16_t* ang, const uint8_t* in, uint32_t n,
-                       int32_t speed, const uint8_t* grid) {
+                       int32_t speed, const uint32_t* grid) {
   for (uint32_t i = 0; i < n; i++) {
     int32_t thr = (int32_t)((in[i] & IN_FWD) != 0) - (int32_t)((in[i] & IN_BACK) != 0);
     uint32_t di  = ang[i] >> ANGLE_SHIFT;
@@ -189,7 +192,7 @@ static uint32_t build_instances(void) {
   uint32_t k = 0;
   for (int32_t r = 0; r < GRID_H; r++)
     for (int32_t c = 0; c < GRID_W; c++)
-      if (g_grid[r * GRID_W + c])
+      if ((g_grid[r] >> c) & 1u)
         k = push_quad(k, c * SUB + SUB / 2, r * SUB + SUB / 2,
                       123, 123, 16384, 0, COL_WALL);
   for (uint32_t i = 0; i < N_TANKS; i++) {
@@ -210,9 +213,12 @@ static uint32_t build_instances(void) {
 /* ------------------------------------------------------------------------ */
 
 EXPORT(init) void init(void) {
-  for (int32_t r = 0; r < GRID_H; r++)
+  for (int32_t r = 0; r < GRID_H; r++) {
+    uint32_t row = 0;
     for (int32_t c = 0; c < GRID_W; c++)
-      g_grid[r * GRID_W + c] = (MAP[r][c] == '#') ? 1u : 0u;
+      if (MAP[r][c] == '#') row |= (1u << c);
+    g_grid[r] = row;
+  }
 
   /* place the two tanks in known-open cells, facing each other */
   g_tank_x[0] = (int16_t)(2  * SUB + SUB / 2); g_tank_y[0] = (int16_t)(7 * SUB + SUB / 2);
@@ -241,7 +247,7 @@ EXPORT(set_input) void set_input(uint32_t tank, uint32_t bits) {
 
 /* pointers */
 EXPORT(inst_ptr)       Inst* inst_ptr(void)      { return g_inst; }
-EXPORT(grid_ptr)       uint8_t*  grid_ptr(void)        { return g_grid; }
+EXPORT(grid_ptr)       uint32_t* grid_ptr(void)        { return g_grid; }
 EXPORT(tank_x_ptr)     int16_t* tank_x_ptr(void)      { return g_tank_x; }
 EXPORT(tank_y_ptr)     int16_t* tank_y_ptr(void)      { return g_tank_y; }
 EXPORT(tank_angle_ptr) uint16_t* tank_angle_ptr(void)  { return g_tank_ang; }
@@ -273,13 +279,13 @@ EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_su
 }
 EXPORT(set_wall) void set_wall(uint32_t cx, uint32_t cy, uint32_t v) {
   if (cx < GRID_W && cy < GRID_H) {
-    g_grid[cy * GRID_W + cx] = v ? 1u : 0u;
+    if (v) g_grid[cy] |= (1u << cx); else g_grid[cy] &= ~(1u << cx);
     g_inst_count = build_instances();
   }
 }
 EXPORT(toggle_wall) void toggle_wall(uint32_t cx, uint32_t cy) {
   if (cx < GRID_W && cy < GRID_H) {
-    g_grid[cy * GRID_W + cx] ^= 1u;
+    g_grid[cy] ^= (1u << cx);
     g_inst_count = build_instances();
   }
 }

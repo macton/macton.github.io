@@ -85,7 +85,7 @@ async function main() {
 
   // views into wasm memory (stable: memory never grows)
   const view = {
-    grid: () => new Uint8Array(wasm.memory.buffer, wasm.grid_ptr(), GW * GH),
+    grid: () => new Uint32Array(wasm.memory.buffer, wasm.grid_ptr(), GH),  // one word per row, bit c == col c
     x:    () => new Int16Array(wasm.memory.buffer, wasm.tank_x_ptr(), NT),
     y:    () => new Int16Array(wasm.memory.buffer, wasm.tank_y_ptr(), NT),
     ang:  () => new Uint16Array(wasm.memory.buffer, wasm.tank_angle_ptr(), NT),
@@ -272,8 +272,8 @@ function buildPanel(wasm, view, dims) {
   const inBits = (v) => ["F", "B", "L", "R", "*"].map((c, i) => (v & (1 << i)) ? c : "·").join("");
 
   function update({ fps, dt, instCount }) {
-    const g = view.grid();
-    let walls = 0; for (let i = 0; i < g.length; i++) walls += g[i];
+    const g = view.grid();   // row bitsets
+    let walls = 0; for (let r = 0; r < GH; r++) { let v = g[r]; while (v) { v &= v - 1; walls++; } }
     stats.innerHTML =
       `frame <b>${wasm.frame()}</b> &nbsp; ${(dt * 1000).toFixed(1)} ms &nbsp; ${fps.toFixed(0)} fps<br>` +
       `instances <b>${instCount}</b> &nbsp; walls <b>${walls}</b> &nbsp; mem ${(wasm.memory.buffer.byteLength / 1024) | 0} KiB`;
@@ -290,7 +290,8 @@ function buildPanel(wasm, view, dims) {
       r.live.textContent =
         `sub(${x[t]},${y[t]})  dir ${ang[t] >> 11}/32  in ${inBits(inp[t])}  v(${vx[t]},${vy[t]})`;
     }
-    for (let i = 0; i < cells.length; i++) cells[i].classList.toggle("on", !!g[i]);
+    for (let i = 0; i < cells.length; i++)
+      cells[i].classList.toggle("on", !!((g[(i / GW) | 0] >>> (i % GW)) & 1));
   }
 
   const api = { update };

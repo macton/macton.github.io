@@ -53,13 +53,13 @@ Firefox Nightly).
 
 | data | type | notes |
 |------|------|-------|
-| grid | `u8[20*15]` | `0` empty / `1` wall |
-| tank x, y | `i16[2]` each | subcells, 256 = 1 cell (Q8.8) |
-| tank angle | `u16[2]` | `0..65535`, `>>11` → 1 of 32 directions |
-| tank input | `u8[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
-| tank vx, vy | `i16[2]` each | last tick's applied move, subcells |
-| trig table | `i16[32]` ×2 | cos/sin in Q14 (`±16384`) |
-| instances | `Inst[W*H + 4]` | render output, 16 B: i16 cx,cy,hx,hy,co,si + u8 rgba |
+| grid | `uint32_t[15]` | bitset: one word per row, bit c = column c (1 = wall) |
+| tank x, y | `int16_t[2]` each | subcells, 256 = 1 cell (Q8.8) |
+| tank angle | `uint16_t[2]` | `0..65535`, `>>11` → 1 of 32 directions |
+| tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
+| tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
+| trig table | `int16_t[32]` ×2 | cos/sin in Q14 (`±16384`) |
+| instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint8 rgba |
 
 Arena is the grid: 20×15 cells, 256 subcells per cell.
 

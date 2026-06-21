@@ -82,6 +82,20 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   - *From:* "You're adding indirection and abstraction that is zero value; all
     of the value has already been managed by the existence of stdint."
 
+## Data packing
+
+- **Pack data to the bits its real domain needs; don't spend a byte (or an
+  `int`) on a boolean or tiny enum.** A grid of wall/empty cells is a bitset —
+  one machine word per row, one bit per cell — not one byte per cell. Tight
+  packing cuts memory and, more importantly, lets one whole-word operation
+  replace a per-element loop (test the column span a tank covers against a row
+  word with a single mask-AND, instead of looping cells). Size the packing to a
+  stated constraint and guard it with a `_Static_assert` (a row ≤ 32 columns
+  fits one `uint32_t`). Keep the bit layout explicit in the data-protocol
+  comment, since JS reads the same words.
+  - *From:* "Grid should be stored as bits in integers. Array of uint32_t where
+    each is a row seems reasonable start."
+
 ## UI & presentation
 
 - **Design mobile-first; verify narrow widths before finishing.** A public web
