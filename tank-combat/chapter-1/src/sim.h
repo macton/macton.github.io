@@ -39,6 +39,6 @@ _Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");
 
 void sim_init(World* w);         /* load the level, place tanks, reset counters */
 void sim_tick(World* w);         /* advance one fixed step: turn then move */
-void sim_grid_changed(World* w); /* rebuild cell_move; call after editing grid */
+void sim_grid_changed(World* w); /* rebuild cell_escape; call after editing grid */
 
 #endif

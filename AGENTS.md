@@ -252,6 +252,16 @@ is not justified: decide from facts, not dogma (including the "rules" here).
   - *From:* "We also need to separate simulation from render completely so we can
     have a simulation only build for testing (which can be built and run on
     host, does not need to be wasm)."
+- **Prune what a refactor orphans; a rename isn't done until every reference is
+  updated.** Each change can leave dead surface (an export or function nothing
+  calls any more) and stale comments/docs (a field renamed `cell_move` →
+  `cell_escape` but described by the old name). Both violate other rules (no
+  speculative surface; keep the data contract honest), so after a change sweep
+  for newly-unused exports/code and references to the old name/shape, and remove
+  or update them. Periodically audit the whole codebase against these rules.
+  - *From:* "Sweep all the data and code so far for the rules we've established."
+    (Found two dead exports — `n_dirs`, `set_wall` — never called by the host,
+    and comments left stale by the cell_move→cell_escape rename.)
 
 ## Contracts & testing
 

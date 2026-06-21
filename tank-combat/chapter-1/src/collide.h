@@ -11,10 +11,10 @@
  * the footprint wrap around the arena, so this works across the seam. */
 int blocked(const uint32_t* grid, int32_t px, int32_t py);
 
-/* Build the per-cell escape-direction cache: cell_move[cy*GRID_W+cx] gets bit d
+/* Build the per-cell open-direction masks: cell_move[cy*GRID_W+cx] gets bit d
  * set if a tank centred in that cell can step one cell along direction d without
- * hitting a wall (wrapping included). This is the grid query the steer needs,
- * precomputed once per grid change instead of probed every tick. */
+ * hitting a wall (wrapping included). This is the intermediate that the escape
+ * table (tanks_build_escape) is built from, recomputed only on grid change. */
 void cells_build_move(uint32_t* cell_move, const uint32_t* grid);
 
 #endif

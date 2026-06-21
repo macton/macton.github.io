@@ -18,9 +18,9 @@
  *     tank_x_ptr tank_y_ptr tank_angle_ptr tank_input_ptr
  *     tank_vx_ptr tank_vy_ptr tank_hit_ptr
  *
- *   scalars: grid_w grid_h n_tanks n_dirs subcell inst_count inst_stride frame
+ *   scalars: grid_w grid_h n_tanks subcell inst_count inst_stride frame
  *   tunables: move_speed/set_move_speed   turn_rate/set_turn_rate
- *   debug pokes: set_tank_pose  set_wall  toggle_wall
+ *   debug pokes: set_tank_pose  toggle_wall
  * ---------------------------------------------------------------------------
  */
 
@@ -63,7 +63,6 @@ EXPORT(tank_hit_ptr)   uint8_t*  tank_hit_ptr(void)   { return g_world.tank_hit;
 EXPORT(grid_w)      uint32_t grid_w(void)      { return GRID_W; }
 EXPORT(grid_h)      uint32_t grid_h(void)      { return GRID_H; }
 EXPORT(n_tanks)     uint32_t n_tanks(void)     { return N_TANKS; }
-EXPORT(n_dirs)      uint32_t n_dirs(void)      { return N_DIRS; }
 EXPORT(subcell)     uint32_t subcell(void)     { return SUB; }
 EXPORT(inst_count)  uint32_t inst_count(void)  { return g_inst_count; }
 EXPORT(inst_stride) uint32_t inst_stride(void) { return (uint32_t)sizeof(Inst); }
@@ -81,13 +80,6 @@ EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_su
   g_world.tank_x[t] = (int16_t)wrap_x(x_sub); g_world.tank_y[t] = (int16_t)wrap_y(y_sub);
   g_world.tank_ang[t] = (uint16_t)ang;
   g_inst_count = build_instances(&g_world, g_inst);
-}
-EXPORT(set_wall) void set_wall(uint32_t cx, uint32_t cy, uint32_t v) {
-  if (cx < GRID_W && cy < GRID_H) {
-    if (v) g_world.grid[cy] |= (1u << cx); else g_world.grid[cy] &= ~(1u << cx);
-    sim_grid_changed(&g_world);   /* refresh the escape cache */
-    g_inst_count = build_instances(&g_world, g_inst);
-  }
 }
 EXPORT(toggle_wall) void toggle_wall(uint32_t cx, uint32_t cy) {
   if (cx < GRID_W && cy < GRID_H) {

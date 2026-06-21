@@ -123,7 +123,7 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    opening of a concave pocket — so holding a throttle never leaves it
    permanently stuck. This is the **movement contract** (`CONTRACT.md`), enforced
    by the native tests. `cell_escape` is rebuilt by `sim_grid_changed` only when
-   the grid changes (`init`, `set_wall`, `toggle_wall`): the nearest-open *scan*
+   the grid changes (`init`, `toggle_wall`): the nearest-open *scan*
    itself is precomputed for every cell × travel direction, so the per-tick path
    never searches — it reads one byte.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
