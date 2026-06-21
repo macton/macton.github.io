@@ -170,6 +170,32 @@ is not justified: decide from facts, not dogma (including the "rules" here).
     own files, to structurally reinforce independence. similarly, the
     boundary/data contract with the renderer can be structurally reinforced by
     putting those related data/function in their own files e.g. build_instances."
+- **Separate the core logic/simulation from I/O (render, GPU, wasm, network) so
+  the core builds and runs on the host under test.** Make the dependency
+  one-way: render/wasm depend on the sim; the sim depends on neither. Then tests
+  exercise the real logic with no browser, GPU, or device. Keep the sim's data
+  in a struct passed to its functions (a `World`), not hidden in the I/O layer.
+  - *From:* "We also need to separate simulation from render completely so we can
+    have a simulation only build for testing (which can be built and run on
+    host, does not need to be wasm)."
+
+## Contracts & testing
+
+- **When behavior the user relies on has emerged implicitly, make it an explicit
+  contract and test every case.** Write the promise down (what is guaranteed,
+  and the boundaries/non-promises), then enumerate the cases — including the
+  hard ones (convex corners, concave U-pockets, head-on, both throttles) and the
+  no-op case — and assert each. An implicit contract no one wrote down is one no
+  one can rely on or catch regressing.
+  - *From:* "We have now implicitly made a contract with the user ... So now we
+    need to make that contract explicit, and test all the cases. For instance,
+    you can get stuck in the corners of the map. Or ... three blocks in a U-shape
+    ... (Need to rotate out of it)."
+- **Prefer a general, robust rule over patching cases one at a time.** The
+  collision steering went through three iterations of per-case patches before
+  becoming one rule ("rotate toward the nearest direction you can actually
+  move") that covers flat walls, corners, and pockets together. When you're on
+  the second patch for the same behavior, step back and find the invariant.
 
 ## UI & presentation
 

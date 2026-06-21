@@ -18,19 +18,17 @@ static uint32_t push_quad(Inst* out, uint32_t k, int32_t cx, int32_t cy,
   return k + 1;
 }
 
-uint32_t build_instances(Inst* out, const uint32_t* grid,
-                         const int16_t* tank_x, const int16_t* tank_y,
-                         const uint16_t* tank_ang, uint32_t n_tanks) {
+uint32_t build_instances(const World* w, Inst* out) {
   uint32_t k = 0;
   for (int32_t r = 0; r < GRID_H; r++)
     for (int32_t c = 0; c < GRID_W; c++)
-      if ((grid[r] >> c) & 1u)
+      if ((w->grid[r] >> c) & 1u)
         k = push_quad(out, k, c * SUB + SUB / 2, r * SUB + SUB / 2,
                       123, 123, 16384, 0, COL_WALL);
-  for (uint32_t i = 0; i < n_tanks; i++) {
-    uint32_t di = tank_ang[i] >> ANGLE_SHIFT;
+  for (uint32_t i = 0; i < N_TANKS; i++) {
+    uint32_t di = w->tank_ang[i] >> ANGLE_SHIFT;
     int32_t co = dir_cos(di), si = dir_sin(di);
-    int32_t cx = tank_x[i], cy = tank_y[i];
+    int32_t cx = w->tank_x[i], cy = w->tank_y[i];
     k = push_quad(out, k, cx, cy, 87, 67, co, si, COL_BODY[i]);
     /* barrel: a short bar offset forward (0.34 cell == 87 subcells) */
     int32_t bx = cx + ((co * 87) >> TRIG_SHIFT);

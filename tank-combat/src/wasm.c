@@ -1,0 +1,96 @@
+/* wasm.c — the WebAssembly boundary. This is the ONLY wasm-specific file: it
+ * holds the single static World (so JS can read pointers into it) and the
+ * instance buffer, and exports the data protocol below. The simulation
+ * (sim.c) and renderer (render.c) know nothing about wasm.
+ *
+ * ---------------------------------------------------------------------------
+ * DATA PROTOCOL (JS <-> WASM)
+ * ---------------------------------------------------------------------------
+ * C owns every byte layout. JS never computes an offset; it asks C for the
+ * pointer/count it needs. The exported surface is the protocol:
+ *
+ *   init()                          load level + place tanks
+ *   tick()    -> inst_count         advance one fixed step, refill instances
+ *   set_input(tank, bits)           write a tank's input bitfield
+ *
+ *   pointers (into linear memory, read by JS each frame):
+ *     inst_ptr  grid_ptr
+ *     tank_x_ptr tank_y_ptr tank_angle_ptr tank_input_ptr
+ *     tank_vx_ptr tank_vy_ptr tank_hit_ptr
+ *
+ *   scalars: grid_w grid_h n_tanks n_dirs subcell inst_count inst_stride frame
+ *   tunables: move_speed/set_move_speed   turn_rate/set_turn_rate
+ *   debug pokes: set_tank_pose  set_wall  toggle_wall
+ * ---------------------------------------------------------------------------
+ */
+
+#include "sim.h"
+#include "render.h"
+
+#define EXPORT(name) __attribute__((export_name(#name)))
+
+static World    g_world;
+static Inst     g_inst[N_CELLS + N_TANKS * 2];
+static uint32_t g_inst_count;
+
+EXPORT(init) void init(void) {
+  sim_init(&g_world);
+  g_inst_count = build_instances(&g_world, g_inst);
+}
+
+EXPORT(tick) uint32_t tick(void) {
+  sim_tick(&g_world);
+  g_inst_count = build_instances(&g_world, g_inst);
+  return g_inst_count;
+}
+
+EXPORT(set_input) void set_input(uint32_t tank, uint32_t bits) {
+  if (tank < N_TANKS) g_world.tank_in[tank] = (uint8_t)bits;
+}
+
+/* pointers */
+EXPORT(inst_ptr)       Inst*     inst_ptr(void)       { return g_inst; }
+EXPORT(grid_ptr)       uint32_t* grid_ptr(void)       { return g_world.grid; }
+EXPORT(tank_x_ptr)     int16_t*  tank_x_ptr(void)     { return g_world.tank_x; }
+EXPORT(tank_y_ptr)     int16_t*  tank_y_ptr(void)     { return g_world.tank_y; }
+EXPORT(tank_angle_ptr) uint16_t* tank_angle_ptr(void) { return g_world.tank_ang; }
+EXPORT(tank_input_ptr) uint8_t*  tank_input_ptr(void) { return g_world.tank_in; }
+EXPORT(tank_vx_ptr)    int16_t*  tank_vx_ptr(void)    { return g_world.tank_vx; }
+EXPORT(tank_vy_ptr)    int16_t*  tank_vy_ptr(void)    { return g_world.tank_vy; }
+EXPORT(tank_hit_ptr)   uint8_t*  tank_hit_ptr(void)   { return g_world.tank_hit; }
+
+/* scalars */
+EXPORT(grid_w)      uint32_t grid_w(void)      { return GRID_W; }
+EXPORT(grid_h)      uint32_t grid_h(void)      { return GRID_H; }
+EXPORT(n_tanks)     uint32_t n_tanks(void)     { return N_TANKS; }
+EXPORT(n_dirs)      uint32_t n_dirs(void)      { return N_DIRS; }
+EXPORT(subcell)     uint32_t subcell(void)     { return SUB; }
+EXPORT(inst_count)  uint32_t inst_count(void)  { return g_inst_count; }
+EXPORT(inst_stride) uint32_t inst_stride(void) { return (uint32_t)sizeof(Inst); }
+EXPORT(frame)       uint32_t frame(void)       { return g_world.frame; }
+
+/* tunables */
+EXPORT(move_speed)     uint32_t move_speed(void)       { return g_world.move_speed; }
+EXPORT(set_move_speed) void set_move_speed(uint32_t v) { g_world.move_speed = (uint16_t)v; }
+EXPORT(turn_rate)      uint32_t turn_rate(void)        { return g_world.turn_rate; }
+EXPORT(set_turn_rate)  void set_turn_rate(uint32_t v)  { g_world.turn_rate = (uint16_t)v; }
+
+/* debug pokes */
+EXPORT(set_tank_pose) void set_tank_pose(uint32_t t, int32_t x_sub, int32_t y_sub, uint32_t ang) {
+  if (t >= N_TANKS) return;
+  g_world.tank_x[t] = (int16_t)x_sub; g_world.tank_y[t] = (int16_t)y_sub;
+  g_world.tank_ang[t] = (uint16_t)ang;
+  g_inst_count = build_instances(&g_world, g_inst);
+}
+EXPORT(set_wall) void set_wall(uint32_t cx, uint32_t cy, uint32_t v) {
+  if (cx < GRID_W && cy < GRID_H) {
+    if (v) g_world.grid[cy] |= (1u << cx); else g_world.grid[cy] &= ~(1u << cx);
+    g_inst_count = build_instances(&g_world, g_inst);
+  }
+}
+EXPORT(toggle_wall) void toggle_wall(uint32_t cx, uint32_t cy) {
+  if (cx < GRID_W && cy < GRID_H) {
+    g_world.grid[cy] ^= (1u << cx);
+    g_inst_count = build_instances(&g_world, g_inst);
+  }
+}

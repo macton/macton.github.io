@@ -10,9 +10,11 @@ It is built following Mike Acton's data-oriented design rules:
 — understand the real data first, then write the simplest machine that
 transforms the input you have into the output you need, at a cost you can state.
 
-**Step 1 (this commit):** two tanks, obstacles on a grid, movement, rotation,
-and collision against walls and the arena edge. A debug panel exposes and edits
-every datum live.
+**So far:** two tanks, obstacles on a grid, movement, rotation, and collision
+against walls and the arena edge, with an explicit, tested movement contract
+([`CONTRACT.md`](CONTRACT.md)): holding a throttle auto-rotates a tank out of
+walls, corners, and pockets so it never gets stuck. A debug panel exposes and
+edits every datum live.
 
 Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge, or
 Firefox Nightly).
@@ -23,15 +25,18 @@ Firefox Nightly).
 
 ## Why it's built this way
 
-- **All state is data, flat and static.** `game.c` owns the world arrays and
-  the exported boundary; the transforms live next to the data they touch.
+- **Simulation is fully separated from rendering and from wasm.** `sim.c` (the
+  `World` data + `sim_init`/`sim_tick`) is plain portable C that knows nothing
+  about WebGPU or WebAssembly. The renderer (`render.c`) reads the `World` and
+  is downstream; `wasm.c` is the only wasm-specific file. So the whole
+  simulation **builds and runs natively on the host** for testing — no browser,
+  no GPU (see *Testing* and `CONTRACT.md`).
+- **All state is data, flat and static.** The `World` is a handful of arrays.
   No objects, no hidden state.
 - **Independent transforms are separate files**, so the independence is
-  structural rather than a comment: `tanks_turn.c` (rotate headings) and
-  `tanks_move.c` (advance + resolve collision) share nothing; `render.c` holds
-  the renderer boundary (`build_instances` + the `Inst` data contract);
-  `dirtab.c` is the baked trig table shared by move and render. See *Source
-  layout* below.
+  structural rather than a comment: `tanks_turn.c`, `tanks_move.c`, and
+  `tanks_steer.c` each touch only their data; `collide.c` is the shared grid
+  query; `dirtab.c` is the baked trig table. See *Source layout* below.
 - **No dynamic allocation.** The module is freestanding wasm32 (`-nostdlib`,
   no libc, no libm). Every byte lives in static linear memory, sized at compile
   time. WASM memory is never grown, so the JS-side typed-array views over it
@@ -58,23 +63,34 @@ Firefox Nightly).
   buffer straight to the GPU and issues a single instanced draw.
 - **Explicit data protocol at the boundary.** C owns every byte of layout; JS
   never computes an offset — it asks C for the pointer or count it needs. The
-  exported function list *is* the protocol (see the header of `game.c`).
+  exported function list *is* the protocol (see the header of `wasm.c`).
 
 ## Source layout
+
+Simulation core (portable C, no render, no wasm):
 
 | file | responsibility |
 |------|----------------|
 | `src/defs.h` | shared sizes, input bits, exact-width types |
-| `src/game.c` | world state (data), `init`/`tick`, the exported protocol |
-| `src/tanks_turn.c/.h` | independent transform: rotate headings |
-| `src/tanks_move.c/.h` | independent transform: advance + resolve grid collision |
-| `src/tanks_steer.c/.h` | on collision, steer heading toward the slide direction (consumes the move output) |
-| `src/render.c/.h` | renderer boundary: `Inst` contract + `build_instances` |
-| `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset (shared by move + render) |
+| `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
+| `src/tanks_turn.c/.h` | transform: rotate headings by turn input |
+| `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
+| `src/tanks_steer.c/.h` | transform: steer a stuck throttled tank toward an opening |
+| `src/collide.c/.h` | shared grid collision query (`blocked`) |
+| `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
 
-The transforms take their data as parameters and reference no globals, so the
-file boundaries are real: nothing leaks between them. Only the `init`/`tick`/
-pointer functions are exported from the wasm (the internal transforms are not).
+Boundaries on top of the core:
+
+| file | responsibility |
+|------|----------------|
+| `src/render.c/.h` | reads `World` → `Inst` instance buffer (`build_instances`) |
+| `src/wasm.c` | the wasm boundary: static `World`, exports the data protocol |
+| `src/test.c` | native tests of the sim core (the movement contract) |
+
+`sim.c` does not include `render.h` or anything wasm — the dependency is
+one-way (render and wasm depend on sim, never the reverse). Transforms take
+their data as parameters and reference no globals. Only the protocol functions
+are exported from the wasm (the internal transforms are not).
 
 ## The data
 
@@ -98,14 +114,18 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected
-4. `tanks_steer` — for any tank that `hit` a wall while moving, rotate its
-   heading (at `turn_rate`) toward the nearer of the two directions parallel to
-   that wall. The wall orientation comes from which axis was blocked (`hit`
-   bit0 = x, bit1 = y), so it works at any approach angle, forward or reverse,
-   including head-on (a tank backing straight into a wall pivots to slide along
-   it instead of sticking facing away). In open space this does nothing
-5. `build_instances` — world state → packed integer instance buffer
-6. host copies the instance buffer to the GPU and draws `inst_count` quads
+4. `tanks_steer` — if a tank is driving (forward/back) but its travel direction
+   is blocked, rotate it (at `turn_rate`) toward the nearest of the 32
+   directions it can actually move. This slides it along flat walls, turns it
+   out of convex corners, and rotates it around to the opening of a concave
+   pocket — so holding a throttle never leaves it permanently stuck. This is the
+   **movement contract** (`CONTRACT.md`), enforced by the native tests. In open
+   space it does nothing.
+
+The render/host then: `build_instances` turns the `World` into the packed
+integer instance buffer, and the host copies it to the GPU and draws
+`inst_count` quads. (In the wasm build, `tick()` runs the sim step and refills
+the instance buffer; the simulation itself contains no rendering.)
 
 **Out-of-range / collision policy (explicit):** the arena edge and any wall
 cell count as blocked; a blocked axis move is *rejected* (the tank keeps its
@@ -120,18 +140,33 @@ Requires `clang` with the `wasm32` target and `wasm-ld` (LLVM ≥ 15). No
 emscripten.
 
 ```sh
-./build.sh        # writes game.wasm (~3.4 KB)
+./build.sh        # writes game.wasm (~3.9 KB)
 ```
 
 `game.wasm` is committed so GitHub Pages serves it without a build step.
 
+## Testing
+
+Because the simulation is separated from rendering and wasm, it builds and runs
+on the host:
+
+```sh
+./test.sh         # compiles the sim core + src/test.c with host clang, runs it
+```
+
+`src/test.c` sets up each movement-contract case on a `World` and asserts the
+outcome: open-space (no auto-steer), sliding along a flat wall, head-on into a
+wall (forward and reverse), convex corners, the arena's own corners, concave
+U-pockets (forward and reverse rotate out and exit), a 3000-tick roam of the
+real map (never stuck more than a few ticks), and "no throttle ⇒ no movement".
+No browser or GPU needed.
+
 ## Verified
 
-- Simulation tested in Node against `game.wasm`: tank placement, forward motion
-  (moves along heading, perpendicular axis unchanged), turning (angle/direction
-  index advance), wall collision (stops before interior walls), edge clamp
-  (stays ≥ tank radius), and instance count (`walls + tanks*2`). All instances
-  land inside the arena.
+- `./test.sh` passes (14 checks): the full movement contract above.
+- Simulation also exercised via `game.wasm` in Node (forward motion, collision,
+  pocket escape through the wasm path) — identical to native, as expected since
+  they share the same `sim.c`.
 - **Not** verified here: the live WebGPU render and on-screen touch pads — no
   GPU/browser in the build environment. The host uses standard WebGPU calls;
   render-test in a browser.

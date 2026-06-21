@@ -1,19 +1,22 @@
-/* tanks_steer — when a tank collides while moving, rotate its heading to run
- * parallel with the wall it hit, until aligned. Pipeline stage after
- * tanks_move: it consumes that transform's hit bitmask (which names the wall
- * orientation). */
+/* tanks_steer — keeps a throttled tank from getting stuck. When a tank is
+ * holding forward or backward and its travel direction is blocked, rotate it
+ * toward the nearest direction it can actually move, so it slides along flat
+ * walls, turns out of convex corners, and rotates around to the opening of a
+ * concave pocket. See CONTRACT.md.
+ *
+ * Pipeline stage after tanks_move. Self-contained: it re-probes the grid from
+ * the tank's position rather than depending on the move result. */
 #ifndef TANK_STEER_H
 #define TANK_STEER_H
 
 #include "defs.h"
 
-/* For each of n tanks blocked on exactly one axis this tick (hit[i] is 1 or 2),
- * rotate ang[i] toward the nearer of the two headings parallel to that wall, by
- * up to `rate` angle-units, snapping when aligned. Derived from the wall
- * orientation, not the velocity, so it works at any approach angle including
- * head-on (a tank backing straight into a wall pivots to slide along it instead
- * of sticking facing away). No effect when not blocked or wedged in a corner
- * (hit == 0 or 3). */
-void tanks_steer(uint16_t* ang, const uint8_t* hit, uint32_t n, uint16_t rate);
+/* For each of n tanks that is driving (forward or backward) but cannot move in
+ * its current travel direction, rotate ang[i] by up to `rate` toward the
+ * nearest of the 32 directions in which it could move. No effect on tanks in
+ * open space, stopped tanks, or tanks with no reachable opening. */
+void tanks_steer(const int16_t* x, const int16_t* y, uint16_t* ang,
+                 const uint8_t* in, uint32_t n, uint16_t rate,
+                 int32_t speed, const uint32_t* grid);
 
 #endif
