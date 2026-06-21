@@ -113,23 +113,24 @@ static uint32_t g_frame;
 static uint16_t g_move_speed = 20;      /* subcells per tick (~4.7 cells/sec)    */
 static uint16_t g_turn_rate  = 400;     /* angle units per tick                  */
 
-/* default map: '#' wall, '.' empty. This is data; init parses it once.     */
-static const char* const MAP[GRID_H] = {
-  "####################",
-  "#..................#",
-  "#..##..........##..#",
-  "#..##....##....##..#",
-  "#........##........#",
-  "#....##.......##...#",
-  "#....##.......##...#",
-  "#.........#........#",
-  "#....##.......##...#",
-  "#....##.......##...#",
-  "#........##........#",
-  "#..##....##....##..#",
-  "#..##..........##..#",
-  "#..................#",
-  "####################",
+/* initial level, stored directly as row bit-words (no parse step). The ASCII
+ * picture in each comment is just documentation; the word is the data.        */
+static const uint32_t GRID_INIT[GRID_H] = {  /* bit c == column c */
+  0xFFFFF,  /* #################### */
+  0x80001,  /* #..................# */
+  0x98019,  /* #..##..........##..# */
+  0x98619,  /* #..##....##....##..# */
+  0x80601,  /* #........##........# */
+  0x8C061,  /* #....##.......##...# */
+  0x8C061,  /* #....##.......##...# */
+  0x80401,  /* #.........#........# */
+  0x8C061,  /* #....##.......##...# */
+  0x8C061,  /* #....##.......##...# */
+  0x80601,  /* #........##........# */
+  0x98619,  /* #..##....##....##..# */
+  0x98019,  /* #..##..........##..# */
+  0x80001,  /* #..................# */
+  0xFFFFF,  /* #################### */
 };
 
 /* ------------------------------------------------------------------------ */
@@ -213,12 +214,7 @@ static uint32_t build_instances(void) {
 /* ------------------------------------------------------------------------ */
 
 EXPORT(init) void init(void) {
-  for (int32_t r = 0; r < GRID_H; r++) {
-    uint32_t row = 0;
-    for (int32_t c = 0; c < GRID_W; c++)
-      if (MAP[r][c] == '#') row |= (1u << c);
-    g_grid[r] = row;
-  }
+  for (int32_t r = 0; r < GRID_H; r++) g_grid[r] = GRID_INIT[r];
 
   /* place the two tanks in known-open cells, facing each other */
   g_tank_x[0] = (int16_t)(2  * SUB + SUB / 2); g_tank_y[0] = (int16_t)(7 * SUB + SUB / 2);

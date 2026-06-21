@@ -95,6 +95,15 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   comment, since JS reads the same words.
   - *From:* "Grid should be stored as bits in integers. Array of uint32_t where
     each is a row seems reasonable start."
+- **Author build-time data in its target representation; don't keep a source
+  form that must be transformed at runtime.** If the values are known when you
+  write the code, store them as what the program actually uses (grid rows as
+  bit-words), not as a convenient foreign form (ASCII strings) parsed every
+  init — that parse is an unnecessary step (can we not do this at all?). Keep
+  the human-readable form as a comment if it aids legibility; the comment is
+  documentation, the stored value is the data.
+  - *From:* "MAP does not need to exist. Values can be set in g_grid. This is an
+    unnecessary extra step."
 
 ## UI & presentation
 
