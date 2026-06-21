@@ -70,6 +70,14 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   - *From:* "Use stdint.h." / "Remove the typedef'd int types, just use stdint
     types directly … indirection and abstraction that is zero value; all of the
     value has already been managed by the existence of stdint."
+- **Size every field to the data's real domain, and make the rationale
+  explicit.** Be ready to justify each width; say which bits are semantically
+  used and which are precision. A heading stored as a `uint16_t` is a Q5.11
+  value — 5 bits select 1 of 32 directions, the low 11 are sub-direction turn
+  precision; document that so the width isn't a mystery (5 bits alone would
+  force whole-step turning). If a width can't be justified against the domain,
+  it is probably wrong.
+  - *From:* "Does tank angle require 16 bits?"
 
 ## Design / abstraction
 
@@ -104,6 +112,28 @@ data-oriented-design doc, (3) this file, (4) existing convention.
   documentation, the stored value is the data.
   - *From:* "MAP does not need to exist. Values can be set in g_grid. This is an
     unnecessary extra step."
+- **Use the established conventional format for well-known data.** Color is a
+  packed `uint32_t` RGBA8888, not a 4-`uint8_t` struct: it is the conventional
+  representation, it matches the GPU's `unorm8x4` byte order on little-endian,
+  and it drops a bespoke type. Prefer the convention the consumer already
+  speaks over a hand-made layout.
+  - *From:* "rgb(a) can be stored as uint32_t - it's a well-established
+    conventional format."
+
+## Code structure & module boundaries
+
+- **Make independence and boundaries structural, not just commented — put them
+  in separate files.** Independent transforms each get their own file
+  (`tanks_turn.c`, `tanks_move.c`) so they physically cannot share state; a
+  boundary/data contract (the renderer's `Inst` layout + `build_instances`)
+  gets its own file too. Transforms take their data as parameters and reference
+  no globals, so the separation is real. Export only the module's protocol from
+  the wasm; internal transforms stay unexported (rely on the `export_name`
+  attribute, not `--export-dynamic`).
+  - *From:* "put independent transforms like tanks_move and tanks_turn in their
+    own files, to structurally reinforce independence. similarly, the
+    boundary/data contract with the renderer can be structurally reinforced by
+    putting those related data/function in their own files e.g. build_instances."
 
 ## UI & presentation
 

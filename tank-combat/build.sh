@@ -11,10 +11,9 @@ clang \
   -fno-builtin \
   -Wall -Wextra \
   -Wl,--no-entry \
-  -Wl,--export-dynamic \
   -Wl,--initial-memory=1048576 \
   -Wl,--max-memory=1048576 \
   -Wl,--stack-first \
   -o game.wasm \
-  src/game.c
+  src/game.c src/tanks_turn.c src/tanks_move.c src/render.c src/dirtab.c
 echo "built game.wasm: $(wc -c < game.wasm) bytes"

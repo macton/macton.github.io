@@ -23,25 +23,35 @@ Firefox Nightly).
 
 ## Why it's built this way
 
-- **All state is data, flat and static.** `game.c` is the entire simulation: a
-  handful of arrays and the transforms over them. No objects, no hidden state.
+- **All state is data, flat and static.** `game.c` owns the world arrays and
+  the exported boundary; the transforms live next to the data they touch.
+  No objects, no hidden state.
+- **Independent transforms are separate files**, so the independence is
+  structural rather than a comment: `tanks_turn.c` (rotate headings) and
+  `tanks_move.c` (advance + resolve collision) share nothing; `render.c` holds
+  the renderer boundary (`build_instances` + the `Inst` data contract);
+  `dirtab.c` is the baked trig table shared by move and render. See *Source
+  layout* below.
 - **No dynamic allocation.** The module is freestanding wasm32 (`-nostdlib`,
   no libc, no libm). Every byte lives in static linear memory, sized at compile
   time. WASM memory is never grown, so the JS-side typed-array views over it
   stay valid for the life of the page.
 - **No floating point — integer fixed point throughout.** Positions and sizes
-  are *subcells* (256 subcells = 1 grid cell, Q8.8) stored as `i16`; the trig
-  table is Q14 (`value = trig * 16384`); colors are `u8`. The single place
-  fixed point becomes float is the vertex shader — the GPU is float hardware,
-  so that is its data format.
+  are *subcells* (256 subcells = 1 grid cell, Q8.8) stored as `int16_t`; the
+  trig table is Q14 (`value = trig * 16384`); colors are packed `uint32_t`
+  RGBA8888. The single place fixed point becomes float is the vertex shader —
+  the GPU is float hardware, so that is its data format.
 - **Fixed timestep, so there is no `dt` to multiply.** `tick()` advances one
   simulation step; the per-tick deltas (`move_speed`, `turn_rate`) *are* the
   data. The host runs ticks from a real-time accumulator at 60 Hz.
 - **Tanks are structure-of-arrays.** `x[]`, `y[]`, `angle[]`, `input[]`,
   `vx[]`, `vy[]` — each transform streams the one field it needs. Two tanks is
   just `count == 2`; the transforms are written for the batch.
-- **Heading is discrete data, not runtime trig.** A tank's heading is a `u16`
-  angle; `angle >> 11` indexes the 32-entry cos/sin table. No `sinf`, no libm.
+- **Heading is discrete data, not runtime trig.** A tank's heading is a
+  `uint16_t` *Q5.11* angle: the top 5 bits (`angle >> 11`) select 1 of 32
+  directions and index the baked cos/sin table; the low 11 bits are
+  sub-direction precision so `turn_rate` can be finer than one direction per
+  tick. No `sinf`, no libm.
 - **One transform produces the render data.** `build_instances()` turns world
   state into a packed integer instance buffer (16 bytes/quad). JS copies that
   buffer straight to the GPU and issues a single instanced draw.
@@ -49,17 +59,32 @@ Firefox Nightly).
   never computes an offset — it asks C for the pointer or count it needs. The
   exported function list *is* the protocol (see the header of `game.c`).
 
+## Source layout
+
+| file | responsibility |
+|------|----------------|
+| `src/defs.h` | shared sizes, input bits, exact-width types |
+| `src/game.c` | world state (data), `init`/`tick`, the exported protocol |
+| `src/tanks_turn.c/.h` | independent transform: rotate headings |
+| `src/tanks_move.c/.h` | independent transform: advance + resolve grid collision |
+| `src/render.c/.h` | renderer boundary: `Inst` contract + `build_instances` |
+| `src/dirtab.c/.h` | baked Q14 cos/sin table (shared by move + render) |
+
+The transforms take their data as parameters and reference no globals, so the
+file boundaries are real: nothing leaks between them. Only the `init`/`tick`/
+pointer functions are exported from the wasm (the internal transforms are not).
+
 ## The data
 
 | data | type | notes |
 |------|------|-------|
 | grid | `uint32_t[15]` | bitset: one word per row, bit c = column c (1 = wall) |
 | tank x, y | `int16_t[2]` each | subcells, 256 = 1 cell (Q8.8) |
-| tank angle | `uint16_t[2]` | `0..65535`, `>>11` → 1 of 32 directions |
+| tank angle | `uint16_t[2]` | Q5.11 heading: 5-bit direction (`>>11` → 1 of 32) + 11-bit turn fraction |
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT/FIRE |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
 | trig table | `int16_t[32]` ×2 | cos/sin in Q14 (`±16384`) |
-| instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint8 rgba |
+| instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
 Arena is the grid: 20×15 cells, 256 subcells per cell.
 
