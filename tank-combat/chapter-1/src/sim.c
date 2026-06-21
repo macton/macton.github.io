@@ -37,23 +37,21 @@ void sim_init(World* w) {
   w->frame = 0;
   w->move_speed = 20;   /* subcells per tick (~4.7 cells/sec at 60 Hz) */
   w->turn_rate  = 400;  /* angle units per tick                        */
-  sim_grid_changed(w);  /* build the escape-direction cache from the grid */
-}
 
-/* Rebuild the steer's escape table. Call after any change to the grid — far
- * less often than the steer reads it (every tick). Two stages: grid -> per-cell
- * open-direction masks (collision topology), then masks -> per-(cell,travel)
- * escape (the steer's scan, precomputed). The masks are a transient. */
-void sim_grid_changed(World* w) {
-  uint32_t cell_move[N_CELLS];
-  cells_build_move(cell_move, w->grid);
-  tanks_build_escape(w->cell_escape, cell_move);
+  /* Build the steer's escape table once. Two stages: the 16 local patterns ->
+   * per-pattern open-direction masks (collision topology), then masks ->
+   * per-(pattern,travel) escape (the steer's scan, precomputed). Both stages are
+   * grid-independent, so unlike a per-cell cache there is nothing to rebuild when
+   * the grid is edited — the per-tick lookup reads the cell's pattern live. */
+  uint32_t pattern_open[N_PATTERNS];
+  patterns_build_open(pattern_open);
+  tanks_build_escape(w->pattern_escape, pattern_open);
 }
 
 void sim_tick(World* w) {
   /* rotate: player turn + auto-steer out of last tick's collision */
   tanks_turn(w->tank_x, w->tank_y, w->tank_ang, w->tank_in, w->tank_hit,
-             N_TANKS, w->turn_rate, w->cell_escape);
+             N_TANKS, w->turn_rate, w->grid, w->pattern_escape);
   tanks_move(w->tank_x, w->tank_y, w->tank_vx, w->tank_vy, w->tank_hit,
              w->tank_ang, w->tank_in, N_TANKS, (int32_t)w->move_speed, w->grid);
   w->frame++;

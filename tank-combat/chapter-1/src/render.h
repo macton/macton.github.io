@@ -21,4 +21,12 @@ typedef struct { int16_t cx, cy, hx, hy, co, si; uint32_t rgba; } Inst;
  * into out and returns the count. */
 uint32_t build_instances(const World* w, Inst* out);
 
+/* Debug overlay: append small markers on exactly the grid cells the collision
+ * and steering code samples this tick for each *moving* tank — the leading-edge
+ * cell(s) movement tests (one colour) and the 4 orthogonal neighbours the steer
+ * reads when auto-steering (another). Makes the "small local pattern" visible.
+ * Appends after `k` existing instances; returns the new total. Writes up to
+ * N_TANKS*8 markers. */
+uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k);
+
 #endif

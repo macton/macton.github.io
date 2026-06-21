@@ -25,11 +25,14 @@ typedef struct {
   int16_t  tank_vy [N_TANKS];
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
   uint32_t grid    [GRID_H];    /* wall bitset, one row per word */
-  uint8_t  cell_escape[N_CELLS * N_DIRS];  /* steer lookup, derived from grid:
-                                 * indexed [cell*N_DIRS + travel_dir], gives the
-                                 * precomputed escape (bit5 = handedness, bits0-4
-                                 * = direction; 0xFF = none). The whole scan, done
-                                 * once per grid change instead of every tick. */
+  uint8_t  pattern_escape[N_PATTERNS * N_DIRS];  /* steer lookup, indexed
+                                 * [pattern*N_DIRS + travel_dir]: the precomputed
+                                 * nearest-open escape (bit5 = handedness, bits0-4
+                                 * = direction; 0xFF = none). `pattern` is a cell's
+                                 * 4-neighbour wall code, read live. The escape is
+                                 * a pure function of that pattern, so this table
+                                 * is grid-independent — built once, never per
+                                 * grid edit (16 rows, not one per cell). */
   uint32_t frame;
   uint16_t move_speed;          /* subcells per tick */
   uint16_t turn_rate;           /* angle units per tick */
@@ -37,8 +40,7 @@ typedef struct {
 
 _Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");
 
-void sim_init(World* w);         /* load the level, place tanks, reset counters */
+void sim_init(World* w);         /* load the level, place tanks, build escape table */
 void sim_tick(World* w);         /* advance one fixed step: turn then move */
-void sim_grid_changed(World* w); /* rebuild cell_escape; call after editing grid */
 
 #endif

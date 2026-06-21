@@ -15,17 +15,16 @@ static void check(int cond, const char* msg) {
 }
 
 /* --- scenario helpers ----------------------------------------------------- */
-/* These edit the grid and then refresh the escape cache, mirroring how real
- * grid edits work (sim_grid_changed / wasm set_wall). */
+/* These edit the grid directly. No cache to refresh: the steer reads each cell's
+ * 4-neighbour pattern live, and the pattern->escape table is grid-independent
+ * (built once in sim_init), so a grid edit takes effect on the next tick. */
 static void arena_open(World* w) {            /* border walls only */
   for (int r = 0; r < GRID_H; r++)
     w->grid[r] = (r == 0 || r == GRID_H - 1) ? ((1u << GRID_W) - 1u)
                                              : (1u | (1u << (GRID_W - 1)));
-  sim_grid_changed(w);
 }
 static void wall(World* w, int c, int r, int v) {
   if (v) w->grid[r] |= (1u << c); else w->grid[r] &= ~(1u << c);
-  sim_grid_changed(w);
 }
 static void place(World* w, int t, double cx, double cy, unsigned dir) {
   w->tank_x[t] = (int16_t)(cx * SUB);

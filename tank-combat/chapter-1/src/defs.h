@@ -10,6 +10,7 @@
 #define N_CELLS     (GRID_W * GRID_H)
 #define N_TANKS     2
 #define N_DIRS      32          /* discrete headings: angle >> ANGLE_SHIFT   */
+#define N_PATTERNS  16          /* a cell's 4 orthogonal-neighbour walls: NESW */
 #define ANGLE_SHIFT 11          /* 65536 >> 11 == 32                         */
 #define SUB         256         /* subcells per grid cell (Q8.8)             */
 #define SUB_SHIFT   8

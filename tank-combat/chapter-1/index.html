@@ -62,6 +62,9 @@
   button:hover { background: #353a47; }
   .stats { padding: 8px 10px; background: #000; border-radius: 6px; font-size: 13px; }
   .stats b { color: #fff; }
+  .chk { flex: 1.6; display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 13px; cursor: pointer; }
+  .chk input { accent-color: var(--acc); }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
   .nf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
   .nf span { color: var(--dim); font-size: 14px; }
   .nf input { width: 130px; padding: 4px 6px; background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 4px; }
@@ -181,12 +184,35 @@
     branch-free operations compute it. Tabulating first showed us which values we
     actually need; then the data told us we could drop the table.</p>
     <p>The escape, though, genuinely earns a table. "I want to go this way but I'm
-    stuck — which way should I turn?" is one lookup by (cell, direction). Even the
-    <em>search</em> for the nearest open direction is precomputed — for every cell
-    and every facing — because it only depends on the walls, and <em>the walls
-    almost never change while the tanks turn many times a second</em>. So it's
-    computed once when the grid changes (start up, or editing a wall) and just
-    read every tick. Match the work to how often the data actually changes.</p>
+    stuck — which way should I turn?" Even the <em>search</em> for the nearest open
+    direction is precomputed for every facing, because it depends only on the
+    walls around the tank. The question is: <em>which</em> walls?</p>
+
+    <h2>The response is a lookup into 16 local patterns</h2>
+    <p>Turn on <b>show sampled cells</b> in the controls above and drive into a
+    wall. Two colors light up the cells the code actually reads this tick:
+    <span class="swatch" style="background:#78e682"></span> the leading-edge
+    cell(s) the <strong>move</strong> tests, and
+    <span class="swatch" style="background:#e46edc"></span> the cells the
+    <strong>steer</strong> reads to decide which way to turn out.</p>
+    <p>The striking thing is how few there are. The steer only ever reads the
+    <strong>four orthogonal neighbours</strong> of the tank's cell — never the
+    diagonals. So the entire "which way can I go?" answer for a cell is a function
+    of just <strong>four bits</strong> (is there a wall north / east / south /
+    west). Four bits means only <strong>16 possible local situations</strong> in
+    the whole game. We verified this by grouping every cell of every map by its
+    4-neighbour pattern: cells that share a pattern always produce the identical
+    set of open directions.</p>
+    <p>That collapses the table dramatically. What could be "an escape direction
+    for every cell and every facing" (300 cells × 32 facings ≈ 9.6&nbsp;KB) is
+    really only <strong>16 patterns × 32 facings = 512 bytes</strong> — and
+    because a pattern is a pattern regardless of <em>where</em> it sits, the table
+    no longer depends on the map at all. It's built once, never rebuilt when you
+    edit a wall. Each tick the steer reads the tank cell's four neighbours (four
+    bit-tests), forms the 4-bit pattern, and does one lookup. The big realization
+    of data-oriented design in miniature: we thought the input was "the whole
+    grid," but the response only ever depended on a tiny local pattern, so the
+    real input — and the table — is tiny.</p>
 
     <h2>The movement contract</h2>
     <p>Holding forward (or backward) makes a promise: the tank keeps making
@@ -251,9 +277,11 @@
     <a href="src/sim.c">sim.c</a> ·
     <a href="src/tanks_turn.c">tanks_turn.c</a> ·
     <a href="src/tanks_move.c">tanks_move.c</a> ·
+    <a href="src/collide.c">collide.c</a> ·
     <a href="src/render.c">render.c</a> ·
     <a href="src/wasm.c">wasm.c</a> ·
     <a href="src/test.c">test.c</a> ·
+    <a href="tools/analyze_samples.c">analyze_samples.c</a> ·
     <a href="README.md">README</a> ·
     <a href="CONTRACT.md">CONTRACT</a></p>
   </article>

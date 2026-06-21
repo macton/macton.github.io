@@ -88,7 +88,7 @@ async function main() {
   const GH     = wasm.grid_h();
   const SUB    = wasm.subcell();
   const STRIDE = wasm.inst_stride();          // bytes per instance (16)
-  const MAX_INST = GW * GH + NT * 2;
+  const MAX_INST = wasm.inst_max();           // capacity C reserves (incl. sample overlay)
 
   // views into wasm memory (stable: memory never grows)
   const view = {
@@ -245,6 +245,14 @@ function mountWidgets(wasm, view, dims) {
     bPause.addEventListener("click", () => { const v = bPause.textContent === "Pause"; bPause.textContent = v ? "Resume" : "Pause"; api.onPause && api.onPause(v); });
     bStep.addEventListener("click", () => api.onStep && api.onStep());
     bReset.addEventListener("click", () => api.onReset && api.onReset());
+    // toggle the sampled-cell overlay (green = movement edge, magenta = steer neighbours)
+    if (wasm.set_show_samples) {
+      const lab = el("label", "chk");
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = true;
+      const sp = el("span"); sp.textContent = "show sampled cells";
+      cb.addEventListener("change", () => wasm.set_show_samples(cb.checked ? 1 : 0));
+      lab.append(cb, sp); cc.append(lab);
+    }
   }
 
   // stats: frame / timing / instance + wall counts / memory

@@ -39,6 +39,17 @@ Firefox Nightly).
   rotation (player turn + auto-steer, since both write the heading) and
   `tanks_move.c` owns position; `collide.c` is the shared grid query; `dirtab.c`
   is the baked trig table. See *Source layout* below.
+- **The steer response is a lookup into 16 local patterns.** The escape search
+  only ever reads a cell's **4 orthogonal neighbours** (never diagonals), so a
+  cell's whole set of open directions is a function of a **4-bit pattern** (wall
+  N/E/S/W) — only 16 possibilities. The escape table is therefore `16 × 32`
+  (pattern × facing) = **512 bytes**, not one row per cell (≈9.6 KB), and it is
+  **grid-independent**: built once, never rebuilt on a wall edit. Each tick the
+  steer reads the tank cell's 4 neighbours live and does one lookup. Proven on
+  the host by `analyze.sh` (cells sharing a pattern always yield the identical
+  open set). This is the project's central lesson: the response depended not on
+  "the grid" but on a tiny local pattern, so the real input — and the table — is
+  tiny.
 - **No dynamic allocation.** The module is freestanding wasm32 (`-nostdlib`,
   no libc, no libm). Every byte lives in static linear memory, sized at compile
   time. WASM memory is never grown, so the JS-side typed-array views over it
@@ -77,16 +88,17 @@ Simulation core (portable C, no render, no wasm):
 | `src/sim.c/.h` | the `World` data + `sim_init`/`sim_tick` |
 | `src/tanks_turn.c/.h` | transform: all heading rotation (player turn + auto-steer); builds the escape table (`tanks_build_escape`) |
 | `src/tanks_move.c/.h` | transform: advance + resolve grid collision (sets `hit`) |
-| `src/collide.c/.h` | per-axis leading-edge collision (`blocked_x`/`blocked_y`) + per-cell open-direction masks (`cells_build_move`) |
+| `src/collide.c/.h` | per-axis leading-edge collision (`blocked_x`/`blocked_y`); a cell's 4-neighbour pattern (`cell_pattern`); the 16 per-pattern open-direction masks (`patterns_build_open`) |
 | `src/dirtab.c/.h` | baked Q14 cos table, sin derived by quarter-turn offset |
 
 Boundaries on top of the core:
 
 | file | responsibility |
 |------|----------------|
-| `src/render.c/.h` | reads `World` → `Inst` instance buffer (`build_instances`) |
+| `src/render.c/.h` | reads `World` → `Inst` instance buffer (`build_instances`); debug `build_sample_overlay` marks the cells sampled this tick |
 | `src/wasm.c` | the wasm boundary: static `World`, exports the data protocol |
 | `src/test.c` | native tests of the sim core (the movement contract) |
+| `tools/analyze_samples.c` | host analysis: which cells are sampled, and the 16-pattern collapse (`analyze.sh`) |
 
 `sim.c` does not include `render.h` or anything wasm — the dependency is
 one-way (render and wasm depend on sim, never the reverse). Transforms take
@@ -103,7 +115,7 @@ are exported from the wasm (the internal transforms are not).
 | tank input | `uint8_t[2]` | bits: FWD/BACK/LEFT/RIGHT |
 | tank vx, vy | `int16_t[2]` each | last tick's applied move, subcells |
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
-| cell_escape | `uint8_t[20*15*32]` | steer lookup `[cell*32 + travel]`: precomputed nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). Rebuilt only on grid change |
+| pattern_escape | `uint8_t[16*32]` | steer lookup `[pattern*32 + travel]`: precomputed nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). `pattern` = the cell's 4-neighbour wall code, read live. Grid-independent → built once, never rebuilt |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
 | instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
 
@@ -117,15 +129,16 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    offset — these are simple bit functions, so no table is needed. The player's
    turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank
    collided last tick (`hit`) while driving, **auto-steer** is a single lookup:
-   `cell_escape[cell*32 + travel]` gives the nearest open direction (and the
-   handedness to turn), and it rotates (at `turn_rate`) toward it. That slides it
-   along flat walls, turns it out of convex corners, and rotates it around to the
-   opening of a concave pocket — so holding a throttle never leaves it
+   it reads the tank cell's 4-neighbour pattern live (`cell_pattern`, 4 bit-tests)
+   and `pattern_escape[pattern*32 + travel]` gives the nearest open direction (and
+   the handedness to turn), and it rotates (at `turn_rate`) toward it. That slides
+   it along flat walls, turns it out of convex corners, and rotates it around to
+   the opening of a concave pocket — so holding a throttle never leaves it
    permanently stuck. This is the **movement contract** (`CONTRACT.md`), enforced
-   by the native tests. `cell_escape` is rebuilt by `sim_grid_changed` only when
-   the grid changes (`init`, `toggle_wall`): the nearest-open *scan*
-   itself is precomputed for every cell × travel direction, so the per-tick path
-   never searches — it reads one byte.
+   by the native tests. `pattern_escape` is built once (`sim_init`): the
+   nearest-open *scan* is precomputed for every pattern × travel direction, and
+   because the open set depends only on the 4-bit pattern it is grid-independent
+   — a wall edit changes which pattern a cell reads, not the table.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
    angle; sets `hit` when an intended axis move was rejected.
@@ -166,7 +179,7 @@ Requires `clang` with the `wasm32` target and `wasm-ld` (LLVM ≥ 15). No
 emscripten.
 
 ```sh
-./build.sh        # writes game.wasm (~3.9 KB)
+./build.sh        # writes game.wasm (~5.7 KB)
 ```
 
 `game.wasm` is committed so GitHub Pages serves it without a build step.
@@ -178,6 +191,7 @@ on the host:
 
 ```sh
 ./test.sh         # compiles the sim core + src/test.c with host clang, runs it
+./analyze.sh      # prints the sampled-cell analysis + the 16-pattern collapse
 ```
 
 `src/test.c` sets up each movement-contract case on a `World` and asserts the
@@ -189,10 +203,15 @@ No browser or GPU needed.
 
 ## Verified
 
-- `./test.sh` passes (14 checks): the full movement contract above.
+- `./test.sh` passes (18 checks): the full movement contract above.
+- `./analyze.sh` confirms the steer samples only the 4 orthogonal neighbours and
+  that the open-direction response is a pure function of the 16 local patterns
+  (so the pattern-keyed table is exactly equivalent to the old per-cell one).
+- The pattern refactor was checked to be behaviour-identical: all 18 contract
+  tests still pass unchanged.
 - Simulation also exercised via `game.wasm` in Node (forward motion, collision,
-  pocket escape through the wasm path) — identical to native, as expected since
-  they share the same `sim.c`.
+  pocket escape, the sample overlay through the wasm path) — identical to native,
+  as expected since they share the same `sim.c`.
 - **Not** verified here: the live WebGPU render and on-screen touch pads — no
   GPU/browser in the build environment. The host uses standard WebGPU calls;
   render-test in a browser.
