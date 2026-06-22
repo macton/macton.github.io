@@ -4,23 +4,26 @@
 #include "escape_table.h"   /* PATTERN_ESCAPE — generated, baked in */
 
 /* initial level, stored directly as row bit-words (no parse step). The ASCII
- * picture in each comment is just documentation; the word is the data.       */
+ * picture in each comment is just documentation; the word is the data. Each
+ * outer edge has a one-cell gap at its centre, matched across opposite edges
+ * (top/bottom at column 10, left/right at row 7), so the toroidal wrap passes
+ * straight through by default.                                                 */
 static const uint32_t GRID_INIT[GRID_H] = {  /* bit c == column c */
-  0xFFFFF,  /* #################### */
+  0xFFBFF,  /* ##########.######### */
   0x80001,  /* #..................# */
   0x98019,  /* #..##..........##..# */
   0x98619,  /* #..##....##....##..# */
   0x80601,  /* #........##........# */
   0x8C061,  /* #....##.......##...# */
   0x8C061,  /* #....##.......##...# */
-  0x80401,  /* #.........#........# */
+  0x00400,  /* ..........#......... */
   0x8C061,  /* #....##.......##...# */
   0x8C061,  /* #....##.......##...# */
   0x80601,  /* #........##........# */
   0x98619,  /* #..##....##....##..# */
   0x98019,  /* #..##..........##..# */
   0x80001,  /* #..................# */
-  0xFFFFF,  /* #################### */
+  0xFFBFF,  /* ##########.######### */
 };
 
 void sim_init(World* w) {

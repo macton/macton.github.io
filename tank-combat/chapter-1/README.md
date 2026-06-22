@@ -166,9 +166,11 @@ the instance buffer; the simulation itself contains no rendering.)
 **Toroidal arena (explicit):** there is no hard edge — the world wraps. A tank
 crossing an edge reappears on the opposite side; collision depends only on the
 wall on the far side, so two opposite open edges let it pass through, while an
-opposite wall stops it (at wrapped coordinates). The default map has a full
-border, so it plays as a closed arena until you open a border cell. A blocked
-axis move is *rejected* (the tank keeps its old coordinate on that axis).
+opposite wall stops it (at wrapped coordinates). The default map has a one-cell
+gap at the centre of each edge, matched across opposite edges (top/bottom at
+column 10, left/right at row 7), so the wrap is usable straight away — drive
+through a gap and you reappear on the opposite side. A blocked axis move is
+*rejected* (the tank keeps its old coordinate on that axis).
 
 **Leading-edge collision (explicit):** because a tank steps less than one cell
 per tick and its previous cell was already clear, only the leading edge can hit

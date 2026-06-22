@@ -250,12 +250,13 @@
     <h2>The map wraps around</h2>
     <p>There is no hard edge: the arena is a torus. Drive off one side and you
     reappear on the other — and whether you can cross depends only on the wall on
-    the far side. Open a cell on two opposite edges (toggle them in the grid
-    above) and a tank passes straight through; if the far side has a wall, you
-    collide with <em>that</em> wall instead. The default map has a solid border,
-    so it plays closed until you punch a hole in it. In the data this is just
-    arithmetic: positions are taken modulo the arena size, and the collision
-    check reads the grid at wrapped coordinates.</p>
+    the far side. The default map already has a one-cell gap at the centre of
+    each edge, matched across opposite edges, so a tank driving out through one
+    reappears from the opposite one; if the far side has a wall instead, you
+    collide with <em>that</em> wall. (Toggle border cells in the grid above to
+    open or close your own crossings.) In the data this is just arithmetic:
+    positions are taken modulo the arena size, and the collision check reads the
+    grid at wrapped coordinates.</p>
 
     <h2>An explicit data protocol to the screen</h2>
     <p>The simulation never talks to the GPU. Instead one transform turns the

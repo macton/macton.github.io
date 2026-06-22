@@ -77,7 +77,8 @@ down in `CONTRACT.md` and assert every case in the native tests:
 - **The arena is a torus.** Positions wrap; there is no hard edge. Whether you
   can cross an edge depends only on the wall on the *far* side — two opposite
   open edges let a tank pass through, an opposite wall stops it. (The default map
-  has a full border, so it plays closed until a border cell is opened.)
+  has a one-cell gap at the centre of each edge, matched across opposite edges,
+  so the wrap is usable by default.)
 - **A held throttle never leaves a tank permanently stuck.** If a driving tank is
   against a wall, corner, or in a concave pocket, it auto-rotates toward the
   nearest direction it can actually move and drives out — for both forward and
