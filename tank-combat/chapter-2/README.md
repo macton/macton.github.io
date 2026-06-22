@@ -41,6 +41,11 @@ and wraps at the big-grid edge, so:
   `src/map_data.c`) gives every screen solid borders with a one-cell gap at the
   centre of each side; the gaps line up across inner borders and the outer wrap,
   so the whole world is one connected toroidal grid (64 connecting edge points).
+  Each of the 16 screens has a **distinct interior** (open, blocks, pillars, rooms,
+  dead-ends, a maze, an enclosed *island* of unreachable cells, …) — drawn freely,
+  then the centre cross and gaps are punched open last so connectivity holds
+  regardless of the art. The generator runs a connectivity self-check and fails the
+  build if any screen's four gaps aren't joined.
 
 ## Two tank classes, stored as a partition
 
