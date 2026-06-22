@@ -185,6 +185,23 @@ static void t_no_throttle(void) {
   check(w.tank_xy[0] == xy0, "stays put when not driving");
 }
 
+static void t_manual_turn_suppresses_steer(void) {
+  printf("manual turn while colliding suppresses auto-steer:\n");
+  World w; sim_init(&w); arena_open(&w);
+  for (int c = 1; c <= 18; c++) wall(&w, c, 9, 1);   /* flat wall on row 9 */
+  place(&w, 0, 9.5, 8.4, 8);                          /* head-on into the wall (facing +y) */
+  w.tank_in[0] = IN_FWD | IN_RIGHT;                   /* drive + manual right */
+  int pure = 1;
+  for (int i = 0; i < 24; i++) {
+    uint16_t a0 = w.tank_ang[0];
+    sim_tick(&w);
+    /* manual turn applies exactly turn_rate/tick; if auto-steer also fired while
+     * colliding, the per-tick delta would differ from turn_rate */
+    if ((uint16_t)(w.tank_ang[0] - a0) != w.turn_rate) pure = 0;
+  }
+  check(pure, "heading turns by exactly turn_rate/tick (auto-steer suppressed)");
+}
+
 int main(void) {
   t_open_space();
   t_flat_wall_slide();
@@ -199,6 +216,7 @@ int main(void) {
   t_wrap_through();
   t_wrap_blocked();
   t_no_throttle();
+  t_manual_turn_suppresses_steer();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
 }

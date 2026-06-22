@@ -142,8 +142,9 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
 2. `tanks_turn` — rotate the heading. The input bits decode branch-free into a
    turn direction, a throttle sign, and (when reversing) a half-turn travel
    offset — these are simple bit functions, so no table is needed. The player's
-   turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank
-   collided last tick (`hit`) while driving, **auto-steer** is a single lookup:
+   turn is ±`turn_rate` per LEFT/RIGHT (wraps). Then, if the tank collided last
+   tick (`hit`) while driving **and the player isn't turning**, **auto-steer** is
+   a single lookup:
    it reads the tank cell's 4-neighbour pattern live (`cell_pattern`, 4 bit-tests)
    and `pattern_escape[pattern*32 + travel]` gives the nearest open direction (and
    the handedness to turn), and it rotates (at `turn_rate`) toward it. That slides
@@ -223,7 +224,8 @@ No browser or GPU needed.
 
 ## Verified
 
-- `./test.sh` passes (18 checks): the full movement contract above.
+- `./test.sh` passes (19 checks): the full movement contract above, including
+  that manual turn input suppresses auto-steer.
 - `./analyze.sh` confirms the steer samples only the 4 orthogonal neighbours and
   that the open-direction response is a pure function of the 16 local patterns
   (so the pattern-keyed table is exactly equivalent to the old per-cell one).

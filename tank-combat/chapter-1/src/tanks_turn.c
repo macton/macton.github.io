@@ -20,8 +20,10 @@ void tanks_turn(const uint32_t* xy, uint16_t* ang,
     /* player's manual turn */
     ang[i] = (uint16_t)((int32_t)ang[i] + (int32_t)rate * turn);   /* wraps mod 65536 */
 
-    /* auto-steer out of a collision seen last tick (else nothing to do) */
-    if (hit[i] == 0 || thr == 0) continue;
+    /* auto-steer out of a collision seen last tick — but only when the player is
+     * not steering. Any manual turn in the input (LEFT or RIGHT held) means the
+     * player owns the heading this tick; don't fight or augment it. */
+    if (hit[i] == 0 || thr == 0 || (b & (IN_LEFT | IN_RIGHT))) continue;
 
     /* the tank cell's 4-neighbour pattern, read live (4 bits) — that is all the
      * steer needs; the escape per (pattern,travel) is the precomputed table */

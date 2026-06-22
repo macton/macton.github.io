@@ -231,7 +231,9 @@
     transform's auto-steer rotates it toward the nearest direction it can actually
     move — so it slides along flat walls, turns out of corners (including the
     arena's own), and rotates around to the mouth of a dead-end pocket. It never
-    stays permanently stuck unless it is truly sealed in.</p>
+    stays permanently stuck unless it is truly sealed in. Auto-steer only acts
+    when you are <em>not</em> turning: hold left or right and the heading is
+    yours, so you can steer freely — even straight into a wall.</p>
     <p>This promise is written down in <a href="CONTRACT.md">CONTRACT.md</a> and
     checked by a suite of native tests (more below). Crank the speed and turn
     rate and drive into walls to feel it — turning is gradual at
