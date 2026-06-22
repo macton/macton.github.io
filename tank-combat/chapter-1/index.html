@@ -235,11 +235,14 @@
     when you are <em>not</em> turning: hold left or right and the heading is
     yours, so you can steer freely — even straight into a wall.</p>
     <p>This promise is written down in <a href="CONTRACT.md">CONTRACT.md</a> and
-    checked by a suite of native tests (more below). Crank the speed and turn
-    rate and drive into walls to feel it — turning is gradual at
-    <code>turn_rate</code> angle-units per tick:</p>
+    checked by a suite of native tests (more below). A tank that is still in
+    contact with a wall (it was blocked last tick) moves at a fraction of its
+    speed — <code>collide_scale</code> out of 256, 128 = half — so it eases
+    against walls rather than grinding at full speed, then picks back up once it
+    slides clear. Crank the speed, turn rate, and collision scale and drive into
+    walls to feel it:</p>
     <div class="fig">
-      <p class="cap">tunables · live-editable per-tick amounts</p>
+      <p class="cap">tunables · live-editable per-tick amounts (collide_scale is out of 256)</p>
       <div id="w-tunables"></div>
     </div>
     <p class="note">Two details make this robust. The escape turn always rotates

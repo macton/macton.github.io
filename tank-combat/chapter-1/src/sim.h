@@ -30,6 +30,7 @@ typedef struct {
   uint32_t frame;
   uint16_t move_speed;          /* subcells per tick */
   uint16_t turn_rate;           /* angle units per tick */
+  uint16_t collide_scale;       /* speed scale while colliding, Q0.8 (256 = full, 128 = 50%) */
 } World;
 
 _Static_assert(GRID_W <= 32, "a grid row must fit in one uint32_t");

@@ -5,6 +5,7 @@
  * Build & run: ./test.sh  (compiles sim + transforms + this file with host cc) */
 
 #include "sim.h"
+#include "tanks_move.h"
 #include <stdio.h>
 
 static int g_checks = 0, g_fails = 0;
@@ -202,6 +203,26 @@ static void t_manual_turn_suppresses_steer(void) {
   check(pure, "heading turns by exactly turn_rate/tick (auto-steer suppressed)");
 }
 
+static void t_collide_slowdown(void) {
+  printf("collide_scale reduces move speed while colliding:\n");
+  World w; sim_init(&w); arena_open(&w);     /* open arena, clear interior */
+  w.tank_xy[0]  = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2);
+  w.tank_ang[0] = 0;                          /* east: cos = 1, so vx == speed */
+  w.tank_in[0]  = IN_FWD;
+  /* drive tanks_move directly with a controlled hit, bypassing auto-steer */
+  uint8_t hit_clear[N_TANKS] = {0};
+  uint8_t hit_coll[N_TANKS]  = {0}; hit_coll[0] = 2;   /* "blocked last tick" */
+  tanks_move(w.tank_xy, w.tank_vxy, hit_clear, w.tank_ang, w.tank_in, N_TANKS,
+             w.move_speed, w.collide_scale, w.grid);
+  int v_full = xy_lo(w.tank_vxy[0]);
+  tanks_move(w.tank_xy, w.tank_vxy, hit_coll, w.tank_ang, w.tank_in, N_TANKS,
+             w.move_speed, w.collide_scale, w.grid);
+  int v_coll = xy_lo(w.tank_vxy[0]);
+  check(v_full == w.move_speed, "full speed when not colliding");
+  check(v_coll == (((int)w.move_speed * (int)w.collide_scale) >> 8),
+        "scaled speed when colliding (collide_scale/256)");
+}
+
 int main(void) {
   t_open_space();
   t_flat_wall_slide();
@@ -217,6 +238,7 @@ int main(void) {
   t_wrap_blocked();
   t_no_throttle();
   t_manual_turn_suppresses_steer();
+  t_collide_slowdown();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
 }

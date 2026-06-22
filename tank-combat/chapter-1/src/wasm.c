@@ -19,7 +19,7 @@
  *     tank_vxy_ptr (packed vx|vy<<16) tank_hit_ptr
  *
  *   scalars: grid_w grid_h n_tanks subcell inst_count inst_max inst_stride frame
- *   tunables: move_speed/set_move_speed   turn_rate/set_turn_rate
+ *   tunables: move_speed/set_move_speed  turn_rate/set_turn_rate  collide_scale/set_collide_scale
  *   debug pokes: set_tank_pose  toggle_wall  set_show_samples
  * ---------------------------------------------------------------------------
  */
@@ -80,6 +80,8 @@ EXPORT(move_speed)     uint32_t move_speed(void)       { return g_world.move_spe
 EXPORT(set_move_speed) void set_move_speed(uint32_t v) { g_world.move_speed = (uint16_t)v; }
 EXPORT(turn_rate)      uint32_t turn_rate(void)        { return g_world.turn_rate; }
 EXPORT(set_turn_rate)  void set_turn_rate(uint32_t v)  { g_world.turn_rate = (uint16_t)v; }
+EXPORT(collide_scale)     uint32_t collide_scale(void)       { return g_world.collide_scale; }
+EXPORT(set_collide_scale) void set_collide_scale(uint32_t v) { g_world.collide_scale = (uint16_t)v; }
 
 /* debug pokes */
 EXPORT(set_show_samples) void set_show_samples(uint32_t on) { g_show_samples = on ? 1u : 0u; g_inst_count = rebuild(); }

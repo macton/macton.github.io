@@ -14,6 +14,6 @@
  * value names the wall orientation), 0 = no collision. */
 void tanks_move(uint32_t* xy, uint32_t* vxy, uint8_t* hit,
                 const uint16_t* ang, const uint8_t* in, uint32_t n,
-                int32_t speed, const uint32_t* grid);
+                int32_t speed, int32_t coll_scale, const uint32_t* grid);
 
 #endif

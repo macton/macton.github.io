@@ -157,7 +157,9 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    (`src/escape_table.c`). A wall edit just changes which pattern a cell reads.
 3. `tanks_move` — step along the heading by `move_speed` subcells, resolving
    collision one axis at a time so a tank slides along a wall it hits at an
-   angle; sets `hit` when an intended axis move was rejected.
+   angle; sets `hit` when an intended axis move was rejected. If the tank was
+   colliding last tick (`hit`), the step is scaled by `collide_scale` (Q0.8,
+   default 128 = 50%) so it eases against walls; clear of contact, full speed.
 
 The render/host then: `build_instances` turns the `World` into the packed
 integer instance buffer, and the host copies it to the GPU and draws
@@ -224,8 +226,9 @@ No browser or GPU needed.
 
 ## Verified
 
-- `./test.sh` passes (19 checks): the full movement contract above, including
-  that manual turn input suppresses auto-steer.
+- `./test.sh` passes (21 checks): the full movement contract above, including
+  that manual turn input suppresses auto-steer and that a colliding tank moves at
+  `collide_scale` of `move_speed`.
 - `./analyze.sh` confirms the steer samples only the 4 orthogonal neighbours and
   that the open-direction response is a pure function of the 16 local patterns
   (so the pattern-keyed table is exactly equivalent to the old per-cell one).

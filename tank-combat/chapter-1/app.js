@@ -267,17 +267,20 @@ function mountWidgets(wasm, view, dims) {
     });
   }
 
-  // tunables: move_speed / turn_rate (live-editable)
+  // tunables: move_speed / turn_rate / collide_scale (live-editable)
   const tc = at("w-tunables");
   if (tc) {
     const speed = numField("move_speed (sub/tick)", 0, 256, 1, wasm.move_speed());
     const turn  = numField("turn_rate (ang/tick)", 0, 4000, 25, wasm.turn_rate());
+    const coll  = numField("collide_scale (/256)", 0, 256, 16, wasm.collide_scale());
     speed.input.addEventListener("change", () => wasm.set_move_speed(parseInt(speed.input.value) | 0));
     turn.input.addEventListener("change", () => wasm.set_turn_rate(parseInt(turn.input.value) | 0));
-    tc.append(speed.wrap, turn.wrap);
+    coll.input.addEventListener("change", () => wasm.set_collide_scale(parseInt(coll.input.value) | 0));
+    tc.append(speed.wrap, turn.wrap, coll.wrap);
     updaters.push(() => {
       if (focused() !== speed.input) speed.input.value = wasm.move_speed();
       if (focused() !== turn.input)  turn.input.value  = wasm.turn_rate();
+      if (focused() !== coll.input)  coll.input.value  = wasm.collide_scale();
     });
   }
 

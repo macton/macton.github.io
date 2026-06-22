@@ -20,7 +20,11 @@ Concretely, each tick the simulation:
    auto-steer that turns it (at `turn_rate`) toward the nearest of the 32
    directions it *can* move,
 2. moves the tank along its heading, resolving collision one axis at a time so
-   it slides along a wall it meets at an angle (`tanks_move`).
+   it slides along a wall it meets at an angle (`tanks_move`). While the tank is
+   still in contact (it was blocked on the previous tick), it moves at a reduced
+   speed — `collide_scale` of `move_speed`, default 50% — so it eases against a
+   wall instead of grinding at full speed; once it slides clear it is back to
+   full speed.
 
 "Travel direction" is the heading when moving forward, and the heading turned
 180° when reversing (a reversing tank faces opposite its motion).
