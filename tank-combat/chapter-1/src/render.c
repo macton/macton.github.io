@@ -29,7 +29,7 @@ static uint32_t mark(Inst* out, uint32_t k, int32_t cx, int32_t cy, uint32_t rgb
 #define WC(c) ((c) < 0 ? (c) + GRID_W : ((c) >= GRID_W ? (c) - GRID_W : (c)))
 #define WR(r) ((r) < 0 ? (r) + GRID_H : ((r) >= GRID_H ? (r) - GRID_H : (r)))
 
-uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k) {
+static uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k) {
   for (uint32_t i = 0; i < N_TANKS; i++) {
     int32_t thr = (int32_t)((w->tank_in[i] & IN_FWD) != 0)
                 - (int32_t)((w->tank_in[i] & IN_BACK) != 0);
@@ -62,13 +62,21 @@ uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k) {
   return k;
 }
 
-uint32_t build_instances(const World* w, Inst* out) {
+/* static walls — one quad per wall cell. Changes only with the grid. */
+uint32_t build_walls(const World* w, Inst* out) {
   uint32_t k = 0;
   for (int32_t r = 0; r < GRID_H; r++)
     for (int32_t c = 0; c < GRID_W; c++)
       if ((w->grid[r] >> c) & 1u)
         k = push_quad(out, k, c * SUB + SUB / 2, r * SUB + SUB / 2,
                       123, 123, 16384, 0, COL_WALL);
+  return k;
+}
+
+/* dynamic quads — tank bodies + barrels, then the sample overlay, then a
+ * zero-size tail pad. Rewritten every tick; returns INST_DYN_MAX. */
+uint32_t build_dynamic(const World* w, Inst* out, int show_samples) {
+  uint32_t k = 0;
   for (uint32_t i = 0; i < N_TANKS; i++) {
     uint32_t di = w->tank_ang[i] >> ANGLE_SHIFT;
     int32_t co = dir_cos(di), si = dir_sin(di);
@@ -79,5 +87,7 @@ uint32_t build_instances(const World* w, Inst* out) {
     int32_t by = cy + ((si * 87) >> TRIG_SHIFT);
     k = push_quad(out, k, bx, by, 56, 18, co, si, COL_BARR[i]);
   }
+  if (show_samples) k = build_sample_overlay(w, out, k);
+  while (k < INST_DYN_MAX) k = push_quad(out, k, 0, 0, 0, 0, 0, 0, 0); /* zero-size: drawn but invisible */
   return k;
 }

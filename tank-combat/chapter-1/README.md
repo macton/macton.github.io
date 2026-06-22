@@ -78,9 +78,17 @@ Firefox Nightly).
   quarter-turn earlier); the low 11 bits are
   sub-direction precision so `turn_rate` can be finer than one direction per
   tick. No `sinf`, no libm.
-- **One transform produces the render data.** `build_instances()` turns world
-  state into a packed integer instance buffer (16 bytes/quad). JS copies that
-  buffer straight to the GPU and issues a single instanced draw.
+- **The render data is split by frequency of change — no ghost writes.** The
+  instance buffer (16 bytes/quad) is one contiguous block, but ~93% of its quads
+  are walls that only change on a grid edit, while the few tank quads change every
+  tick. So it is two transforms: `build_walls()` writes the static wall quads
+  *once* per grid change into the back of the buffer; `build_dynamic()` rewrites
+  only the small fixed front region (tanks + the debug overlay, ~20 quads) each
+  tick. The host mirrors this — it re-uploads just the dynamic front every frame
+  and re-uploads the wall region only when `walls_version` changes — then issues a
+  single instanced draw over both. Per tick the buffer writes dropped from ~111 to
+  ~20. (Before the split, every wall was rewritten and re-uploaded 60×/s
+  unchanged — the kind of ghost write data-oriented design exists to remove.)
 - **Explicit data protocol at the boundary.** C owns every byte of layout; JS
   never computes an offset — it asks C for the pointer or count it needs. The
   exported function list *is* the protocol (see the header of `wasm.c`).
@@ -103,7 +111,7 @@ Boundaries on top of the core:
 
 | file | responsibility |
 |------|----------------|
-| `src/render.c/.h` | reads `World` → `Inst` instance buffer (`build_instances`); debug `build_sample_overlay` marks the cells sampled this tick |
+| `src/render.c/.h` | reads `World` → `Inst` instance buffer, split by frequency of change: `build_walls` (static, per grid change) + `build_dynamic` (tanks + sample overlay, per tick) |
 | `src/wasm.c` | the wasm boundary: static `World`, exports the data protocol |
 | `src/test.c` | native tests of the sim core (the movement contract) |
 
@@ -132,7 +140,7 @@ are exported from the wasm (the internal transforms are not).
 | tank hit | `uint8_t[2]` | blocked-axis bitmask this tick: bit0 = x, bit1 = y (names the wall) |
 | PATTERN_ESCAPE | `const uint8_t[16*32]` | steer lookup `[pattern*32 + travel]`: nearest-open escape (bit5 = handedness, bits0-4 = direction; `0xFF` = none). `pattern` = the cell's 4-neighbour wall code, read live. A compile-time constant — **generated on the host, baked into the binary** (`src/escape_table.c`), not in `World` |
 | trig table | `int16_t[32]` | cos in Q14 (`±16384`); sin = cos a quarter-turn earlier |
-| instances | `Inst[W*H + 4]` | render output, 16 B: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888) |
+| instances | `Inst[20 + W*H]` | render output, 16 B each: int16 cx,cy,hx,hy,co,si + uint32 rgba (RGBA8888). Front 20 = dynamic (tanks + overlay, per tick); rest = static walls (per grid change) |
 
 Arena is the grid: 20×15 cells, 256 subcells per cell.
 
@@ -162,10 +170,13 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    colliding last tick (`hit`), the step is scaled by `collide_scale` (Q0.8,
    default 128 = 50%) so it eases against walls; clear of contact, full speed.
 
-The render/host then: `build_instances` turns the `World` into the packed
-integer instance buffer, and the host copies it to the GPU and draws
-`inst_count` quads. (In the wasm build, `tick()` runs the sim step and refills
-the instance buffer; the simulation itself contains no rendering.)
+The render/host then: `build_dynamic` rewrites only the tank/overlay quads at the
+front of the instance buffer (the walls were written once by `build_walls` and
+are left untouched); the host uploads just that dynamic front to the GPU each
+frame — plus the wall region only when `walls_version` changes — and draws
+`inst_count` quads in one instanced draw. (In the wasm build, `tick()` runs the
+sim step and refills the dynamic quads; the simulation itself contains no
+rendering.)
 
 **Toroidal arena (explicit):** there is no hard edge — the world wraps. A tank
 crossing an edge reappears on the opposite side; collision depends only on the

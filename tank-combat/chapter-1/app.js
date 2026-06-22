@@ -88,7 +88,8 @@ async function main() {
   const GH     = wasm.grid_h();
   const SUB    = wasm.subcell();
   const STRIDE = wasm.inst_stride();          // bytes per instance (16)
-  const MAX_INST = wasm.inst_max();           // capacity C reserves (incl. sample overlay)
+  const MAX_INST = wasm.inst_max();           // capacity C reserves (dynamic front + walls)
+  const DYN = wasm.dyn_count();               // dynamic quads at the front, re-uploaded each frame
 
   // views into wasm memory (stable: memory never grows)
   const view = {
@@ -99,7 +100,8 @@ async function main() {
     inp:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_input_ptr(), NT),
     vxy:  () => new Int16Array(wasm.memory.buffer, wasm.tank_vxy_ptr(), NT * 2),
     hit:  () => new Uint8Array(wasm.memory.buffer, wasm.tank_hit_ptr(), NT),
-    inst: (n) => new Uint8Array(wasm.memory.buffer, wasm.inst_ptr(), n * STRIDE),
+    // a byte range of the instance buffer, [start, start+n) instances
+    instBytes: (start, n) => new Uint8Array(wasm.memory.buffer, wasm.inst_ptr() + start * STRIDE, n * STRIDE),
   };
 
   // --- WebGPU -------------------------------------------------------------
@@ -157,6 +159,7 @@ async function main() {
 
   // --- frame loop (fixed timestep) ---------------------------------------
   let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0;
+  let lastWallsVer = -1;   // force the wall region to upload on the first frame
   dbg.onPause = (v) => { paused = v; };
   dbg.onStep  = () => { stepOnce = true; };
   dbg.onReset = () => { wasm.init(); };
@@ -175,8 +178,16 @@ async function main() {
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { wasm.tick(); acc -= TICK_DT; s++; } }
     else { acc = 0; }
 
+    // Upload only what changed (frequency of change): the dynamic front every
+    // frame, the static walls once and again only when the grid edits.
+    device.queue.writeBuffer(instBuf, 0, view.instBytes(0, DYN));
+    const wv = wasm.walls_version();
+    if (wv !== lastWallsVer) {
+      lastWallsVer = wv;
+      device.queue.writeBuffer(instBuf, wasm.wall_base() * STRIDE,
+                               view.instBytes(wasm.wall_base(), wasm.wall_count()));
+    }
     const n = wasm.inst_count();
-    device.queue.writeBuffer(instBuf, 0, view.inst(n));
 
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({

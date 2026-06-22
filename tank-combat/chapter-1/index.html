@@ -264,14 +264,24 @@
     grid at wrapped coordinates.</p>
 
     <h2>An explicit data protocol to the screen</h2>
-    <p>The simulation never talks to the GPU. Instead one transform turns the
-    world into a flat <strong>instance buffer</strong>: one 16-byte record per
-    quad (wall or tank part) — center, half-size, and rotation as integers, plus
-    a color packed as a conventional <code>uint32_t</code> RGBA. JavaScript copies
-    that buffer straight to the GPU and issues a single instanced draw; the vertex
-    shader is the only place an integer becomes a float, because that's the GPU's
-    native data format. The browser and the C code communicate through an explicit
-    layout — C owns every byte, and JS only asks for pointers.</p>
+    <p>The simulation never talks to the GPU. Instead the world becomes a flat
+    <strong>instance buffer</strong>: one 16-byte record per quad (wall or tank
+    part) — center, half-size, and rotation as integers, plus a color packed as a
+    conventional <code>uint32_t</code> RGBA. The vertex shader is the only place an
+    integer becomes a float, because that's the GPU's native data format. C owns
+    every byte of the layout; JS only asks for pointers.</p>
+    <p>But almost none of that buffer changes from frame to frame. About 93% of
+    the quads are <em>walls</em>, which only change when you edit the grid; just
+    the handful of tank quads move each tick. Rewriting and re-uploading the walls
+    every frame would be a <strong>ghost write</strong> — work whose output is
+    identical to last frame's. So the buffer is split by how often each part
+    changes: a small fixed region at the front holds the dynamic quads (tanks and
+    the debug overlay) and is the only thing rebuilt and re-uploaded each tick;
+    the walls sit behind it, written once and re-uploaded only when a version
+    counter says the grid changed. Same single instanced draw, but the per-frame
+    work dropped from ~111 quads to ~20. This is the same "match the work to the
+    frequency of change" rule that baked the escape table — here applied to the
+    pixels.</p>
 
     <h2>Simulation separated from rendering</h2>
     <p>Because the simulation depends on nothing but its own data — not the GPU,

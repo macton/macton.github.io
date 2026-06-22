@@ -17,16 +17,31 @@
 
 typedef struct { int16_t cx, cy, hx, hy, co, si; uint32_t rgba; } Inst;
 
-/* world state -> instance buffer. Writes up to N_CELLS + N_TANKS*2 instances
- * into out and returns the count. */
-uint32_t build_instances(const World* w, Inst* out);
+/* The instance buffer is split by frequency of change, because ~93% of the quads
+ * (the walls) only change on a grid edit while the tanks change every tick:
+ *
+ *   [0 .. INST_DYN_MAX)              dynamic: tank quads + sample overlay,
+ *                                    rewritten every tick (unused slots are
+ *                                    zero-size quads, so a contiguous draw skips
+ *                                    them)
+ *   [INST_DYN_MAX .. +wall_count)    static walls, written once per grid change
+ *
+ * So the per-tick path writes only INST_DYN_MAX quads, and the host re-uploads
+ * only that front region each frame (the walls are uploaded once, again only when
+ * the grid changes). N_TANKS*2 tank quads + up to N_TANKS*8 overlay markers. */
+#define INST_DYN_MAX (N_TANKS * 2 + N_TANKS * 8)
 
-/* Debug overlay: append small markers on exactly the grid cells the collision
- * and steering code samples this tick for each *moving* tank — the leading-edge
- * cell(s) movement tests (one colour) and the 4 orthogonal neighbours the steer
- * reads when auto-steering (another). Makes the "small local pattern" visible.
- * Appends after `k` existing instances; returns the new total. Writes up to
- * N_TANKS*8 markers. */
-uint32_t build_sample_overlay(const World* w, Inst* out, uint32_t k);
+/* Static walls: one quad per wall cell, written into out[0..]. Returns the wall
+ * count. Call only when the grid changes (init, edit). */
+uint32_t build_walls(const World* w, Inst* out);
+
+/* Dynamic quads (tank bodies + barrels, plus the debug sample overlay when
+ * show_samples): rewritten every tick into out[0..INST_DYN_MAX). Pads the unused
+ * tail with zero-size quads. Returns INST_DYN_MAX.
+ *
+ * The sample overlay marks exactly the grid cells the collision/steer code reads
+ * this tick for each moving tank — the leading-edge cell(s) movement tests (one
+ * colour) and the 4 orthogonal neighbours the steer reads (another). */
+uint32_t build_dynamic(const World* w, Inst* out, int show_samples);
 
 #endif
