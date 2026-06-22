@@ -81,10 +81,25 @@ down in `CONTRACT.md` and assert every case in the native tests:
 - **A held throttle never leaves a tank permanently stuck.** If a driving tank is
   against a wall, corner, or in a concave pocket, it auto-rotates toward the
   nearest direction it can actually move and drives out — for both forward and
-  reverse. This is the part most likely to go wrong; enumerate the hard cases
-  (flat wall, convex corner, the arena's own corners, a U-pocket, head-on with
-  zero resolved velocity, ~180° escapes) and assert each, including the no-op
+  reverse. "Nearest" means the **smallest turn from the direction it is trying to
+  go** (its heading when going forward, the opposite when reversing) — not a fixed
+  compass priority. This is the part most likely to go wrong; enumerate the hard
+  cases (flat wall, convex corner, the arena's own corners, a U-pocket, head-on
+  with zero resolved velocity, ~180° escapes) and assert each, including the no-op
   case (no throttle ⇒ no movement, no steering).
+
+### Two specifics to pin (so the behavior is reproducible)
+
+- **A tank is a small square smaller than one cell** (so its footprint spans at
+  most two cells on each axis, and the leading-edge collision shortcut applies).
+  It is *not* a point — a point never half-overlaps a wall, which changes the
+  collision character and what "slide" means. Pick the exact half-extent yourself,
+  but state it.
+- **Each tick rotates, then moves**, and the auto-steer **reacts to the collision
+  recorded on the previous tick** (a one-tick feedback through a shared `hit`
+  flag the move writes and the turn reads). Fix this order; it determines the
+  head-on case (on the contact tick the resolved velocity is genuinely zero, so
+  derive the steer target from the *wall*, never from velocity).
 
 ## Definition of done
 
