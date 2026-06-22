@@ -1,9 +1,13 @@
 /* escape_table.h — the steer's precomputed escape directions.
  *
- * PATTERN_ESCAPE is fully determined by compile-time geometry (TANK_R, SUB, the
- * trig table, the scan order) — it depends on no runtime state at all. So it is
- * GENERATED ON THE HOST by tools/gen_escape.c (run from gen.sh) and committed as
- * src/escape_table.c, then compiled in — not computed at startup.
+ * PATTERN_ESCAPE is the EXHAUSTIVE enumeration of every possible local
+ * situation: all 16 four-neighbour patterns x all 32 travel directions. It has
+ * nothing to do with any particular map — every entry is filled — and it never
+ * changes: the values follow only from the fixed footprint/trig/scan geometry.
+ * So it is a compile-time constant, generated once on the host by
+ * tools/gen_escape.c (run from gen.sh), committed as src/escape_table.c, and
+ * compiled in. Transforms reference it directly (like the trig table); it is not
+ * runtime state and is never passed around.
  *
  * Indexed [pattern*N_DIRS + travel]: bit5 = handedness, bits0-4 = direction;
  * 0xFF (ESC_NONE) = no open direction. `pattern` is a cell's 4-neighbour wall

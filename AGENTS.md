@@ -251,10 +251,21 @@ is just there to explain why.
   separate files.** Independent transforms each get their own file (`tanks_turn.c`,
   `tanks_move.c`) so they physically cannot share state; a boundary/data contract
   (the renderer's `Inst` layout + `build_instances`) gets its own file too.
-  Transforms take their data as parameters and reference no globals. Export only
-  the module's protocol from the wasm; internal transforms stay unexported (use
-  the `export_name` attribute, not `--export-dynamic`). *Origin: "put independent
-  transforms in their own files to structurally reinforce independence."*
+  Transforms take their mutable state and inputs as parameters and reference no
+  global *state*. Export only the module's protocol from the wasm; internal
+  transforms stay unexported (use the `export_name` attribute, not
+  `--export-dynamic`). *Origin: "put independent transforms in their own files to
+  structurally reinforce independence."*
+  - *Corollary:* "no globals" means no global mutable *state*; a **compile-time
+    constant table is not state — reference it directly, don't thread it as a
+    parameter.** A parameter says "this can vary per call"; a baked constant
+    never varies, so passing it is a lie about the data and invites the reader to
+    imagine alternatives that don't exist. The trig table is read directly
+    (`dir_cos`); the escape table (`PATTERN_ESCAPE`) is the same kind of thing and
+    is read directly too. (A value only earns a parameter once something can
+    actually pass a different one — e.g. a tunable in the `World`.) *Origin:
+    `PATTERN_ESCAPE` was threaded through `tanks_turn` as a parameter after it had
+    been baked into a constant — "why pass it as though it could be different?"*
 - **Split by independence, not by activity.** Transforms that write the same field
   and are order-coupled belong together — player-turn and collision-auto-steer
   both rotate the heading, so they are one transform (`tanks_turn`), not two.

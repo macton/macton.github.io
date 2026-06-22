@@ -146,8 +146,9 @@ Arena is the grid: 20×15 cells, 256 subcells per cell.
    tick (`hit`) while driving **and the player isn't turning**, **auto-steer** is
    a single lookup:
    it reads the tank cell's 4-neighbour pattern live (`cell_pattern`, 4 bit-tests)
-   and `pattern_escape[pattern*32 + travel]` gives the nearest open direction (and
-   the handedness to turn), and it rotates (at `turn_rate`) toward it. That slides
+   and `PATTERN_ESCAPE[pattern*32 + travel]` (a baked constant, referenced
+   directly like the trig table) gives the nearest open direction (and the
+   handedness to turn), and it rotates (at `turn_rate`) toward it. That slides
    it along flat walls, turns it out of convex corners, and rotates it around to
    the opening of a concave pocket — so holding a throttle never leaves it
    permanently stuck. This is the **movement contract** (`CONTRACT.md`), enforced

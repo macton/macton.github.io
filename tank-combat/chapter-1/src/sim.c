@@ -1,7 +1,6 @@
 #include "sim.h"
 #include "tanks_turn.h"
 #include "tanks_move.h"
-#include "escape_table.h"   /* PATTERN_ESCAPE — generated, baked in */
 
 /* initial level, stored directly as row bit-words (no parse step). The ASCII
  * picture in each comment is just documentation; the word is the data. Each
@@ -48,7 +47,7 @@ void sim_init(World* w) {
 void sim_tick(World* w) {
   /* rotate: player turn + auto-steer out of last tick's collision */
   tanks_turn(w->tank_xy, w->tank_ang, w->tank_in, w->tank_hit,
-             N_TANKS, w->turn_rate, w->grid, PATTERN_ESCAPE);
+             N_TANKS, w->turn_rate, w->grid);
   tanks_move(w->tank_xy, w->tank_vxy, w->tank_hit, w->tank_ang, w->tank_in,
              N_TANKS, (int32_t)w->move_speed, (int32_t)w->collide_scale, w->grid);
   w->frame++;

@@ -15,11 +15,14 @@
 
 /* For each of n tanks: apply the player's left/right turn (±rate, wrapping),
  * then, if it collided last tick (hit[i] != 0) while driving, rotate by up to
- * `rate` toward an open direction. The escape direction is one lookup in
- * `pattern_escape` indexed [pattern*N_DIRS + travel_dir], where `pattern` is the
- * tank cell's 4-neighbour pattern (read live from `grid`, 4 bits). */
+ * `rate` toward an open direction. The escape direction is one lookup in the
+ * baked PATTERN_ESCAPE constant (escape_table.h), indexed
+ * [pattern*N_DIRS + travel_dir], where `pattern` is the tank cell's 4-neighbour
+ * pattern (read live from `grid`, 4 bits). The table is a compile-time constant,
+ * referenced directly like the trig table — not a parameter, since it never
+ * varies. */
 void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
-                const uint32_t* grid, const uint8_t* pattern_escape);
+                const uint32_t* grid);
 
 #endif

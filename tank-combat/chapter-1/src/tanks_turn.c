@@ -1,10 +1,10 @@
 #include "tanks_turn.h"
 #include "collide.h"
-#include "escape_table.h"   /* ESC_NONE (the table itself is passed in) */
+#include "escape_table.h"   /* PATTERN_ESCAPE (baked constant) + ESC_NONE */
 
 void tanks_turn(const uint32_t* xy, uint16_t* ang,
                 const uint8_t* in, const uint8_t* hit, uint32_t n, uint16_t rate,
-                const uint32_t* grid, const uint8_t* pattern_escape) {
+                const uint32_t* grid) {
   for (uint32_t i = 0; i < n; i++) {
     /* Decode the input bits directly, branch-free. Tabulating this first (an
      * INPUT[16] table) made the structure visible: turn/thr/travel_off are just
@@ -30,8 +30,10 @@ void tanks_turn(const uint32_t* xy, uint16_t* ang,
     uint32_t pat    = cell_pattern(grid, xy_lo(xy[i]) >> SUB_SHIFT, xy_hi(xy[i]) >> SUB_SHIFT);
     uint32_t travel = ((ang[i] >> ANGLE_SHIFT) + travel_off) & (N_DIRS - 1);
 
-    /* one lookup: the precomputed nearest-open escape for this pattern + travel */
-    uint8_t esc = pattern_escape[pat * N_DIRS + travel];
+    /* one lookup: the baked nearest-open escape for this pattern + travel.
+     * PATTERN_ESCAPE is a compile-time constant (every possible pattern), so we
+     * reference it directly, the same way movement reads the trig table. */
+    uint8_t esc = PATTERN_ESCAPE[pat * N_DIRS + travel];
     if (esc == ESC_NONE) continue;                 /* fully enclosed: nowhere to go */
     uint32_t best = esc & (N_DIRS - 1);
     int plus = (esc >> 5) & 1;
