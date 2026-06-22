@@ -80,7 +80,8 @@ EXPORT(tank_angle_ptr)  uint16_t* tank_angle_ptr(void)  { return g_world.tank_an
 EXPORT(tank_input_ptr)  uint8_t*  tank_input_ptr(void)  { return g_world.tank_in; }
 EXPORT(tank_vxy_ptr)    uint32_t* tank_vxy_ptr(void)    { return g_world.tank_vxy; }
 EXPORT(tank_hit_ptr)    uint8_t*  tank_hit_ptr(void)    { return g_world.tank_hit; }
-EXPORT(l1dist_ptr)      uint16_t* l1dist_ptr(void)      { return g_world.l1dist; }         /* N_SCREENS*TRI */
+EXPORT(l1dist_ptr)      uint8_t*  l1dist_ptr(void)      { return g_world.l1dist; }         /* N_SCREENS*TRI bytes */
+EXPORT(l1_screen_max_ptr) uint16_t* l1_screen_max_ptr(void) { return g_world.l1_screen_max; }
 EXPORT(ep_screen_ptr)   uint8_t*  ep_screen_ptr(void)   { return g_world.ep_screen; }
 EXPORT(ep_cell_ptr)     uint16_t* ep_cell_ptr(void)     { return g_world.ep_cell; }
 EXPORT(ep_cross_ptr)    uint8_t*  ep_cross_ptr(void)    { return g_world.ep_cross; }
@@ -112,6 +113,8 @@ EXPORT(tri)         uint32_t tri(void)         { return TRI; }
 EXPORT(n_edge_max)  uint32_t n_edge_max(void)  { return N_EDGE_MAX; }
 EXPORT(ep_per_screen_max) uint32_t ep_per_screen_max(void) { return EP_PER_SCREEN_MAX; }
 EXPORT(ep_count)    uint32_t ep_count(void)    { return g_world.ep_count; }
+EXPORT(l1_maxdist)  uint32_t l1_maxdist(void)  { return g_world.l1_maxdist; }   /* measured longest L1 distance */
+EXPORT(l1_dist_ceil) uint32_t l1_dist_ceil(void) { return L1_DIST_CEIL; }       /* provable byte-fit ceiling */
 EXPORT(cam_sx)      uint32_t cam_sx(void)      { return g_world.cam_sx; }
 EXPORT(cam_sy)      uint32_t cam_sy(void)      { return g_world.cam_sy; }
 EXPORT(selected)    uint32_t selected(void)    { return g_world.selected; }

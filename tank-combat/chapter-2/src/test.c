@@ -72,7 +72,7 @@ static void run_to_dest(World* w, uint32_t tank, int wcx, int wcy,
 static void t_level1(void) {
   printf("Level 1 — per-screen all-pairs distance:\n");
   sim_init(&W);
-  const uint16_t* L1 = W.l1dist + 0 * TRI;     /* screen 0 */
+  const uint8_t* L1 = W.l1dist + 0 * TRI;      /* screen 0 */
   int sym = 1, tri_ok = 1;
   for (uint32_t a = 0; a < N_CELLS; a += 7)
     for (uint32_t b = 0; b < N_CELLS; b += 5) {
@@ -94,6 +94,27 @@ static void t_level1(void) {
     check(steps == l1_get(L1, src, dst), "next_dir walk length == stored distance (shortest)");
   } else { check(0, "test cells reachable"); tri_ok = 0; }
   (void)tri_ok;
+}
+
+/* ---- Level-1 distances fit in a byte (sized to the real data) ------------ */
+static void t_byte_fit(void) {
+  printf("Level-1 distances fit a byte (provable ceiling + measured max):\n");
+  sim_init(&W);
+  check(L1_DIST_CEIL < L1_INF, "2x2-block ceiling is below the byte sentinel");
+  printf("  (provable ceiling %d; default map measured max %u)\n", L1_DIST_CEIL, W.l1_maxdist);
+  check(W.l1_maxdist < L1_INF, "default map: measured longest distance fits a byte");
+
+  /* carve a 7-row serpentine into screen 0 to force a long shortest path; it
+   * must still fit the byte (and we measure it, so a violation would be seen). */
+  for (int r = 0; r < GRID_H; r++) W.grid[r] = (1u << GRID_W) - 1u;          /* fill screen 0 */
+  int rows[7] = {1, 3, 5, 7, 9, 11, 13};
+  uint32_t corridor = 0; for (int c = 1; c <= 18; c++) corridor |= 1u << c;
+  for (int i = 0; i < 7; i++) W.grid[rows[i]] &= ~corridor;                  /* open corridors */
+  int conn[6][2] = {{2,18},{4,1},{6,18},{8,1},{10,18},{12,1}};
+  for (int i = 0; i < 6; i++) W.grid[conn[i][0]] &= ~(1u << conn[i][1]);     /* link them into one snake */
+  uint32_t m = l1_build_screen(W.l1dist, W.grid, 0);
+  printf("  (serpentine screen measured max %u)\n", m);
+  check(m > 80 && m < L1_INF, "long serpentine path is large but still fits/detected within a byte");
 }
 
 /* ---- Level 2: edge points + next-hop matrix ------------------------------ */
@@ -133,7 +154,7 @@ static void t_level2(void) {
         if (nx == 0xFF) { compose_ok = 0; break; }
         if (W.ep_partner[cur] == nx) sum += 1;            /* a border crossing */
         else {
-          const uint16_t* L1 = W.l1dist + (uint32_t)W.ep_screen[cur] * TRI;
+          const uint8_t* L1 = W.l1dist + (uint32_t)W.ep_screen[cur] * TRI;
           sum += l1_get(L1, W.ep_cell[cur], W.ep_cell[nx]);  /* a same-screen hop */
         }
         cur = nx;
@@ -290,6 +311,7 @@ static void t_inherited_movement(void) {
 
 int main(void) {
   t_level1();
+  t_byte_fit();
   t_level2();
   t_shortest();
   t_drive_reachable();

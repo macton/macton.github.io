@@ -71,7 +71,7 @@ void l2_build(World* w) {
     if (pj != 0xFF && 1u < D2(w, i, pj)) { D2(w, i, pj) = 1; NH(w, i, pj) = pj; }
   }
   for (uint32_t s = 0; s < N_SCREENS; s++) {          /* same-screen hops cost the Level-1 distance */
-    const uint16_t* L1s = w->l1dist + (uint32_t)s * TRI;
+    const uint8_t* L1s = w->l1dist + (uint32_t)s * TRI;
     uint32_t cnt = w->screen_ep_count[s];
     for (uint32_t a = 0; a < cnt; a++)
       for (uint32_t b = 0; b < cnt; b++) {
@@ -106,7 +106,7 @@ void l2_compute_pg(World* w, uint32_t p) {
   if (!w->phas[p]) return;
 
   uint32_t ds = w->pdest_screen[p], dc = w->pdest_cell[p];
-  const uint16_t* L1d = w->l1dist + ds * TRI;
+  const uint8_t* L1d = w->l1dist + ds * TRI;
   uint32_t cnt = w->screen_ep_count[ds];
   for (uint32_t y = 0; y < P; y++) {
     uint32_t best = INF32;
@@ -126,7 +126,7 @@ void l2_compute_pg(World* w, uint32_t p) {
 uint8_t route_next_dir(const World* w, uint32_t p, uint32_t screen, uint32_t cell) {
   if (!w->phas[p]) return DIR_NONE;
   uint32_t ds = w->pdest_screen[p], dc = w->pdest_cell[p];
-  const uint16_t* L1s = w->l1dist + screen * TRI;
+  const uint8_t* L1s = w->l1dist + screen * TRI;
 
   if (screen == ds) {
     if (cell == dc) return DIR_NONE;                     /* arrived */

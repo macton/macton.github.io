@@ -37,7 +37,7 @@ void sim_init(World* w) {
   /* Build the rarely-changing path tables once. Level 1 first (per-screen
    * all-pairs distance), then Level 2 on top of it (edge-point next-hop), then
    * each tank's remaining-distance vector (empty until a destination is set). */
-  l1_build_all(w->l1dist, w->grid);
+  w->l1_maxdist = (uint16_t)l1_build_all(w->l1dist, w->grid, w->l1_screen_max);
   l2_build(w);
   for (uint32_t p = 0; p < N_PATHED; p++) l2_compute_pg(w, p);
 }
@@ -62,7 +62,10 @@ void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy) {
   /* the toggled cell lives in `screen`, so only that screen's Level-1 distances
    * change; but a border edit can change connectivity, so Level 2 (and every
    * tank's remaining-distance vector) is rebuilt wholesale. All rare. */
-  l1_build_screen(w->l1dist + screen * TRI, w->grid, screen);
+  w->l1_screen_max[screen] = (uint16_t)l1_build_screen(w->l1dist + screen * TRI, w->grid, screen);
+  w->l1_maxdist = 0;
+  for (uint32_t s = 0; s < N_SCREENS; s++)
+    if (w->l1_screen_max[s] > w->l1_maxdist) w->l1_maxdist = w->l1_screen_max[s];
   l2_build(w);
   for (uint32_t p = 0; p < N_PATHED; p++) l2_compute_pg(w, p);
 }

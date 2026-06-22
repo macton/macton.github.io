@@ -193,7 +193,7 @@
     its real domain, and keeping it small <em>is</em> the exercise.</p>
     <p>The key move: <strong>store the metric, derive the arrow.</strong> The distance is
     symmetric (<code>dist(a,b) == dist(b,a)</code>), so we keep just the upper triangle —
-    one <code>uint16</code> per unordered pair. The <em>next direction</em> is <em>not</em>
+    one byte per unordered pair. The <em>next direction</em> is <em>not</em>
     symmetric, so we don't store it; we read it off the distances at runtime: the next step
     from a cell toward a target is the neighbour whose stored distance to the target is one
     less. One table serves both the per-tick arrow and the Level-2 weights below. Pick a
@@ -203,13 +203,20 @@
       <p class="cap">a screen's flow field · choose a screen and click a target cell · arrows are derived from the stored distances</p>
       <div id="w-flow"></div>
     </div>
-    <p>Per screen that is <code>300·301/2</code> = 45,150 pairs × 2 bytes = <strong>90&nbsp;KB</strong>,
-    and <strong>1.41&nbsp;MB</strong> for all 16 screens — the dominant cost, and the
-    reason the wasm's static memory is raised from chapter 1's 1&nbsp;MiB to 4&nbsp;MiB
-    (still no dynamic allocation; a deliberate, stated static size). It is built by a
-    breadth-first fill on init and rebuilt for one screen when you edit a wall there —
-    rarely — and read by a lookup every tick. Toggle walls in the current screen and watch
-    the flow field re-solve:</p>
+    <p>How big is one entry? A distance here is small, bounded data — not an arbitrary
+    number — so we size to what it can actually be. A shortest path inside a screen never
+    revisits a cell, and no 2×2 block can sit entirely on it (four cells would close a
+    loop), so the longest in-screen distance is at most <code>300 − 10·7 − 1 = 229</code>:
+    it <strong>provably fits one byte</strong> (255 is reserved for "unreachable"). So we
+    store a <code>uint8</code>, not two — <code>45,150</code> pairs × 1 byte =
+    <strong>45&nbsp;KB/screen</strong>, <strong>706&nbsp;KB</strong> for all 16 — and the
+    whole chapter stays inside chapter 1's 1&nbsp;MiB, still with no dynamic allocation.
+    And because the table is built from the grid (at build/edit time, not from arbitrary
+    input), we also just <em>measure</em> the longest distance — shown in the counters
+    above — so if a screen ever did exceed the byte, we'd see it and fix the design rather
+    than pay for two bytes everywhere on the chance. Built by a breadth-first fill on init,
+    rebuilt for one screen when you edit a wall there — rarely — and read by a lookup every
+    tick. Toggle walls in the current screen and watch the flow field re-solve:</p>
     <div class="fig">
       <p class="cap">the current screen's wall bitset · click a cell to toggle it (rebuilds that screen's Level-1 table + the edge graph)</p>
       <div id="w-grid"></div>

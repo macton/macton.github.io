@@ -92,6 +92,20 @@ is just there to explain why.
   sub-direction turn precision; document that (5 bits alone would force whole-step
   turning). If a width can't be justified against the domain, it is probably
   wrong. *Origin: "Does tank angle require 16 bits?"*
+  - *Corollary — when the value is produced at build time, size to the range it
+    can actually take, not a defensive worst case; you can **prove or measure**
+    the bound, and **detect** a violation, because you own the data.* A theoretical
+    ceiling (a within-screen path could be up to `N_CELLS-1` cells) is the wrong
+    width if the achievable values are far smaller: bound them (a 2×2 block can't
+    lie wholly on an induced path, so the longest in-screen distance ≤
+    `N_CELLS - (W/2)(H/2) - 1` ⇒ fits a `uint8`), assert that with a
+    `_Static_assert`, and have the generator/build record the measured max so an
+    overflow is *seen*, not silently truncated — then fix the design (or widen
+    only the offending case) if it ever fires. Provisioning the full theoretical
+    width "to be safe" on data you compute is paying for a case that can't occur.
+    *Origin: sizing the per-screen all-pairs distance — proposed as `uint16` for
+    the 0..299 theoretical max, then shown to provably fit a byte and be measured
+    at build time.*
 
 ## Design / abstraction
 

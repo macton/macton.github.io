@@ -1,7 +1,7 @@
 # Chapter 2 contract — pathing & viewport
 
 The explicit promises chapter 2 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (37 checks). Chapter 2 **inherits chapter 1's
+tests in `src/test.c` enforce them (40 checks). Chapter 2 **inherits chapter 1's
 movement contract** ([../chapter-1/CONTRACT.md](../chapter-1/CONTRACT.md)) for the
 manual tank — sized footprint, rotate-then-move tick order, auto-steer reacting to
 the previous tick's `hit`, slide-on-walls, toroidal wrap, the collide-speed

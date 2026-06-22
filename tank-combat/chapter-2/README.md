@@ -73,20 +73,31 @@ Within one screen, route any cell to any cell. We **store the metric and derive
 the arrow**:
 
 - **Store** the symmetric all-pairs **distance**, upper triangle only — one
-  `uint16` per unordered pair (`dist(a,b) == dist(b,a)` because the within-screen
+  **byte** per unordered pair (`dist(a,b) == dist(b,a)` because the within-screen
   graph is undirected). Built by a BFS from every open cell, confined to the
-  screen; wall/disconnected cells are `L1_INF`.
+  screen; wall/disconnected cells are `L1_INF` (`0xFF`).
 - **Derive** the next direction at runtime: the next step from `s` toward target
   `t` is the in-screen neighbour whose stored distance to `t` is one less
   (canonical N,E,S,W tie-break). Direction is *not* symmetric, so it can't be
   folded — but distance can, and the distance is also exactly what Level 2 needs,
   so one table serves both ("find the minimal data the answer depends on").
 
-**Budget:** `TRI = 300·301/2 = 45,150` pairs × 2 bytes = **90 KB/screen**,
-**1.41 MB** for 16 screens — the dominant cost. The raw domain is 0..299 (9 bits);
-we spend a byte-aligned `uint16` for a branch-free hot-path index, a deliberate
-trade in a budget we are already raising (a 9-bit pack is the listed tightening).
-Built on init and rebuilt for *one* screen on a wall edit there; read every tick.
+**One byte, sized to the real data.** A distance here isn't an arbitrary runtime
+number — it's built from the grid, so it's small, bounded, and known at build
+time. We can even *prove* the bound: a shortest path never revisits a cell, and no
+2×2 block lies entirely on an induced path (four cells close a loop), so the
+longest in-screen distance is `≤ N_CELLS − (GRID_W/2)·(GRID_H/2) − 1 = 229`, well
+under the 255 a byte holds. A `_Static_assert` (`grid_paths.h`) makes that a
+compile-time guarantee; the build/edit also *measures* the actual max (shown on
+the page — 29 on the default map) so a violation would be detected rather than
+silently truncated. If a future, much larger screen ever broke the static bound,
+the build fails and you fix the design (or escalate to a per-screen bit depth) —
+no speculative width spent now.
+
+**Budget:** `TRI = 300·301/2 = 45,150` pairs × 1 byte = **45 KB/screen**,
+**~706 KB** for 16 screens — the dominant cost, but small enough that the whole
+chapter stays inside chapter 1's 1 MiB. Built on init and rebuilt for *one* screen
+on a wall edit there; read every tick.
 
 ### Level 2 — between screens: an edge-point next-hop matrix (`edge_paths.c`)
 
@@ -145,19 +156,20 @@ render/wasm depend on sim, never the reverse.
 
 ## Memory budget (static, no dynamic allocation)
 
-The wasm linear memory is raised from chapter 1's 1 MiB to **4 MiB**, sized
-statically to the tables:
+The wasm linear memory is a static **1 MiB** (same as chapter 1) — sizing the
+Level-1 distance to a byte keeps the whole thing under that, with a 128 KB stack:
 
 | data | size |
 |------|------|
-| Level-1 distances `l1dist[16 · 45150]` `uint16` | ~1.41 MB |
+| Level-1 distances `l1dist[16 · 45150]` `uint8` | ~706 KB |
 | Level-2 `dist2` (`uint16`) + `nexthop` (`uint8`), 128² | ~48 KB |
 | per-tank `pg`, edge-point arrays, world scalars | ~5 KB |
 | instance buffer + highlight trace scratch | ~20 KB |
 
 `game.wasm` itself is ~14 KB of code. Every table is precomputed against the
 rarely-changing grid/connectivity and read by a per-tick lookup; data is packed
-and sized to its real domain.
+and sized to its real domain (the Level-1 byte width is *proved* to fit and
+*measured* at build time, not provisioned for a worst case that can't occur).
 
 ## Build
 
@@ -182,8 +194,10 @@ on the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers (37 checks, see [CONTRACT.md](CONTRACT.md)): Level-1 symmetry
+`src/test.c` covers (40 checks, see [CONTRACT.md](CONTRACT.md)): Level-1 symmetry
 and that the derived arrow walk reaches a target in exactly the stored distance;
+that the in-screen distance fits a byte — the provable ceiling and the measured
+max, including a forced serpentine screen;
 edge-point partners and that **next-hop hop distances equal the composed Level-1 +
 crossing distances**; that hierarchical route lengths **equal a brute-force BFS
 over the whole 80×60 grid** (globally shortest) for same-screen, cross-screen, and
@@ -195,7 +209,7 @@ and that the inherited movement model still holds on the big grid.
 
 ## Verified
 
-- `./test.sh` passes (37 checks): the pathing tables, the globally-shortest-route
+- `./test.sh` passes (40 checks): the pathing tables, the globally-shortest-route
   proof vs brute-force BFS, wall-free arrival, unreachable handling, the
   selection/destination/viewport contract, and inherited movement.
 - `game.wasm` exercised in Node (init, all three pathed tanks routing to cross-

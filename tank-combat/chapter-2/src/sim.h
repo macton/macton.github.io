@@ -51,8 +51,10 @@ struct World {
   /* ---- the rarely-rebuilt world ----------------------------------------- */
   uint32_t grid[N_SCREENS * GRID_H];  /* wall bitset, screen-major, one word/row */
 
-  /* ---- LEVEL 1: per-screen all-pairs distance (upper triangle) ----------- */
-  uint16_t l1dist[N_SCREENS * TRI];
+  /* ---- LEVEL 1: per-screen all-pairs distance (upper triangle, 1 byte) ---- */
+  uint8_t  l1dist[N_SCREENS * TRI];
+  uint16_t l1_screen_max[N_SCREENS];  /* measured longest distance per screen (telemetry/detection) */
+  uint16_t l1_maxdist;                /* measured longest distance over all screens */
 
   /* ---- LEVEL 2: connecting edge points + next-hop matrix ----------------- */
   uint32_t ep_count;                          /* number of edge points (<= N_EDGE_MAX) */

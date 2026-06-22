@@ -10,11 +10,14 @@ cd "$(dirname "$0")"
 ./gen.sh
 
 # Linear memory is sized statically to the path tables (no dynamic allocation):
-#   Level-1 distances  16 * 45150 * 2  ~= 1.41 MB   (the dominant term)
+#   Level-1 distances  16 * 45150 * 1  ~= 706 KB   (the dominant term; 1 byte/pair —
+#                                          in-screen distances provably <= 229, see
+#                                          grid_paths.h, so they fit a byte)
 #   Level-2 dist2/nexthop              ~= 48 KB
-#   instance buffer, trace scratch, World scalars, stack
-# 4 MiB covers it with headroom. This is the deliberate static sizing decision
-# the chapter calls for (chapter 1 fit in 1 MiB; the all-pairs tables need more).
+#   instance buffer, trace scratch, World scalars, 128 KB stack
+# ~780 KB of statics + stack fit in 1 MiB. Storing the distance as a byte instead
+# of two (sized to the real, build-time-known data) brings chapter 2 back under
+# chapter 1's 1 MiB.
 clang \
   --target=wasm32 \
   -nostdlib \
@@ -23,8 +26,9 @@ clang \
   -fno-builtin \
   -Wall -Wextra \
   -Wl,--no-entry \
-  -Wl,--initial-memory=4194304 \
-  -Wl,--max-memory=4194304 \
+  -Wl,--initial-memory=1048576 \
+  -Wl,--max-memory=1048576 \
+  -Wl,-z,stack-size=131072 \
   -Wl,--stack-first \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_path.c src/tanks_turn.c src/tanks_move.c \

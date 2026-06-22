@@ -80,7 +80,7 @@ async function main() {
     ang:  () => new Uint16Array(mem(), wasm.tank_angle_ptr(), C.NT),
     inp:  () => new Uint8Array(mem(), wasm.tank_input_ptr(), C.NT),
     hit:  () => new Uint8Array(mem(), wasm.tank_hit_ptr(), C.NT),
-    l1:   () => new Uint16Array(mem(), wasm.l1dist_ptr(), C.NS * C.TRI),
+    l1:   () => new Uint8Array(mem(), wasm.l1dist_ptr(), C.NS * C.TRI),   // 1 byte/pair
     epScreen: () => new Uint8Array(mem(), wasm.ep_screen_ptr(), C.NE),
     epCell:   () => new Uint16Array(mem(), wasm.ep_cell_ptr(), C.NE),
     epCross:  () => new Uint8Array(mem(), wasm.ep_cross_ptr(), C.NE),
@@ -103,7 +103,7 @@ async function main() {
   const DCX = [0, 1, 0, -1], DCY = [-1, 0, 1, 0];
   function l1nextdir(l1, s, src, dst) {
     if (src === dst) return -1;
-    const d0 = l1get(l1, s, src, dst); if (d0 === 0xFFFF) return -1;
+    const d0 = l1get(l1, s, src, dst); if (d0 === 0xFF) return -1;
     const scx = src % C.GW, scy = (src / C.GW) | 0;
     for (let d = 0; d < 4; d++) {
       const nx = scx + DCX[d], ny = scy + DCY[d];
@@ -292,7 +292,8 @@ function mountWidgets(wasm, view, C, P) {
         `frame <b>${wasm.frame()}</b> · ${(dt * 1000).toFixed(1)} ms · ${fps.toFixed(0)} fps · ` +
         `viewport <b>${wasm.cam_sx()},${wasm.cam_sy()}</b><br>` +
         `world <b>${C.BW}×${C.BH}</b> cells · edge points <b>${wasm.ep_count()}</b> · ` +
-        `instances <b>${instCount}</b> · mem <b>${(wasm.memory.buffer.byteLength / 1048576).toFixed(1)}</b> MiB`;
+        `instances <b>${instCount}</b> · mem <b>${(wasm.memory.buffer.byteLength / 1048576).toFixed(1)}</b> MiB<br>` +
+        `longest L1 distance <b>${wasm.l1_maxdist()}</b> — fits a byte (measured; provable ceiling ${wasm.l1_dist_ceil()} &lt; 255)`;
     });
   }
 
@@ -408,9 +409,9 @@ function mountWidgets(wasm, view, C, P) {
       for (let i = 0; i < C.NC; i++) {
         const c = cells[i]; c.className = "cell";
         if (i === fTarget) { c.classList.add("tgt"); c.textContent = "◎"; c.title = "target"; continue; }
-        if (P.l1get(l1, fScreen, i, i) === 0xFFFF) { c.classList.add("on"); c.textContent = ""; c.title = "wall"; continue; }
+        if (P.l1get(l1, fScreen, i, i) === 0xFF) { c.classList.add("on"); c.textContent = ""; c.title = "wall"; continue; }
         const d = P.l1get(l1, fScreen, i, fTarget);
-        if (d === 0xFFFF) { c.textContent = "·"; c.title = "unreachable"; continue; }
+        if (d === 0xFF) { c.textContent = "·"; c.title = "unreachable"; continue; }
         const dir = P.l1nextdir(l1, fScreen, i, fTarget);
         c.classList.add("arr"); c.textContent = dir < 0 ? "·" : DIR_GLYPH[dir]; c.title = "dist " + d;
       }
