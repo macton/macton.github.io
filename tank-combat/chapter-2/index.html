@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Chapter 2 — Bigger Maps &amp; Pathing · Data-Oriented Design, by picture</title>
+<style>
+  :root { color-scheme: dark; --fg:#d7dbe0; --dim:#8b93a0; --acc:#f4b860; --card:#0f1115; --line:#2a2d35; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #16181d; color: var(--fg);
+    font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  code, .mono, .stats, .live, .nf input, #version { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code { background: #0f1115; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: .9em; }
+  a { color: var(--acc); }
+
+  header { max-width: 820px; margin: 0 auto; padding: 18px 16px 6px; }
+  .crumb { color: var(--dim); font-size: 13px; }
+  h1 { font-size: 24px; margin: 4px 0 2px; }
+  .sub { color: var(--dim); margin: 0; }
+  #version {
+    position: fixed; top: 8px; right: 10px; z-index: 10;
+    font-size: 12px; color: var(--acc); background: #0009; border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 7px;
+  }
+
+  /* the game */
+  #map { position: relative; width: 100%; max-width: 720px; margin: 12px auto 0;
+         aspect-ratio: 20 / 15; background: #1a1c22; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* one D-pad (manual tank) bottom-left */
+  .pad { position: absolute; bottom: 8px; left: 8px; width: 126px; height: 126px;
+         display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: repeat(3,1fr);
+         gap: 6px; touch-action: none; }
+  .padbtn { border: 1px solid #f29e2966; background: #ffffff1c; color: #fff; border-radius: 8px;
+            font-size: 18px; line-height: 1; cursor: pointer; touch-action: none; user-select: none;
+            -webkit-user-select: none; padding: 0; }
+  .padbtn:active { background: #f4b86066; }
+  .padbtn.u { grid-column: 2; grid-row: 1; } .padbtn.l { grid-column: 1; grid-row: 2; }
+  .padbtn.r { grid-column: 3; grid-row: 2; } .padbtn.d { grid-column: 2; grid-row: 3; }
+
+  /* scroll buttons (move the viewport one screen) */
+  .scrollbtn { position: absolute; z-index: 3; width: 34px; height: 34px; border-radius: 8px;
+               background: #0f1115cc; border: 1px solid var(--line); color: var(--fg);
+               font-size: 17px; line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; padding: 0; }
+  .scrollbtn:hover { border-color: var(--acc); }
+  .scrollbtn.su { top: 8px; left: 50%; transform: translateX(-50%); }
+  .scrollbtn.sd { bottom: 8px; left: 50%; transform: translateX(-50%); }
+  .scrollbtn.sl { left: 8px; top: 50%; transform: translateY(-50%); }
+  .scrollbtn.sr { right: 8px; top: 50%; transform: translateY(-50%); }
+  #camlabel { position: absolute; top: 8px; right: 8px; z-index: 3; font-size: 12px; color: var(--acc);
+              background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+
+  #status { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--acc); }
+  #help { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--dim); font-size: 14px; }
+  #help b { color: #c7ccd4; }
+
+  /* the article */
+  article { max-width: 820px; margin: 0 auto; padding: 8px 16px 80px; }
+  article h2 { font-size: 19px; margin: 34px 0 8px; color: var(--acc); }
+  article h2:first-of-type { margin-top: 22px; }
+  article p { margin: 10px 0; }
+  article .note { color: var(--dim); font-size: 14px; }
+  .fig { margin: 14px 0; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .fig .cap { color: var(--dim); font-size: 13px; margin: 0 0 8px; }
+
+  /* widgets */
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { flex: 1; padding: 8px 4px; background: #2b2f3a; color: var(--fg); border: 1px solid #3a3f4c;
+           border-radius: 6px; cursor: pointer; font: inherit; }
+  button:hover { background: #353a47; }
+  select { background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 6px; padding: 5px; font: inherit; }
+  .stats { padding: 8px 10px; background: #000; border-radius: 6px; font-size: 13px; }
+  .stats b { color: #fff; }
+  .chk { flex: 1.6; display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 13px; cursor: pointer; }
+  .chk input { accent-color: var(--acc); }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
+  .nf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
+  .nf span { color: var(--dim); font-size: 14px; }
+  .nf input { width: 130px; padding: 4px 6px; background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 4px; }
+  .tankbox { padding: 8px; background: #000; border-radius: 6px; margin: 6px 0; border-left: 3px solid #555; }
+  .tankbox.t0 { border-left-color: #f29e29; } .tankbox.t1 { border-left-color: #4db3e6; }
+  .tankbox.t2 { border-left-color: #78cd78; } .tankbox.t3 { border-left-color: #c48ceb; }
+  .tt { font-weight: 700; margin-bottom: 4px; color: #c7ccd4; }
+  .live { margin-top: 5px; color: var(--dim); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+
+  /* the camera-screen grid editor + flow field */
+  .cellgrid { display: grid; gap: 1px; background: var(--line); padding: 1px; border-radius: 4px; max-width: 460px; }
+  .cell { aspect-ratio: 1; background: #14161b; cursor: pointer; font-size: 9px; color: #6f7785;
+          display: flex; align-items: center; justify-content: center; line-height: 1; }
+  .cell.on { background: #525a68; }
+  .cell.tgt { background: #f4b860; color: #000; }
+  .cell.arr { color: #78cd78; }
+  .cell:hover { outline: 1px solid var(--acc); outline-offset: -1px; }
+
+  /* minimap of the 4x4 world */
+  #w-minimap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-width: 220px; }
+  .scr { aspect-ratio: 20/15; background: #14161b; border: 1px solid var(--line); border-radius: 4px;
+         cursor: pointer; position: relative; }
+  .scr.cam { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; }
+  .scr .dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; transform: translate(-50%,-50%); }
+
+  .matrix { overflow: auto; max-height: 320px; border: 1px solid var(--line); border-radius: 6px; }
+  table.mx { border-collapse: collapse; font-size: 11.5px; font-family: ui-monospace, monospace; }
+  table.mx td, table.mx th { padding: 2px 5px; border: 1px solid #20232b; text-align: right; color: var(--dim); white-space: nowrap; }
+  table.mx th { color: #c7ccd4; position: sticky; top: 0; background: #0f1115; }
+  .elist { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+  .elist div { padding: 3px 8px; border-bottom: 1px solid #20232b; color: var(--dim); }
+  .elist b { color: #c7ccd4; }
+</style>
+</head>
+<body>
+  <div id="version">v…</div>
+  <header>
+    <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 2</div>
+    <h1>Bigger Maps &amp; Pathing</h1>
+    <p class="sub">A 4×4 world and tanks that route themselves across it — every path table live on the page.</p>
+  </header>
+
+  <div id="map">
+    <canvas id="gpu"></canvas>
+    <div id="camlabel">screen 0,0</div>
+    <button class="scrollbtn su" title="scroll up">▲</button>
+    <button class="scrollbtn sd" title="scroll down">▼</button>
+    <button class="scrollbtn sl" title="scroll left">◄</button>
+    <button class="scrollbtn sr" title="scroll right">►</button>
+  </div>
+  <div id="status">loading…</div>
+  <div id="help">
+    <b>Manual tank (amber):</b> W/S move · A/D turn, or the on-screen pad. &nbsp;
+    <b>Pathed tanks:</b> tap one to select it, then tap a cell to send it there. The
+    <span class="swatch" style="background:#78e682"></span> dots are its route. Arrows
+    <b>◄ ▲ ▼ ►</b> scroll the viewport one screen.
+  </div>
+
+  <article>
+    <p>This is chapter two of an interactive book about
+    <a href="https://github.com/macton/nagent/blob/master/context/data-oriented-design.md">data-oriented design</a>.
+    Chapter 1 was two tanks on a single grid of walls. Chapter 2 grows the world to a
+    <strong>4×4 arrangement of screen-grids</strong> and adds <strong>pathing</strong>:
+    a tank you give a destination, and it routes itself there along the shortest wall-free
+    way, across screens and around the world's wrap. As before, every data structure below
+    is <em>live</em> — it reads and pokes the running game's memory directly.</p>
+
+    <p>The whole chapter is one idea applied twice: <strong>the path is a table, and a
+    moving tank just does a lookup.</strong> Working out the shortest route is the
+    expensive part, so we do it once against the rarely-changing walls and store the
+    answer; per tick a tank reads the next step. The art is making the stored answer
+    small.</p>
+
+    <h2>The world is one big toroidal grid, organised as screens</h2>
+    <p>Mechanically there is a single <code>(4·20)×(4·15)</code> = <strong>80×60</strong>
+    toroidal grid. The 4×4 split into 20×15 <em>screens</em> is an organisation — for
+    display (the viewport shows one screen), for scrolling, and for the two-level pathing
+    below. A tank crosses from one screen into its neighbour wherever the border cell and
+    the neighbouring cell are <em>both open</em> — exactly chapter 1's "depends only on the
+    wall on the far side" rule, now applied at every inner screen edge and at the outer
+    wrap. The default map leaves a one-cell gap at the centre of each screen border; those
+    gaps line up, so the whole world is connected. Scroll around with the arrows; the
+    little map shows where you are:</p>
+    <div class="fig">
+      <p class="cap">the 4×4 world · the bordered square is the viewport · dots are tanks · click a screen to jump there</p>
+      <div id="w-minimap"></div>
+      <div id="w-stats" style="margin-top:10px"></div>
+      <div id="w-controls" style="margin-top:8px"></div>
+    </div>
+    <p class="note">The viewport is presentation only: scrolling changes what you see,
+    never the simulation. A tank keeps pathing whether or not its screen is in view.</p>
+
+    <h2>Two tank classes, stored as a partition — no class tag</h2>
+    <p>There is one <strong>manual</strong> tank (amber, index 0), driven exactly as in
+    chapter 1, and three <strong>pathed</strong> tanks (indices 1–3) that route themselves.
+    Both classes share every per-tank field and run through the same
+    <code>turn</code>/<code>move</code> transforms — the <em>only</em> difference is where
+    each tank's input comes from: the manual tank from the keyboard/pad, a pathed tank
+    from the path lookup. So there is no class byte at all; the <strong>index range is the
+    class</strong> (0 manual, 1+ pathed). A pathed tank's per-tick input is just the next
+    cardinal toward its goal, turned into the same button bits the manual tank uses and fed
+    into the same movement model — the movement code is not forked.</p>
+    <div class="fig">
+      <p class="cap">per-tank data · class is the index · for pathed tanks: goal cell, status, and the current direction lookup</p>
+      <div id="w-tanks"></div>
+    </div>
+
+    <h2>Level 1 — within a screen: all-pairs, stored as distance</h2>
+    <p>Inside one screen you must be able to route <em>any</em> cell to any cell. That is
+    the all-pairs table the <a href="../../grid-paths/">grid-paths</a> project builds. It
+    sounds huge — 300 cells is ~90,000 ordered pairs — but it shrinks once you store it to
+    its real domain, and keeping it small <em>is</em> the exercise.</p>
+    <p>The key move: <strong>store the metric, derive the arrow.</strong> The distance is
+    symmetric (<code>dist(a,b) == dist(b,a)</code>), so we keep just the upper triangle —
+    one <code>uint16</code> per unordered pair. The <em>next direction</em> is <em>not</em>
+    symmetric, so we don't store it; we read it off the distances at runtime: the next step
+    from a cell toward a target is the neighbour whose stored distance to the target is one
+    less. One table serves both the per-tick arrow and the Level-2 weights below. Pick a
+    target cell and watch its flow field — the arrow every cell would take to reach it,
+    derived live from the distances:</p>
+    <div class="fig">
+      <p class="cap">a screen's flow field · choose a screen and click a target cell · arrows are derived from the stored distances</p>
+      <div id="w-flow"></div>
+    </div>
+    <p>Per screen that is <code>300·301/2</code> = 45,150 pairs × 2 bytes = <strong>90&nbsp;KB</strong>,
+    and <strong>1.41&nbsp;MB</strong> for all 16 screens — the dominant cost, and the
+    reason the wasm's static memory is raised from chapter 1's 1&nbsp;MiB to 4&nbsp;MiB
+    (still no dynamic allocation; a deliberate, stated static size). It is built by a
+    breadth-first fill on init and rebuilt for one screen when you edit a wall there —
+    rarely — and read by a lookup every tick. Toggle walls in the current screen and watch
+    the flow field re-solve:</p>
+    <div class="fig">
+      <p class="cap">the current screen's wall bitset · click a cell to toggle it (rebuilds that screen's Level-1 table + the edge graph)</p>
+      <div id="w-grid"></div>
+    </div>
+
+    <h2>Level 2 — between screens: a next-hop matrix over edge points</h2>
+    <p>The <strong>connecting edge points</strong> are the open border cells whose
+    neighbour across the border is also open — the matching gaps. Over just those points we
+    build a second all-pairs table: for a start point A and an end point B, the next edge
+    point on the shortest route (and its length). The win is that this is built
+    <strong>on top of Level 1</strong>: two edge points on the same screen are joined by an
+    edge weighted with that screen's Level-1 distance; crossing a matched border costs 1.
+    So Level 2 never re-walks the grid — it reuses the distances Level 1 already stored, and
+    a small Floyd–Warshall fills the matrix. With the default map there are only 64 edge
+    points, so the matrix is tiny.</p>
+    <div class="fig">
+      <p class="cap">the connecting edge points (matched gaps) and the next-hop matrix · pick a source edge point to see its row</p>
+      <div id="w-edges"></div>
+      <div id="w-nexthop" style="margin-top:10px"></div>
+    </div>
+
+    <h2>Composing the two levels into a route</h2>
+    <p>When you click a destination, we fold the matrix into a tiny per-tank vector: for
+    every edge point, the shortest <em>remaining</em> distance to the goal (Level-2 distance
+    to a goal-screen entry point, plus that screen's Level-1 distance in to the goal cell).
+    That fold happens once, when the destination changes — not per tick. After that, each
+    tick a pathed tank in screen <em>S</em> either follows <em>S</em>'s Level-1 flow
+    straight to the goal (if it's there and reachable) or picks the exit edge point that
+    minimises <em>distance-to-the-exit + 1 + remaining-from-its-partner</em> — a handful of
+    table reads, never a search. Because every step strictly decreases the true remaining
+    distance, the route is the globally shortest one, it never enters a wall, and an
+    unreachable destination produces no path at all (shown as such) rather than a spin. The
+    highlighted dots are this route, read straight out of the same tables the tank
+    follows.</p>
+    <p>Tune the pace and drive the manual tank into things to feel the inherited chapter-1
+    movement (slide along walls, auto-steer out of corners) — pathed tanks ride on top of
+    the very same model:</p>
+    <div class="fig">
+      <p class="cap">tunables · per-tick amounts (collide_scale is out of 256)</p>
+      <div id="w-tunables"></div>
+    </div>
+
+    <h2>What this bought us</h2>
+    <p>No allocation, no floats, no objects — a 4×4 world with self-routing tanks in a few
+    kilobytes of WebAssembly plus a couple of megabytes of flat, packed integer tables, all
+    sized to their real domain and all printable on this page. Each table has a job you can
+    state: how often it is built, how often it is read, and why it is shaped the way it is.
+    The simulation is still fully separated from rendering and wasm, so the whole thing —
+    the pathing included — is tested natively with no browser or GPU.</p>
+
+    <p class="note">Source for this chapter:
+    <a href="src/sim.c">sim.c</a> ·
+    <a href="src/grid_paths.c">grid_paths.c</a> ·
+    <a href="src/edge_paths.c">edge_paths.c</a> ·
+    <a href="src/tanks_path.c">tanks_path.c</a> ·
+    <a href="src/render.c">render.c</a> ·
+    <a href="src/wasm.c">wasm.c</a> ·
+    <a href="src/test.c">test.c</a> ·
+    <a href="README.md">README</a> ·
+    <a href="CONTRACT.md">CONTRACT</a></p>
+  </article>
+
+  <script src="version.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
