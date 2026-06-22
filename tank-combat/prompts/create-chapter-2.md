@@ -87,22 +87,40 @@ These are requirements, not suggestions.
 Path **hierarchically**, two levels, both built as precomputed tables read by a
 per-tick lookup (never a per-tick search):
 
-### Level 1 — within a screen-grid: a grid-paths flow field
-Use the **grid-paths method**: for a given **target** cell, store a per-source
-table of `{ dir, dist }` — `dir` is the bitmask of the next step(s) along a
-shortest path from that source toward the target (N/S/E/W, possibly several when
-tied), `dist` is the shortest distance. Pathing toward that target is then a
-**lookup of the current cell's `dir`** each step; `dist` gives length and tells you
-when a region is unreachable (as grid-paths marks with `dist = -1`, including its
-island handling). Build it by the shortest-path fill grid-paths uses, and — if you
-support editing walls live — update incrementally as it does.
+### Level 1 — within a screen-grid: grid-paths all-pairs routing
+Within a single screen you must be able to path **any cell to any cell** (including
+the connecting edge points), so the intra-screen data is effectively the
+**all-pairs** table grid-paths builds: for a **target** cell, the next step toward
+it from each source (grid-paths' `{ dir, dist }`, with its `dist = -1` / island
+handling for unreachable). Per-tick pathing is then a **lookup of the current
+cell's next step**. Build it by grid-paths' shortest-path fill, updating
+incrementally if you allow live wall edits.
 
-**Do not store a flow field for every cell of every screen** — that is
-`(GRID_W·GRID_H)²` per screen × 16 screens (≈ hundreds of MB); it violates "size to
-the real domain." Store flow fields only for the targets you actually reuse — the
-screen's **connecting edge points** (stable, few; see Level 2) — and compute the
-one flow field for the player's final clicked destination on demand. State the
-resulting memory budget.
+All-pairs sounds huge but is small once stored to its real domain — and keeping it
+small *is* the data-oriented exercise of this chapter. Per screen there are
+`GRID_W·GRID_H` (= 300) cells → ~90k ordered (source, target) pairs. The levers,
+to be worked out carefully (the exact scheme is yours to design and justify):
+- **A direction is 2 bits** (N/S/E/W): ~90k × 2 bits ≈ 22 KB/screen (~360 KB for
+  16) if you store direction directly. Decide how to encode what doesn't fit 2
+  bits: **unreachable ("blocked") is rare → keep it out of the 2-bit field** (a
+  separate sparse set / per-screen list) and pick one canonical step on ties. For a
+  first cut, 3–4 bits/element (room for a "none" code) is fine; tighten later.
+- **The pair is symmetric**, so there is ~2× redundancy to fold — store each
+  unordered pair once. But fold along the symmetry that *actually* holds: the
+  **distance** is symmetric (`dist(a,b) == dist(b,a)`) and the shortest-path cell
+  set is symmetric, whereas the **next direction** from a→b is *not* the next
+  direction from b→a (it is the far end of the same path). A clean resolution is to
+  store the **symmetric all-pairs distance** (upper triangle) and **derive the
+  2-bit direction at runtime** by stepping to the lower-distance neighbour — store
+  the metric, derive the arrow (the "find the minimal data the answer depends on"
+  move). This also hands Level-2 its edge-point distances for free.
+- **The per-target tables are not independent** — grid-paths shows that one
+  obstacle edits many targets' tables and that neighbouring targets' fields differ
+  by little. So do **not** store 300 independent per-cell tables; share their
+  common structure. Read grid-paths closely for these couplings.
+
+State the final layout and per-screen / total byte budget. The destination the
+player clicks is just a target slice of this table — no separate on-demand build.
 
 ### Level 2 — between screen-grids: a next-hop matrix over edge points
 The **connecting edge points** are the open cells on screen-grid borders that
