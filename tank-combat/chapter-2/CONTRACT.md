@@ -54,9 +54,8 @@ modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world
 - **A pathed tank reaches a reachable target without ever entering a wall.** Across
   the run its footprint never overlaps a wall cell, and it stops on the exact
   destination cell. (Holds for same-screen, cross-screen, and wrap targets.)
-- **An unreachable destination produces no path, not a spin.** If the goal is in a
-  sealed region, the tank's status is `PS_NOPATH`, it never drives into a wall, and
-  it stays put — no spin, no wall-grind.
+- **An unreachable destination produces no path.** If the goal is in a sealed region,
+  the tank's status is `PS_NOPATH`, it never drives into a wall, and it stays put.
 - **Selection & destination are explicit, single-target.** Tapping a tank cycles
   its state; tapping a cell while a tank is *auto-path* sets that tank's
   destination and **replaces** any prior one. Each routing tank's drawn path is

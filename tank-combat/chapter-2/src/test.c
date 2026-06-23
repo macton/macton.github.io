@@ -199,7 +199,7 @@ static void t_unreachable(void) {
   run_to_dest(&W, 0, 3, 3, 1500, &arrived, &footbad, &ticks);
   check(!arrived && W.pstatus[0] == PS_NOPATH, "sealed cell reported as no-path");
   check(!footbad, "no-path tank never drove into a wall");
-  check(W.tank_xy[0] == before, "no-path tank stays put (no spin/grind)");
+  check(W.tank_xy[0] == before, "no-path tank stays put");
 }
 
 /* ---- the tank state machine (CONTRACT.md) -------------------------------- */

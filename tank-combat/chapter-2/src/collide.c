@@ -2,10 +2,10 @@
 
 /* TANK_R < SUB, so the footprint spans at most two cells per axis. Those two
  * cells may fall in different screens at a border, so we test each via
- * cell_is_wall (which resolves the screen and wraps) rather than a single
- * row-word mask — the whole-world bitset is screen-major, not one word per
- * world row. The leading-edge cell may sit one cell outside [0,BIG_W)/[0,BIG_H)
- * before wrapping; cell_is_wall handles that. */
+ * cell_is_wall, which resolves the screen and wraps; the whole-world bitset is
+ * screen-major (one word per screen-row), so a cross-border span needs the
+ * per-cell resolve. The leading-edge cell may sit one cell outside
+ * [0,BIG_W)/[0,BIG_H) before wrapping; cell_is_wall handles that. */
 int blocked_x(const uint32_t* grid, int32_t nx, int32_t y, int32_t mx) {
   int32_t ex  = nx + (mx > 0 ? TANK_R : -TANK_R);   /* leading x edge      */
   int32_t col = ex >> SUB_SHIFT;                     /* world column it enters */

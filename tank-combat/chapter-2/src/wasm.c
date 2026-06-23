@@ -8,7 +8,6 @@
  *   set_input(tank, bits)         drive the MANUAL tank
  *   cycle_tank(tank)              cycle a tank UNSELECTED->AUTOPATH->MANUAL->...
  *   set_dest(tank, wcx, wcy)      give a tank a destination (world cell)
- *   deselect()                    drop selection (paths keep running)
  *   toggle_wall(wcx, wcy)         flip a wall, rebuild affected tables
  *   set_camera(sx,sy) / set_slide(to_sx,to_sy,dx,dy) / clear_slide()
  *                                 the host drives the follow camera + screen slide

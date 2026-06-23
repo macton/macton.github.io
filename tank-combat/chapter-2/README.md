@@ -53,7 +53,7 @@ and wraps at the big-grid edge, so:
 
 ## One kind of tank, three states
 
-All `N_TANKS` (= 4) tanks are **identical** — no classes. Each carries a `tstate`
+All `N_TANKS` (= 4) tanks are **identical**. Each carries a `tstate`
 (`TS_UNSELECTED` / `TS_AUTOPATH` / `TS_MANUAL`), cycled by tapping it; at most one
 is `selected`. They share every field and the *same* `tanks_turn`/`tanks_move`;
 the only difference is the **source** of `tank_in`: a `TS_MANUAL` tank from
@@ -65,14 +65,13 @@ control **abandons the destination** (set in `sim_cycle_tank` when entering
 `TS_MANUAL`), so deselecting from MANUAL leaves the tank where it is, while
 deselecting from AUTO-PATH (by selecting another tank) keeps it routing.
 
-A routing tank's per-tick input is the next cardinal toward its goal, turned into
-the *same* button bits a driven tank uses (turn toward the cardinal; drive only
-when the discrete heading is exactly aligned). Because `tanks_move` steps along
-`di = angle>>11` (the discrete heading), "exactly aligned" is exactly axis-
-aligned, so the tank tracks grid cells and never clips a corner — **the movement
-transform is not forked**. It snaps to the cell centre at each turn (a Pac-Man-
-style grid tracker), which keeps it centred through the one-cell inter-screen
-gaps regardless of speed.
+A routing tank's per-tick input is the next cardinal toward its goal, written as the
+*same* button bits a driven tank uses: turn toward the cardinal, drive only when the
+discrete heading is exactly aligned. Because `tanks_move` steps along `di = angle>>11`
+(the discrete heading), "exactly aligned" is exactly axis-aligned, so the tank tracks
+grid cells and never clips a corner. It snaps to the cell centre at each turn (a
+Pac-Man-style grid tracker), which keeps it centred through the one-cell inter-screen
+gaps at any speed.
 
 ## The pathing: two precomputed levels, read by a lookup
 
@@ -95,22 +94,19 @@ the arrow**:
   folded — but distance can, and the distance is also exactly what Level 2 needs,
   so one table serves both ("find the minimal data the answer depends on").
 
-**One byte, sized to the real data.** A distance here isn't an arbitrary runtime
-number — it's built from the grid, so it's small, bounded, and known at build
-time. We can even *prove* the bound: a shortest path never revisits a cell, and no
-2×2 block lies entirely on an induced path (four cells close a loop), so the
-longest in-screen distance is `≤ N_CELLS − (GRID_W/2)·(GRID_H/2) − 1 = 229`, well
-under the 255 a byte holds. A `_Static_assert` (`grid_paths.h`) makes that a
-compile-time guarantee; the build/edit also *measures* the actual max (shown on
-the page — 29 on the default map) so a violation would be detected rather than
-silently truncated. If a future, much larger screen ever broke the static bound,
-the build fails and you fix the design (or escalate to a per-screen bit depth) —
-no speculative width spent now.
+**One byte, sized to the real data.** Each distance is built from the grid, so it is
+small, bounded, and known at build time — and the bound is provable: a shortest path
+never revisits a cell, and no 2×2 block lies entirely on an induced path (four cells
+close a loop), so the longest in-screen distance is
+`≤ N_CELLS − (GRID_W/2)·(GRID_H/2) − 1 = 229`, inside the 255 a byte holds. A
+`_Static_assert` (`grid_paths.h`) makes that a compile-time guarantee; the build/edit
+also *measures* the actual max (shown on the page) so a screen exceeding the byte would
+be caught. If a future, larger screen broke the static bound, the build fails and you
+fix the design (or escalate to a per-screen bit depth).
 
 **Budget:** `TRI = 300·301/2 = 45,150` pairs × 1 byte = **45 KB/screen**,
-**~706 KB** for 16 screens — the dominant cost, but small enough that the whole
-chapter stays inside chapter 1's 1 MiB. Built on init and rebuilt for *one* screen
-on a wall edit there; read every tick.
+**~706 KB** for 16 screens — the dominant table. Built on init, rebuilt for *one*
+screen on a wall edit there, read every tick.
 
 ### Level 2 — between screens: an edge-point next-hop matrix (`edge_paths.c`)
 
@@ -119,9 +115,8 @@ the matched border is also open. Over those points we build an all-pairs next-ho
 matrix (`nexthop[A][B]` = next edge point toward B; `dist2[A][B]` = its length) by
 Floyd–Warshall — **on top of Level 1**: two edge points on the same screen are
 joined by an edge weighted with that screen's Level-1 distance; crossing a matched
-border costs 1. So Level 2 never re-walks the grid; it reuses the Level-1
-distances. With the default map there are ~80 edge points, so the matrix is tiny
-(`dist2`/`nexthop` ≈ 48 KB at the static cap).
+border costs 1. Level 2 reuses the Level-1 distances. With the default map there are
+~80 edge points, so the matrix is tiny (`dist2`/`nexthop` ≈ 48 KB at the static cap).
 
 ### Composition (a route, with no per-destination grid search)
 
@@ -136,13 +131,11 @@ change. Per tick a pathed tank in screen `S`:
   `L1(cell→X) + 1 + pg[partner(X)]`, then follow Level-1 toward `X` (and cross
   when on it).
 
-A handful of table reads, **never a per-tick search**. Every step strictly
-decreases the true remaining distance, so the route is **globally shortest**
-(verified in tests against a brute-force BFS over the whole 80×60 grid), never
-enters a wall, and an unreachable goal yields *no path* (status `PS_NOPATH`)
-rather than a spin. The on-screen highlight is `path_trace` — the same per-tick
-lookup dry-run cell by cell — so it is read straight out of the tables the tank
-follows.
+A handful of table reads per tick. Every step strictly decreases the true remaining
+distance, so the route is **globally shortest** (verified in tests against a
+brute-force BFS over the whole 80×60 grid) and never enters a wall; an unreachable goal
+yields *no path* (status `PS_NOPATH`). The on-screen highlight is `path_trace` — the
+same per-tick lookup, run cell by cell — so it is read from the tables the tank follows.
 
 ## Source layout
 
@@ -159,17 +152,15 @@ New in chapter 2:
 | `src/tanks_path.c/.h` | per-tick transform: each non-manual tank's input bits from the route lookup (grid-tracking) |
 | `src/map.h`, `src/map_data.c` | the baked 4×4 world map (generated by `tools/gen_map.c`) |
 
-`sim.c` holds the `World` (now with the path tables + per-tank state), the per-tick
-order (`tanks_path` → `tanks_turn` → `tanks_move`), and the mutators
-(`sim_toggle_wall`, `sim_set_dest`, `sim_cycle_tank`, `sim_deselect`) that rebuild
-only the tables a change can affect. `render.c` (`build_view`) builds the viewport
-— the camera screen, plus the incoming screen during a slide, in screen-local
-quads (walls, per-tank coloured paths with overlap-split, tanks with a state
-outline). The camera (follow + slide + picker) lives in `wasm.c`/`app.js`, not the
-sim. Because the camera follows, paths update, and the view slides, the whole view
-changes every frame, so it is rebuilt each frame (no static/dynamic wall split —
-there is no large static part to hoist). `wasm.c` exports the protocol and table
-pointers. The dependency is one-way: render/wasm depend on sim, never the reverse.
+`sim.c` holds the `World` (path tables + per-tank state), the per-tick order
+(`tanks_path` → `tanks_turn` → `tanks_move`), and the mutators (`sim_toggle_wall`,
+`sim_set_dest`, `sim_cycle_tank`) that rebuild only the tables a change affects.
+`render.c` (`build_view`) builds the viewport — the camera screen, plus the incoming
+screen during a slide — in screen-local quads (walls, per-tank coloured paths with
+overlap-split, tanks with a state outline). The camera (follow + slide + picker) lives in
+`wasm.c`/`app.js`. The follow camera, the updating paths, and the slide change the whole
+view each frame, so it is rebuilt each frame. `wasm.c` exports the protocol and table
+pointers. The dependency is one-way: render and wasm depend on sim.
 
 ## Memory budget (static, no dynamic allocation)
 
@@ -184,9 +175,8 @@ Level-1 distance to a byte keeps the whole thing under that, with a 128 KB stack
 | instance buffer + highlight trace scratch | ~20 KB |
 
 `game.wasm` itself is ~14 KB of code. Every table is precomputed against the
-rarely-changing grid/connectivity and read by a per-tick lookup; data is packed
-and sized to its real domain (the Level-1 byte width is *proved* to fit and
-*measured* at build time, not provisioned for a worst case that can't occur).
+rarely-changing grid and read by a per-tick lookup; data is packed and sized to its real
+domain — the Level-1 byte width is *proved* to fit and *measured* at build time.
 
 ## Build
 
@@ -239,7 +229,6 @@ its destination); and that the inherited movement model still holds on the big g
 
 ## Deferred (not built — no speculative generality)
 
-Firing/projectiles, tank-vs-tank collision, dynamic edge-point counts beyond the
-static cap, incremental (rather than full-rebuild) Level-1 updates on wall edits,
-moving pathed tanks avoiding each other, multiple maps. Each is its own future
-step.
+Firing/projectiles, tank-vs-tank collision, dynamic edge-point counts beyond the static
+cap, incremental Level-1 updates on wall edits, moving pathed tanks avoiding each other,
+multiple maps. Each is its own future step.

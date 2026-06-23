@@ -190,52 +190,47 @@
     open the picker and look elsewhere and it carries on.</p>
 
     <h2>One kind of tank, three states</h2>
-    <p>All the tanks are <strong>identical</strong> — there are no classes. Each carries a
-    small <em>state</em> you cycle by tapping it: <strong>auto-path</strong> (tap a cell and
-    it routes there), <strong>manual</strong> (you drive it — the on-screen pad and W/S/A/D
-    appear only now), or <strong>unselected</strong> (it keeps following any route it was
-    given, otherwise sits). At most one tank is selected at a time, and its screen is
-    <em>followed</em> — when it drives across a border, the new screen slides in. The whole
-    behaviour difference between a driven tank and a routing one is just where its one input
-    byte comes from: the controls, or the path lookup — both feed the <em>same</em>
-    <code>turn</code>/<code>move</code> transforms (the movement code is not forked). So a
-    tank is the same data either way; the state only picks the input source.</p>
+    <p>All the tanks are <strong>identical</strong>. Each carries a small <em>state</em> you
+    cycle by tapping it: <strong>auto-path</strong> (tap a cell and it routes there),
+    <strong>manual</strong> (you drive it — the on-screen pad and W/S/A/D appear in this
+    state), or <strong>unselected</strong> (it keeps following any route it has). At most one
+    tank is selected at a time, and its screen is <em>followed</em>: when it drives across a
+    border, the new screen slides in. A tank's one input byte comes from one of two sources —
+    the controls or the path lookup — and both feed the same
+    <code>turn</code>/<code>move</code> transforms. The state picks the source; the data and
+    the movement are the same.</p>
     <div class="fig">
       <p class="cap">per-tank data · state, destination, status, and the current direction lookup · tap “cycle state” or the tank itself</p>
       <div id="w-tanks"></div>
     </div>
 
     <h2>Level 1 — within a screen: all-pairs, stored as distance</h2>
-    <p>Inside one screen you must be able to route <em>any</em> cell to any cell. That is
-    the all-pairs table the <a href="../../grid-paths/">grid-paths</a> project builds. It
-    sounds huge — 300 cells is ~90,000 ordered pairs — but it shrinks once you store it to
-    its real domain, and keeping it small <em>is</em> the exercise.</p>
-    <p>The key move: <strong>store the metric, derive the arrow.</strong> The distance is
-    symmetric (<code>dist(a,b) == dist(b,a)</code>), so we keep just the upper triangle —
-    one byte per unordered pair. The <em>next direction</em> is <em>not</em>
-    symmetric, so we don't store it; we read it off the distances at runtime: the next step
+    <p>Inside one screen you route <em>any</em> cell to any cell — the all-pairs table the
+    <a href="../../grid-paths/">grid-paths</a> project builds. 300 cells make ~90,000 ordered
+    pairs; the table below packs that into 45&nbsp;KB.</p>
+    <p>The key move: <strong>store the metric, derive the arrow.</strong> Distance is
+    symmetric (<code>dist(a,b) == dist(b,a)</code>), so we keep one byte per unordered pair —
+    the upper triangle. Direction is asymmetric, so we derive it at runtime: the next step
     from a cell toward a target is the neighbour whose stored distance to the target is one
     less. One table serves both the per-tick arrow and the Level-2 weights below. Pick a
-    target cell and watch its flow field — the arrow every cell would take to reach it,
-    derived live from the distances:</p>
+    target cell and watch its flow field — the arrow each cell takes to reach it, derived
+    live from the distances:</p>
     <div class="fig">
       <p class="cap">a screen's flow field · choose a screen and click a target cell · arrows are derived from the stored distances</p>
       <div id="w-flow"></div>
     </div>
-    <p>How big is one entry? A distance here is small, bounded data — not an arbitrary
-    number — so we size to what it can actually be. A shortest path inside a screen never
-    revisits a cell, and no 2×2 block can sit entirely on it (four cells would close a
-    loop), so the longest in-screen distance is at most <code>300 − 10·7 − 1 = 229</code>:
-    it <strong>provably fits one byte</strong> (255 is reserved for "unreachable"). So we
-    store a <code>uint8</code>, not two — <code>45,150</code> pairs × 1 byte =
-    <strong>45&nbsp;KB/screen</strong>, <strong>706&nbsp;KB</strong> for all 16 — and the
-    whole chapter stays inside chapter 1's 1&nbsp;MiB, still with no dynamic allocation.
-    And because the table is built from the grid (at build/edit time, not from arbitrary
-    input), we also just <em>measure</em> the longest distance — shown in the counters
-    above — so if a screen ever did exceed the byte, we'd see it and fix the design rather
-    than pay for two bytes everywhere on the chance. Built by a breadth-first fill on init,
-    rebuilt for one screen when you edit a wall there — rarely — and read by a lookup every
-    tick. Toggle walls in the current screen and watch the flow field re-solve:</p>
+    <p>How big is one entry? Each distance is built from the grid, so it is small and
+    bounded, and the bound is provable. A shortest path inside a screen never revisits a
+    cell, and no 2×2 block can sit entirely on one (four cells would close a loop), so at
+    most three of every four cells lie on it: the longest in-screen distance is at most
+    <code>300 − 10·7 − 1 = 229</code>. That fits one <strong>byte</strong> (255 is reserved
+    for "unreachable"), guaranteed at compile time by a <code>_Static_assert</code>. The
+    build also measures the actual longest distance — shown in the counters above — so a
+    screen that ever exceeded the byte would be caught.</p>
+    <p>So one entry is one byte: <code>45,150</code> pairs = <strong>45&nbsp;KB</strong> per
+    screen, <strong>706&nbsp;KB</strong> for all 16. The table is filled by a breadth-first
+    search on init, rebuilt for one screen when you edit a wall there, and read by a lookup
+    every tick. Toggle walls in the current screen and watch the flow field re-solve:</p>
     <div class="fig">
       <p class="cap">the current screen's wall bitset · click a cell to toggle it (rebuilds that screen's Level-1 table + the edge graph)</p>
       <div id="w-grid"></div>
@@ -248,9 +243,8 @@
     point on the shortest route (and its length). The win is that this is built
     <strong>on top of Level 1</strong>: two edge points on the same screen are joined by an
     edge weighted with that screen's Level-1 distance; crossing a matched border costs 1.
-    So Level 2 never re-walks the grid — it reuses the distances Level 1 already stored, and
-    a small Floyd–Warshall fills the matrix. With the default map there are only ~80 edge
-    points, so the matrix is tiny.</p>
+    Level 2 reuses the distances Level 1 already stored, and a small Floyd–Warshall fills
+    the matrix. With the default map there are only ~80 edge points, so the matrix is tiny.</p>
     <div class="fig">
       <p class="cap">the connecting edge points (matched gaps) and the next-hop matrix · pick a source edge point to see its row</p>
       <div id="w-edges"></div>
@@ -265,12 +259,11 @@
     tick a routing tank in screen <em>S</em> either follows <em>S</em>'s Level-1 flow
     straight to the goal (if it's there and reachable) or picks the exit edge point that
     minimises <em>distance-to-the-exit + 1 + remaining-from-its-partner</em> — a handful of
-    table reads, never a search. Because every step strictly decreases the true remaining
-    distance, the route is the globally shortest one, it never enters a wall, and an
-    unreachable destination produces no path at all (shown as such) rather than a spin. Each
-    routing tank's path is drawn in its own colour, read straight out of the same tables it
-    follows; where two paths share a cell the marker splits into coloured strips so both
-    stay visible.</p>
+    table reads. Because every step strictly decreases the true remaining distance, the route
+    is the globally shortest one and never enters a wall; an unreachable destination produces
+    no path at all, shown as such. Each routing tank's path is drawn in its own colour, read
+    from the same tables it follows; where two paths share a cell the marker splits into
+    coloured strips so both stay visible.</p>
     <p>Tune the pace and drive a tank (tap it twice to make it manual) into things to feel
     the inherited chapter-1 movement (slide along walls, auto-steer out of corners) — the
     auto-pathing tanks ride on top of the very same model:</p>
@@ -280,12 +273,12 @@
     </div>
 
     <h2>What this bought us</h2>
-    <p>No allocation, no floats, no objects — a 4×4 world with self-routing tanks in a few
-    kilobytes of WebAssembly plus a couple of megabytes of flat, packed integer tables, all
-    sized to their real domain and all printable on this page. Each table has a job you can
-    state: how often it is built, how often it is read, and why it is shaped the way it is.
-    The simulation is still fully separated from rendering and wasm, so the whole thing —
-    the pathing included — is tested natively with no browser or GPU.</p>
+    <p>Static memory, integer math, flat tables: a 4×4 world with self-routing tanks in a few
+    kilobytes of WebAssembly plus under a megabyte of packed integer tables, all sized to
+    their real domain and printable on this page. Each table has a stated job — how often it
+    is built, how often it is read, and why it is shaped the way it is. The simulation is
+    separated from rendering and wasm, so the whole thing, pathing included, is tested
+    natively with no browser or GPU.</p>
 
     <p class="note">Source for this chapter:
     <a href="src/sim.c">sim.c</a> ·

@@ -12,9 +12,8 @@
  * subcells. The camera follows the selected tank, and when it changes screen the
  * page slides the new screen in — so the renderer can build TWO screens at once
  * (the from-screen at offset 0 and the to-screen at a one-screen offset) and the
- * host animates the view between them. Because the camera follows, paths update,
- * and the view slides, the whole view changes every frame, so it is rebuilt each
- * frame (no static/dynamic split — there is no large static part to hoist).
+ * host animates the view between them. The follow camera, the updating paths, and
+ * the slide change the whole view every frame, so it is rebuilt each frame.
  *
  * Each tank shows its IDENTITY as a body colour and its STATE as an outline
  * (AUTOPATH / MANUAL / none). A pathing tank's route is drawn in a lighter shade

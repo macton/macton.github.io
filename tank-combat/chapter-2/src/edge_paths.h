@@ -9,8 +9,8 @@
  * COMPOSITION (the data-oriented win): the matrix is built ON TOP OF Level 1.
  * Two edge points on the same screen are joined by an edge weighted with that
  * screen's Level-1 distance between their cells; crossing a matched inner edge
- * costs 1. So Level 2 never re-walks the grid — it reuses the distances Level 1
- * already stored, and Floyd-Warshall over the few edge points fills the matrix.
+ * costs 1. Level 2 reuses the distances Level 1 already stored, and Floyd-Warshall
+ * over the few edge points fills the matrix.
  *
  * A pathed tank's route composes the two levels without any per-destination
  * grid search: when the destination is set we fold the matrix into a small
@@ -19,7 +19,7 @@
  * distance in to the goal cell). Per tick the tank, in screen S, either follows
  * S's Level-1 flow straight to the goal (if it's in S and reachable) or picks the
  * exit edge point X of S minimising L1(cell->X) + 1 + pg[partner(X)] — a handful
- * of table reads, never a search. */
+ * of table reads. */
 #ifndef TANK_EDGE_PATHS_H
 #define TANK_EDGE_PATHS_H
 

@@ -2,25 +2,22 @@
  * to any cell. This is the all-pairs table the `grid-paths` project builds
  * (macton.github.io/grid-paths), sized down to its real domain.
  *
- * WHAT WE STORE: the symmetric all-pairs *distance* per screen, upper triangle.
- * WHAT WE DERIVE: the next step. dist(a,b) == dist(b,a) (the within-screen graph
- * is undirected), but the next direction a->b is NOT the next direction b->a, so
- * direction can't be folded by symmetry — distance can. So we store the metric
- * (one byte per unordered pair) and read the arrow off it at runtime: the next
- * step from s toward t is the in-screen neighbour whose dist to t is one less.
- * The distance is also exactly what LEVEL 2 needs to weight its edge-point graph,
- * so one table serves both, and the per-tick step is a handful of lookups.
+ * STORE the metric, DERIVE the arrow. We keep the symmetric all-pairs *distance*
+ * per screen, upper triangle, one byte per unordered pair: dist(a,b) == dist(b,a)
+ * because the within-screen graph is undirected. The next direction is asymmetric
+ * (a->b differs from b->a), so we derive it at runtime: the next step from s toward
+ * t is the in-screen neighbour whose dist to t is one less. The distance is also
+ * what LEVEL 2 needs to weight its edge-point graph, so one table serves both, and
+ * the per-tick step is a handful of lookups.
  *
- * ONE BYTE, not two: the distance is build-time-known data, not adversarial
- * runtime input, so we size to what it can actually be — and here we can *prove*
- * it fits a byte. A 2x2 block of cells can't all lie on an induced path (they
- * form a 4-cycle), so at most 3 of every 4 do; the longest in-screen shortest
- * path is therefore <= N_CELLS - (GRID_W/2)*(GRID_H/2) - 1 = 229 for a 20x15
- * screen, well under the 255 a byte holds (L1_INF reserves 0xFF for
- * unreachable). The _Static_assert below makes that a compile-time guarantee; if
- * a future screen size ever broke it, the build fails and you fix the design (or
- * escalate to a per-screen bit depth). l1_build_* also returns the *measured*
- * max so the page can show it.
+ * THE BYTE IS PROVABLE. Each distance is built from the grid, so we size to what it
+ * can be. A 2x2 block of cells can't all lie on an induced path (they form a
+ * 4-cycle), so at most 3 of every 4 do; the longest in-screen shortest path is
+ * therefore <= N_CELLS - (GRID_W/2)*(GRID_H/2) - 1 = 229 for a 20x15 screen, inside
+ * the 255 a byte holds (L1_INF reserves 0xFF for unreachable). The _Static_assert
+ * below makes that a compile-time guarantee; if a future screen size broke it, the
+ * build fails and you fix the design (or escalate to a per-screen bit depth).
+ * l1_build_* also returns the *measured* max so the page can show it.
  *
  * BUDGET: TRI = 300*301/2 = 45150 pairs * 1 byte = 45 KB/screen, ~706 KB for all
  * 16 screens. Built by BFS per cell on init and on a wall edit; read every tick. */
