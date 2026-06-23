@@ -9,8 +9,8 @@ approach** — here, that a shortest-path system is just *precomputed tables rea
 by a per-tick lookup*, sized to their real domain. Chapter 2 is an *increment* on
 chapter 1: it reuses its sim core (fixed-point types, the bitset grid,
 `tanks_turn`/`tanks_move`/`collide`, the baked trig and escape tables, the
-sim/render/wasm split, the instance-buffer split, version stamping, the native
-test harness) unchanged where it can.
+sim/render/wasm split, version stamping, the native test harness) unchanged where
+it can.
 
 Built following Mike Acton's data-oriented design rules:
 [**data-oriented-design.md**](https://github.com/macton/nagent/blob/master/context/data-oriented-design.md).
@@ -22,8 +22,10 @@ Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge).
   *unselected* (keeps following any route it has). At most one tank is selected.
 - The selected tank's screen is **followed**; crossing a border slides the next
   screen in. Each routing tank draws its route in its own colour.
-- **Look around:** tap the **screen x,y ▾** badge to open the picker (a 4×4 map +
-  move arrows); picking a screen deselects any tank and goes there.
+- **Look around:** tap the **screen x,y ▾** badge to open the picker — a minimap of
+  the whole world (walls, tanks, live routes) + move arrows. It does **not**
+  deselect, so with a tank selected you can pick another screen and tap a cell
+  there to send it across the world; follow re-engages when you set the target.
 
 ## The world: one big toroidal grid, organised as screens
 
@@ -58,7 +60,10 @@ the only difference is the **source** of `tank_in`: a `TS_MANUAL` tank from
 `set_input` (the controls), every other tank from `tanks_path` (the path lookup,
 if it has a destination). Every tank can path, so the destination / status /
 remaining-distance arrays are sized `N_TANKS`. An `UNSELECTED` tank keeps following
-a route it was given; the state only chooses the input source.
+a route it was given; the state only chooses the input source. Taking manual
+control **abandons the destination** (set in `sim_cycle_tank` when entering
+`TS_MANUAL`), so deselecting from MANUAL leaves the tank where it is, while
+deselecting from AUTO-PATH (by selecting another tank) keeps it routing.
 
 A routing tank's per-tick input is the next cardinal toward its goal, turned into
 the *same* button bits a driven tank uses (turn toward the cardinal; drive only
@@ -115,7 +120,7 @@ matrix (`nexthop[A][B]` = next edge point toward B; `dist2[A][B]` = its length) 
 Floyd–Warshall — **on top of Level 1**: two edge points on the same screen are
 joined by an edge weighted with that screen's Level-1 distance; crossing a matched
 border costs 1. So Level 2 never re-walks the grid; it reuses the Level-1
-distances. With the default map there are 64 edge points, so the matrix is tiny
+distances. With the default map there are ~80 edge points, so the matrix is tiny
 (`dist2`/`nexthop` ≈ 48 KB at the static cap).
 
 ### Composition (a route, with no per-destination grid search)
@@ -206,7 +211,7 @@ on the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers (41 checks, see [CONTRACT.md](CONTRACT.md)): Level-1 symmetry
+`src/test.c` covers (43 checks, see [CONTRACT.md](CONTRACT.md)): Level-1 symmetry
 and that the derived arrow walk reaches a target in exactly the stored distance;
 that the in-screen distance fits a byte — the provable ceiling and the measured
 max, including a forced serpentine screen;
@@ -221,7 +226,7 @@ its destination); and that the inherited movement model still holds on the big g
 
 ## Verified
 
-- `./test.sh` passes (41 checks): the pathing tables, the globally-shortest-route
+- `./test.sh` passes (43 checks): the pathing tables, the globally-shortest-route
   proof vs brute-force BFS, wall-free arrival, unreachable handling, the
   tank state machine, and inherited movement.
 - `game.wasm` exercised in Node (init, the state cycle, tanks routing to cross-

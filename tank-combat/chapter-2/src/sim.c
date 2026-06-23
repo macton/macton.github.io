@@ -78,15 +78,11 @@ void sim_cycle_tank(World* w, uint32_t tank) {
     if (w->selected != SEL_NONE) w->tstate[w->selected] = TS_UNSELECTED;
     w->selected = (uint8_t)tank;
     w->tstate[tank] = TS_AUTOPATH;
-  } else if (w->tstate[tank] == TS_AUTOPATH) {
-    w->tstate[tank] = TS_MANUAL;
-  } else {                                           /* MANUAL -> deselect (keeps any destination) */
+  } else if (w->tstate[tank] == TS_AUTOPATH) {       /* taking manual control abandons the auto-path, */
+    w->tstate[tank] = TS_MANUAL;                      /* so deselecting from MANUAL leaves it where it is */
+    w->phas[tank] = 0; w->pstatus[tank] = PS_IDLE; w->pgoal[tank] = DIR_NONE;
+  } else {                                           /* MANUAL -> deselect (no destination to resume) */
     w->tstate[tank] = TS_UNSELECTED;
     w->selected = SEL_NONE;
   }
-}
-
-void sim_deselect(World* w) {
-  if (w->selected != SEL_NONE) w->tstate[w->selected] = TS_UNSELECTED;
-  w->selected = SEL_NONE;
 }

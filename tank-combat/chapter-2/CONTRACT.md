@@ -1,7 +1,7 @@
 # Chapter 2 contract — pathing & viewport
 
 The explicit promises chapter 2 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (41 checks). Chapter 2 **inherits chapter 1's
+tests in `src/test.c` enforce them (43 checks). Chapter 2 **inherits chapter 1's
 movement contract** ([../chapter-1/CONTRACT.md](../chapter-1/CONTRACT.md)) for any
 driven tank — sized footprint, rotate-then-move tick order, auto-steer reacting to
 the previous tick's `hit`, slide-on-walls, toroidal wrap, the collide-speed
@@ -15,8 +15,9 @@ modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world
   neighbouring cell are **both open** — the same far-side-wall rule as chapter 1.
   Each screen border has 0–2 matching openings; no screen is an island.
 - **The viewport is presentation only.** The camera follows the selected tank and
-  slides between screens, and the picker lets you look anywhere; none of it touches
-  the simulation. A tank keeps pathing whether or not its screen is in view.
+  slides between screens, and the picker lets you look anywhere (it does **not**
+  deselect, so a selected tank can be sent to a cell in another screen); none of it
+  touches the simulation. A tank keeps pathing whether or not its screen is in view.
 
 ## One kind of tank, three states
 
@@ -25,8 +26,12 @@ modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world
   (selected; driven by the one control set — keyboard + on-screen pad), or
   **unselected**. At most one tank is selected at a time. *(tested: the cycle, and
   that selecting one tank deselects the previously selected one.)*
-- **An UNSELECTED tank keeps following any route it was given** until it arrives; a
-  **MANUAL tank ignores its destination** and moves only by its input. *(tested.)*
+- **A tank keeps auto-pathing only while it was actively auto-pathing.** Taking
+  manual control **abandons the destination**, so a tank unselected *from* MANUAL
+  stays put; a tank unselected *from* AUTO-PATH (by selecting another) keeps its
+  route, and an UNSELECTED tank with a destination keeps following it. *(tested:
+  entering MANUAL clears the destination; unselect-from-MANUAL stays put;
+  select-another keeps pathing.)*
 - **A routing tank follows the shortest route** produced by the tables, takes a
   wall-free path, crosses matched openings and the outer wrap, and **stops on
   arrival** at the destination cell.

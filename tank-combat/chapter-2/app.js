@@ -126,18 +126,22 @@ async function main() {
   // --- camera (follow + slide) + picker -----------------------------------
   // wasm owns the camera (cam_sx/cam_sy); JS only animates the slide.
   const CAM = () => ({ sx: wasm.cam_sx(), sy: wasm.cam_sy() });
+  const R = { wasm, view, C };
   let slide = null;             // { dx, dy, toSx, toSy, t0 }
-  let pickerOpen = false;
+  let pickerOpen = false, manualView = false, lastSel = 255;
   function startSlide(toSx, toSy, dx, dy) {
     if (dx === 0 && dy === 0) { wasm.set_camera(toSx, toSy); return; }
     wasm.set_slide(toSx, toSy, dx, dy); slide = { dx, dy, toSx, toSy, t0: performance.now() / 1000 };
   }
+  // Opening the picker does NOT deselect — so a selected tank can be sent to a
+  // cell in another screen. Picking a screen enters "manual view" (follow paused);
+  // follow re-engages when you set a destination or (re)select a tank.
   function setPicker(open) {
     pickerOpen = open;
     document.getElementById("picker").style.display = open ? "grid" : "none";
     for (const a of document.querySelectorAll(".scrollbtn")) a.style.display = open ? "block" : "none";
-    if (open) wasm.deselect();
   }
+  function gotoScreen(sx, sy) { const c = CAM(); startSlide(sx, sy, sdir(c.sx, sx, C.SX), sdir(c.sy, sy, C.SY)); manualView = true; setPicker(false); }
 
   // canvas click: a tank cell -> cycle its state; an empty cell -> set the
   // selected (auto-path) tank's destination there.
@@ -150,28 +154,25 @@ async function main() {
     const cam = CAM(); const wcx = cam.sx * C.GW + lcx, wcy = cam.sy * C.GH + lcy;
     const xy = view.xy();
     for (let t = 0; t < C.NT; t++)
-      if ((xy[2 * t] >> 8) === wcx && (xy[2 * t + 1] >> 8) === wcy) { wasm.cycle_tank(t); return; }
+      if ((xy[2 * t] >> 8) === wcx && (xy[2 * t + 1] >> 8) === wcy) { wasm.cycle_tank(t); manualView = false; return; }
     const sel = wasm.selected();
-    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) wasm.set_dest(sel, wcx, wcy);
+    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) { wasm.set_dest(sel, wcx, wcy); manualView = false; }
   }
   canvas.addEventListener("click", clickCell);
 
   // screen-(x,y) button toggles the picker; cells / arrows pick a screen
   document.getElementById("camlabel").addEventListener("click", () => setPicker(!pickerOpen));
-  const arrowStep = (dx, dy) => { const c = CAM(); startSlide((c.sx + dx + C.SX) % C.SX, (c.sy + dy + C.SY) % C.SY, dx, dy); setPicker(false); };
+  const arrowStep = (dx, dy) => { const c = CAM(); gotoScreen((c.sx + dx + C.SX) % C.SX, (c.sy + dy + C.SY) % C.SY); };
   document.querySelector(".scrollbtn.su").onclick = () => arrowStep(0, -1);
   document.querySelector(".scrollbtn.sd").onclick = () => arrowStep(0, 1);
   document.querySelector(".scrollbtn.sl").onclick = () => arrowStep(-1, 0);
   document.querySelector(".scrollbtn.sr").onclick = () => arrowStep(1, 0);
-  const picker = document.getElementById("picker");
-  for (let i = 0; i < C.NS; i++) {
-    const d = el("div", "scr"); const psx = i % C.SX, psy = (i / C.SX) | 0;
-    d.onclick = () => { const c = CAM(); startSlide(psx, psy, sdir(c.sx, psx, C.SX), sdir(c.sy, psy, C.SY)); setPicker(false); };
-    picker.appendChild(d);
-  }
 
   buildTouchPad(document.getElementById("map"));
   const dbg = mountWidgets(wasm, view, C, { l1get, l1nextdir });
+  // minimaps showing the actual map + tanks + active routes (picker + in-article)
+  const pickerMap = makeMiniMap(document.getElementById("picker"), gotoScreen, R);
+  const articleMap = makeMiniMap(document.getElementById("w-minimap"), gotoScreen, R);
   if (statusEl) statusEl.style.display = "none";
 
   // --- frame loop ---------------------------------------------------------
@@ -182,6 +183,7 @@ async function main() {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
     const sel = wasm.selected(), ts = view.tstate();
+    if (sel !== lastSel) { manualView = false; lastSel = sel; }   // (re)selecting a tank re-engages follow
     const manual = sel !== 255 && ts[sel] === 2;
 
     // input drives the manual tank only
@@ -193,8 +195,8 @@ async function main() {
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { wasm.tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
 
-    // follow the selected tank; slide when it changes screen
-    if (!pickerOpen && sel !== 255 && !slide) {
+    // follow the selected tank; slide when it changes screen (unless looking around)
+    if (!pickerOpen && !manualView && sel !== 255 && !slide) {
       const xy = view.xy(), c = CAM();
       const tsx = (xy[2 * sel] >> 8) / C.GW | 0, tsy = (xy[2 * sel + 1] >> 8) / C.GH | 0;
       if (tsx !== c.sx || tsy !== c.sy) startSlide(tsx, tsy, sdir(c.sx, tsx, C.SX), sdir(c.sy, tsy, C.SY));
@@ -214,7 +216,9 @@ async function main() {
     pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, instBuf);
     pass.draw(6, n); pass.end(); device.queue.submit([enc.finish()]);
 
-    const cam = CAM();
+    const cam = CAM(), camIdx = cam.sy * C.SX + cam.sx;
+    articleMap.update(camIdx);
+    if (pickerOpen) pickerMap.update(camIdx);
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
     dbg.update({ fps, dt, instCount: n, cam });
     requestAnimationFrame(frame);
@@ -237,11 +241,38 @@ function buildTouchPad(map) {
   map.appendChild(pad);
 }
 
+// a minimap of the 4x4 world: each screen is a tiny canvas showing the walls,
+// the tanks, and any active routes; click a screen to view it.
+function makeMiniMap(container, onPick, R) {
+  const { wasm, view, C } = R;
+  const BODY = [[242,158,41],[77,179,230],[120,205,120],[196,140,235]];
+  const PATH = [[165,120,45],[55,118,158],[82,140,82],[132,98,165]];   // dim body shade for routes
+  const BG = [22,24,30], WALL = [70,75,90];
+  const canvases = [], ctxs = [], imgs = [];
+  for (let i = 0; i < C.NS; i++) {
+    const cv = document.createElement("canvas"); cv.width = C.GW; cv.height = C.GH; cv.className = "mmcell";
+    const sx = i % C.SX, sy = (i / C.SX) | 0; cv.onclick = () => onPick(sx, sy);
+    container.appendChild(cv); canvases.push(cv); ctxs.push(cv.getContext("2d")); imgs.push(ctxs[i].createImageData(C.GW, C.GH));
+  }
+  const put = (img, lcx, lcy, c) => { const o = (lcy * C.GW + lcx) * 4, d = img.data; d[o] = c[0]; d[o+1] = c[1]; d[o+2] = c[2]; d[o+3] = 255; };
+  const scr = (wcx, wcy) => ((wcy / C.GH) | 0) * C.SX + ((wcx / C.GW) | 0);
+  return { update(camIdx) {
+    const grid = view.grid(), xy = view.xy(), phas = view.phas(), pst = view.pstatus();
+    for (let s = 0; s < C.NS; s++) { const img = imgs[s];
+      for (let cy = 0; cy < C.GH; cy++) { const w = grid[s * C.GH + cy];
+        for (let cx = 0; cx < C.GW; cx++) put(img, cx, cy, ((w >> cx) & 1) ? WALL : BG); } }
+    for (let t = 0; t < C.NT; t++) { if (!phas[t] || pst[t] !== 1) continue;
+      const n = wasm.trace_path(t), path = new Uint16Array(wasm.memory.buffer, wasm.path_ptr(), n);
+      for (let i = 0; i < n; i++) { const wc = path[i], wcx = wc % C.BW, wcy = (wc / C.BW) | 0; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, PATH[t]); } }
+    for (let t = 0; t < C.NT; t++) { const wcx = xy[2*t] >> 8, wcy = xy[2*t+1] >> 8; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, BODY[t]); }
+    for (let s = 0; s < C.NS; s++) { ctxs[s].putImageData(imgs[s], 0, 0); canvases[s].classList.toggle("cam", s === camIdx); }
+  } };
+}
+
 function mountWidgets(wasm, view, C, P) {
   const updaters = [], api = { update(info) { for (const u of updaters) u(info); } };
   const focused = () => document.activeElement;
   const at = (id) => document.getElementById(id);
-  const TANK_COLORS = ["#f29e29", "#4db3e6", "#78cd78", "#c48ceb"];
 
   const cc = at("w-controls");
   if (cc) {
@@ -252,21 +283,7 @@ function mountWidgets(wasm, view, C, P) {
     bReset.onclick = () => api.onReset && api.onReset();
   }
 
-  const mm = at("w-minimap");
-  if (mm) {
-    const cells = [];
-    for (let i = 0; i < C.NS; i++) { const s = el("div", "scr"); const sx = i % C.SX, sy = (i / C.SX) | 0;
-      s.onclick = () => { wasm.deselect(); wasm.set_camera(sx, sy); }; mm.appendChild(s); cells.push(s); }
-    updaters.push(({ cam }) => {
-      const xy = view.xy(), camIdx = cam.sy * C.SX + cam.sx;
-      for (let i = 0; i < C.NS; i++) { cells[i].classList.toggle("cam", i === camIdx); cells[i].textContent = ""; }
-      for (let t = 0; t < C.NT; t++) { const wcx = xy[2 * t] >> 8, wcy = xy[2 * t + 1] >> 8;
-        const s = ((wcy / C.GH) | 0) * C.SX + ((wcx / C.GW) | 0);
-        const d = el("div", "dot"); d.style.background = TANK_COLORS[t] || "#fff";
-        d.style.left = (((wcx % C.GW) + 0.5) / C.GW * 100) + "%"; d.style.top = (((wcy % C.GH) + 0.5) / C.GH * 100) + "%";
-        cells[s].appendChild(d); }
-    });
-  }
+  /* the 4x4 world minimap (#w-minimap) is built by makeMiniMap in main() */
 
   const sc = at("w-stats");
   if (sc) { sc.classList.add("stats");

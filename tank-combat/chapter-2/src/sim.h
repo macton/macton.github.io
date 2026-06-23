@@ -83,6 +83,5 @@ void sim_tick(World* w);    /* advance one fixed step: path-follow, turn, move *
 void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy);            /* flip a wall, rebuild L1(screen)+L2+pg */
 void sim_set_dest(World* w, uint32_t tank, uint32_t wcx, uint32_t wcy);/* set a tank's destination */
 void sim_cycle_tank(World* w, uint32_t tank);                         /* cycle a tank's state; manage `selected` */
-void sim_deselect(World* w);                                          /* drop selection (UNSELECTED keeps its path) */
 
 #endif

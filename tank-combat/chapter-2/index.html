@@ -58,9 +58,12 @@
   #camlabel:hover { border-color: var(--acc); }
   /* screen picker overlay (a 4x4 map of the world) */
   #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
-            gap: 6px; padding: 44px; background: #0c0e12dd; }
-  #picker .scr { background: #1b1e25; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
-  #picker .scr:hover { border-color: var(--acc); background: #232732; }
+            gap: 6px; padding: 44px; background: #0c0e12ee; align-content: center; }
+  /* minimap cells: a tiny canvas per screen (walls + tanks + routes), pixel-scaled */
+  .mmcell { width: 100%; aspect-ratio: 20 / 15; image-rendering: pixelated; display: block;
+            background: #14161b; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  .mmcell:hover { border-color: var(--acc); }
+  .mmcell.cam { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; }
 
   #status { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--acc); }
   #help { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--dim); font-size: 14px; }
@@ -143,7 +146,8 @@
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
     unselected. A selected tank's screen is <b>followed</b>; its route is drawn in its own colour.
-    Tap <b>screen x,y ▾</b> to pick a screen and look around.
+    Tap <b>screen x,y ▾</b> to look around — with a tank selected you can pick another screen
+    and tap a cell there to send it across the world.
   </div>
 
   <article>
@@ -176,7 +180,7 @@
     easy to tell apart and each gives the flow field below something different to solve.
     Tap the screen badge to open the picker and look around:</p>
     <div class="fig">
-      <p class="cap">the 4×4 world · the bordered square is the viewport · dots are tanks · click a screen to jump there</p>
+      <p class="cap">the 4×4 world (walls, tanks, and live routes) · the outlined screen is the viewport · click a screen to view it</p>
       <div id="w-minimap"></div>
       <div id="w-stats" style="margin-top:10px"></div>
       <div id="w-controls" style="margin-top:8px"></div>

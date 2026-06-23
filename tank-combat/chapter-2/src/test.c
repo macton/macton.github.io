@@ -217,15 +217,26 @@ static void t_states(void) {
   check(W.selected == 3 && W.tstate[1] == TS_UNSELECTED && W.tstate[3] == TS_AUTOPATH,
         "selecting another tank deselects the first");
 
-  /* a destination survives deselect, and an UNSELECTED tank keeps pathing */
+  /* selecting another tank leaves the first UNSELECTED but still pathing */
   sim_init(&W);
   sim_cycle_tank(&W, 1);                                 /* AUTOPATH */
   sim_set_dest(&W, 1, ring_wcx(1), ring_wcy(1));
-  sim_deselect(&W);
-  check(W.phas[1] == 1 && W.tstate[1] == TS_UNSELECTED, "deselect keeps the destination");
+  sim_cycle_tank(&W, 2);                                 /* select tank 2: tank 1 -> UNSELECTED, keeps dest */
+  check(W.phas[1] == 1 && W.tstate[1] == TS_UNSELECTED, "selecting another tank leaves the first pathing (keeps dest)");
   int arrived = 0;
   for (int i = 0; i < 16000 && !arrived; i++) { sim_tick(&W); if (W.pstatus[1] == PS_ARRIVED) arrived = 1; }
-  check(arrived, "UNSELECTED tank with a destination still reaches it");
+  check(arrived, "UNSELECTED tank that was auto-pathing still reaches it");
+
+  /* taking MANUAL control abandons the destination — unselecting then stays put */
+  sim_init(&W);
+  sim_cycle_tank(&W, 1);                                 /* AUTOPATH */
+  sim_set_dest(&W, 1, ring_wcx(2), ring_wcy(2));         /* a cross-screen dest */
+  sim_cycle_tank(&W, 1);                                 /* -> MANUAL */
+  check(W.phas[1] == 0, "entering MANUAL abandons the destination");
+  sim_cycle_tank(&W, 1);                                 /* -> UNSELECTED */
+  uint32_t xy1 = W.tank_xy[1];
+  W.tank_in[1] = 0; for (int i = 0; i < 200; i++) sim_tick(&W);
+  check(W.tank_xy[1] == xy1, "after MANUAL + unselect, the tank stays put (no auto-path back)");
 
   /* a MANUAL tank ignores its destination and is driven by its input */
   sim_init(&W);
