@@ -1,0 +1,98 @@
+# Chapter 3 contract — the swarm
+
+The explicit promises chapter 3 makes, so they can be relied on and tested. The
+tests in `src/test.c` enforce them (69 checks). Chapter 3 **inherits chapter 1's
+movement contract** and **chapter 2's pathing/viewport contract**
+([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
+still route themselves exactly as before. The rename of the shared transforms to
+`agent_turn`/`agent_move` (with a `radius` parameter) changed names, not behaviour:
+the inherited tests still pass and the baked escape table is byte-identical.
+
+## The pool
+
+- **A fixed pool of `N_MITES` (= 1000) mites**, spawned at init and alive for the
+  whole chapter — flat structure-of-arrays, statically sized, **no dynamic
+  allocation**. *(tested: the index counts sum to `N_MITES`.)*
+- **Spawn is deterministic and legal.** From the seed, mites scatter across **open,
+  reachable** cells only, **≤ `MITE_CAP` (= 4) per cell**. *(tested: every mite is on
+  an open cell reachable from the open ring; no spawn cell exceeds the cap.)*
+
+## The per-cell index
+
+- **Rebuilt every tick from current positions.** `mite_cnt[cell]` is the true
+  occupancy and `mite_list[cell]` holds its first `MITE_CAP` occupants; every mite
+  appears in exactly its own cell's list. *(tested.)* It is the swarm's `O(N)`
+  acceleration structure — "which mites are within one cell of me" is reading a 3×3
+  neighbourhood, not a 1000×1000 scan.
+
+## The crowding cap
+
+- **At most `MITE_CAP` (= 4) mite centres per cell, after every tick.** Enforced by a
+  deterministic in-order reservation (current occupants + committed inbound), not by
+  physics. A blocked mite re-routes to a free neighbour or holds (emits no drive) and
+  re-evaluates next tick. *(tested: the cap holds across thousands of natural ticks
+  **and** under forced convergence of the whole swarm on one cell; and it is binding —
+  cells do reach 4.)*
+
+## The shared record (last-write-wins)
+
+- **One cell + one timestamp per mite** — the last known tank position (a world cell,
+  or empty), and the frame it was recorded. **Newer timestamp wins**; ties break on
+  lowest mite index. *(tested.)*
+- **Empty is a readable value that propagates.** A newer *empty* record overwrites an
+  older cell record by the same rule. *(tested.)*
+- **Timestamps are monotone.** An older record never overwrites a newer one. *(tested.)*
+- **The gossip is order-independent.** Every mite reads the previous tick's records and
+  writes the next tick's, then the buffers swap (double-buffered), so a planted record
+  spreads exactly **one hop per tick** along a connected in-range chain, regardless of
+  iteration order. *(tested.)*
+
+## Behaviour
+
+- **Sense → record + seek.** A tank within `mite_sense` cells sets the record to the
+  tank's cell, stamped this frame, and the mite seeks it. A self-sensed tank is always
+  sought. *(tested.)*
+- **Adopt → 80/20.** On adopting a newer peer record, the mite seeks it with probability
+  `mite_pseek` (= 80%), else keeps wandering while still relaying it. *(tested: the
+  boundaries `P_SEEK = 0` and `100` are exact, and the default split matches the RNG
+  stream statistically.)*
+- **Arrive & check.** A seeking mite that reaches within one cell of its recorded cell
+  refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
+  now) and reverts to wander if not — and the erase, being newest, propagates "it's
+  gone." *(tested: both arrive-with-tank refresh and arrive-without-tank erase.)*
+- **An empty record means wander.** A mite with no recorded cell wanders.
+
+## Movement & collision
+
+- **Mites collide only with walls**, through the shared `agent_move` at radius
+  `MITE_R`. A mite's footprint **never overlaps a wall** across a run. *(tested.)*
+- **Mites do not collide with tanks or with each other** — crowding is the cap (a
+  decision-level rule), not physics.
+- **Mites do not use the path tables.** They steer greedily (wander = random open
+  non-full neighbour; seek = the open non-full neighbour nearest the recorded cell),
+  turned into the same input byte the routing tanks produce and fed through the same
+  movement model.
+
+## Determinism
+
+- **The swarm is a pure function of the seed and the inputs.** Same seed + same inputs
+  ⇒ identical state hash after K ticks; a different seed scatters differently;
+  re-seeding to the same seed is reproducible. *(tested.)* All randomness is one
+  xorshift32 stream advanced in index order.
+
+## Boundaries / non-promises
+
+- **The cap is the structural maximum 4** (it sizes the occupant list). The `mite_cap`
+  tunable may tighten it within `[1, MITE_CAP]`; it cannot exceed 4.
+- **Seeking is greedy, not routed.** A mite stuck behind a wall is resolved by the
+  wander/erase rules and the swarm's collective coverage, not by pathfinding — dumb
+  cheap agents, by design.
+- **The viewport is presentation only** (inherited): following, sliding, the picker,
+  and which mites are drawn never change the simulation.
+
+## How it's tested
+
+`./test.sh` builds the simulation core (no wasm, no renderer, no GPU) with the host C
+compiler and runs `src/test.c`, which builds the world, drives the swarm, and asserts
+each promise above. Because the simulation is separated from rendering, these tests
+need no browser or GPU.

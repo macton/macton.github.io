@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Chapter 3 — The Swarm · Data-Oriented Design, by picture</title>
+<style>
+  :root { color-scheme: dark; --fg:#d7dbe0; --dim:#8b93a0; --acc:#f4b860; --card:#0f1115; --line:#2a2d35; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #16181d; color: var(--fg);
+    font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  code, .mono, .stats, .live, .nf input, #version { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code { background: #0f1115; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: .9em; }
+  a { color: var(--acc); }
+
+  header { max-width: 820px; margin: 0 auto; padding: 18px 16px 6px; }
+  .crumb { color: var(--dim); font-size: 13px; }
+  h1 { font-size: 24px; margin: 4px 0 2px; }
+  .sub { color: var(--dim); margin: 0; }
+  #version {
+    position: fixed; top: 8px; right: 10px; z-index: 10;
+    font-size: 12px; color: var(--acc); background: #0009; border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 7px;
+  }
+
+  /* the game */
+  #map { position: relative; width: 100%; max-width: 720px; margin: 12px auto 0;
+         aspect-ratio: 20 / 15; background: #1a1c22; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+  /* one D-pad (manual tank) bottom-left */
+  .pad { position: absolute; bottom: 8px; left: 8px; width: 126px; height: 126px;
+         display: grid; grid-template-columns: repeat(3,1fr); grid-template-rows: repeat(3,1fr);
+         gap: 6px; touch-action: none; }
+  .padbtn { border: 1px solid #f29e2966; background: #ffffff1c; color: #fff; border-radius: 8px;
+            font-size: 18px; line-height: 1; cursor: pointer; touch-action: none; user-select: none;
+            -webkit-user-select: none; padding: 0; }
+  .padbtn:active { background: #f4b86066; }
+  .padbtn.u { grid-column: 2; grid-row: 1; } .padbtn.l { grid-column: 1; grid-row: 2; }
+  .padbtn.r { grid-column: 3; grid-row: 2; } .padbtn.d { grid-column: 2; grid-row: 3; }
+
+  /* scroll buttons (move the viewport one screen) */
+  .scrollbtn { position: absolute; z-index: 4; width: 34px; height: 34px; border-radius: 8px;
+               background: #0f1115ee; border: 1px solid var(--acc); color: var(--fg);
+               font-size: 17px; line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; padding: 0;
+               display: none; }      /* shown only while the screen picker is open */
+  .scrollbtn:hover { background: #1b1e25ee; }
+  .scrollbtn.su { top: 8px; left: 50%; transform: translateX(-50%); }
+  .scrollbtn.sd { bottom: 8px; left: 50%; transform: translateX(-50%); }
+  .scrollbtn.sl { left: 8px; top: 50%; transform: translateY(-50%); }
+  .scrollbtn.sr { right: 8px; top: 50%; transform: translateY(-50%); }
+  #camlabel { position: absolute; top: 8px; right: 8px; z-index: 5; font: inherit; font-size: 12px; color: var(--acc);
+              background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+  #camlabel:hover { border-color: var(--acc); }
+  /* screen picker overlay (a 4x4 map of the world) */
+  #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
+            gap: 6px; padding: 44px; background: #0c0e12ee; align-content: center; }
+  .mmcell { width: 100%; aspect-ratio: 20 / 15; image-rendering: pixelated; display: block;
+            background: #14161b; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  .mmcell:hover { border-color: var(--acc); }
+  .mmcell.cam { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; }
+
+  #status { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--acc); }
+  #help { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--dim); font-size: 14px; }
+  #help b { color: #c7ccd4; }
+
+  /* the article */
+  article { max-width: 820px; margin: 0 auto; padding: 8px 16px 80px; }
+  article h2 { font-size: 19px; margin: 34px 0 8px; color: var(--acc); }
+  article h2:first-of-type { margin-top: 22px; }
+  article p { margin: 10px 0; }
+  article ul { margin: 10px 0; padding-left: 22px; }
+  article li { margin: 4px 0; }
+  article .note { color: var(--dim); font-size: 14px; }
+  .fig { margin: 14px 0; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .fig .cap { color: var(--dim); font-size: 13px; margin: 0 0 8px; }
+
+  /* widgets */
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { flex: 1; padding: 8px 4px; background: #2b2f3a; color: var(--fg); border: 1px solid #3a3f4c;
+           border-radius: 6px; cursor: pointer; font: inherit; }
+  button:hover { background: #353a47; }
+  select { background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 6px; padding: 5px; font: inherit; }
+  .stats { padding: 8px 10px; background: #000; border-radius: 6px; font-size: 13px; }
+  .stats b { color: #fff; }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
+  .nf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
+  .nf span { color: var(--dim); font-size: 14px; }
+  .nf input { width: 130px; padding: 4px 6px; background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 4px; }
+  .tankbox { padding: 8px; background: #000; border-radius: 6px; margin: 6px 0; border-left: 3px solid #555; }
+  .tankbox.t0 { border-left-color: #f29e29; } .tankbox.t1 { border-left-color: #4db3e6; }
+  .tankbox.t2 { border-left-color: #78cd78; } .tankbox.t3 { border-left-color: #c48ceb; }
+  .tt { font-weight: 700; margin-bottom: 4px; color: #c7ccd4; }
+  .live { margin-top: 5px; color: var(--dim); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+
+  /* the per-screen cell grid, shared by the wall editor, occupancy, and belief */
+  .cellgrid { display: grid; gap: 1px; background: var(--line); padding: 1px; border-radius: 4px; max-width: 320px; }
+  .cell { aspect-ratio: 1; background: #14161b; cursor: pointer; font-size: 9px; color: #6f7785;
+          display: flex; align-items: center; justify-content: center; line-height: 1; }
+  .cell.on { background: #525a68; }                 /* wall */
+  .cell.tank { box-shadow: 0 0 0 2px var(--acc) inset; }
+  .cell:hover { outline: 1px solid var(--acc); outline-offset: -1px; }
+  /* occupancy heat (0..4 mites per cell) */
+  .cell.o1 { background: #243a44; } .cell.o2 { background: #2f5d5e; }
+  .cell.o3 { background: #3f8a6e; } .cell.o4 { background: #62c07a; color:#04210f; }
+  /* belief markers (a believed-tank cell, tinted by freshness) */
+  .cell.bel-hot  { background: #e05c3c; color:#1a0b07; }
+  .cell.bel-warm { background: #b06a2e; color:#1a0b07; }
+  .cell.bel-cold { background: #5a3742; }
+
+  /* the mite pool readout */
+  .pool { font-family: ui-monospace, monospace; font-size: 12px; background:#000; border-radius:6px; padding:8px 10px; }
+  .pool .hd { color:#c7ccd4; } .pool .rowm { color: var(--dim); white-space: pre; }
+
+  /* minimap of the 4x4 world */
+  #w-minimap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-width: 220px; }
+</style>
+</head>
+<body>
+  <div id="version">v…</div>
+  <header>
+    <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 3</div>
+    <h1>The Swarm</h1>
+    <p class="sub">A thousand cheap units that wander, gossip the last place they saw a tank, and
+    swarm toward it — every structure the volume forces, live on the page.</p>
+  </header>
+
+  <div id="map">
+    <canvas id="gpu"></canvas>
+    <button id="camlabel">screen 0,0 ▾</button>
+    <div id="picker"></div>
+    <button class="scrollbtn su" title="up">▲</button>
+    <button class="scrollbtn sd" title="down">▼</button>
+    <button class="scrollbtn sl" title="left">◄</button>
+    <button class="scrollbtn sr" title="right">►</button>
+  </div>
+  <div id="status">loading…</div>
+  <div id="help">
+    The <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
+    <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
+    <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
+    unselected. Drive a tank through the swarm and watch a sighting spread:
+    <span class="swatch" style="background:#e05c3c"></span> seeking ·
+    <span class="swatch" style="background:#deb64a"></span> relaying ·
+    <span class="swatch" style="background:#609a8a"></span> wandering.
+  </div>
+
+  <article>
+    <p>This is chapter three of an interactive book about
+    <a href="https://github.com/macton/nagent/blob/master/context/data-oriented-design.md">data-oriented design</a>.
+    Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a 4×4 toroidal
+    grid of screens and gave the tanks self-routing. Chapter 3 adds an <strong>enemy
+    faction</strong>: <strong>a thousand mites</strong> that wander, copy the last place they
+    saw a tank on contact, and converge on it. As before, every structure below is
+    <em>live</em> — it reads and pokes the running game's memory directly.</p>
+
+    <p>The chapter's lesson is <strong>scale</strong>. One entity is easy; a thousand is a
+    <em>data layout</em>. The volume forces the structures volume needs — a fixed pool with no
+    allocation, a per-cell index rebuilt every tick, a deterministic integer PRNG, and a piece
+    of shared knowledge that is just <strong>timestamped data copied on contact</strong>, with
+    no central manager and no per-unit pathfinding. The four tanks keep routing exactly as
+    before: <strong>4 routed units beside 1000 cheap ones — the algorithm matched to the
+    need.</strong></p>
+
+    <h2>The world &amp; the tanks (recap)</h2>
+    <p>The world is chapter 2's single <code>80×60</code> toroidal grid, organised as 4×4
+    screens; the viewport shows one screen and follows the selected tank. The tanks still
+    route themselves along precomputed path tables. New here is everything swarming around
+    them. The minimap shows the <strong>whole world</strong> — walls, tanks, routes, and the
+    entire swarm as downsampled dots — so you can watch the mites pool and stream while the
+    viewport stays on one screen:</p>
+    <div class="fig">
+      <p class="cap">the 4×4 world · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is the viewport · click a screen to view it</p>
+      <div id="w-minimap"></div>
+      <div id="w-stats" style="margin-top:10px"></div>
+      <div id="w-controls" style="margin-top:8px"></div>
+    </div>
+    <div class="fig">
+      <p class="cap">per-tank data · state, destination, status — tap a tank on the map, or “cycle state” here</p>
+      <div id="w-tanks"></div>
+    </div>
+    <p class="note">The viewport is presentation only: following, sliding, the picker, and which
+    mites are drawn never change the simulation. The swarm is the same whether or not you are
+    watching its screen.</p>
+
+    <h2>A thousand mites in a fixed pool</h2>
+    <p>A mite is a <strong>quarter-cell body</strong> on the same grid as the tanks. There are
+    exactly <code>N_MITES = 1000</code>, spawned at init and alive for the whole chapter — a
+    <strong>fixed pool</strong>: flat structure-of-arrays, statically sized, <em>no
+    allocation</em>. <em>Where there's one, there's many</em>: a mite is never updated alone;
+    each transform is one batch over the whole pool. A mite shares the tanks' turn and move
+    transforms — the size is just a <strong>parameter</strong> (<code>MITE_R</code> instead of
+    <code>TANK_R</code>) threaded into the collision, not a second copy of the movement code.
+    It collides only with walls; crowding is handled by a rule, not by physics.</p>
+    <div class="fig">
+      <p class="cap">the mite pool · live count and a few structure-of-arrays rows (position, heading, mode, record)</p>
+      <div id="w-mite-pool"></div>
+    </div>
+
+    <h2>The grid you already have is the index</h2>
+    <p>A swarm needs to know, cheaply, <em>which mites are near a given mite</em> and <em>how
+    many are in each cell</em>. Scanning 1000×1000 pairs every tick is the naive answer. The
+    data-oriented one: <strong>the uniform grid is the acceleration structure.</strong> Once a
+    tick we bin every mite into a per-cell <strong>count</strong> and a short <strong>list</strong>
+    of the (≤4) occupants — <code>O(N)</code> — and then “who is within one cell of me” is just
+    reading the occupants of a 3×3 neighbourhood. This is the opposite end of the
+    <strong>frequency-of-change</strong> spectrum from the path tables: the tanks' route tables
+    rebuild only when you <em>edit a wall</em> (rare); the mite index rebuilds <em>every
+    tick</em> (constant), because the mites move every tick. Toggle a wall on the left and
+    watch the per-cell occupancy on the right shift as the swarm flows:</p>
+    <div class="fig">
+      <p class="cap">left: the current screen's walls — click a cell to toggle (rebuilds the path tables, rarely) · right: per-cell mite occupancy 0–4 (rebuilt every tick)</p>
+      <div class="row" style="align-items:flex-start; gap:16px">
+        <div><div class="cap" style="color:var(--dim);font-size:12px;margin-bottom:4px">walls</div><div id="w-grid"></div></div>
+        <div><div class="cap" style="color:var(--dim);font-size:12px;margin-bottom:4px">occupancy</div><div id="w-occupancy"></div></div>
+      </div>
+    </div>
+
+    <h2>The crowding cap: a rule, not a collision</h2>
+    <p>Mites do not physically collide with each other. Instead a <strong>decision-level
+    rule</strong> keeps them spread: <strong>at most 4 mite centres per cell, every tick.</strong>
+    When a mite would step into a full cell it picks a different open neighbour with room, or
+    holds. The cap is enforced <em>deterministically</em> by processing mites in index order
+    against a running tally — current occupants plus the moves already committed this tick — so
+    the <em>n</em>-th mite sees the earlier ones' reservations. The invariant holds inductively:
+    spawning respects it, and each tick gates only the cell a mite <em>enters</em> (chapter 1's
+    “test only the leading edge” again). The occupancy panel above tops out at 4, always.</p>
+
+    <h2>The shared knowledge: one cell + one timestamp</h2>
+    <p>Here is the heart of the chapter. <em>What is the minimal data the swarm's behaviour
+    depends on?</em> Not a map, not a plan — just the <strong>last known tank position</strong>:
+    <strong>one world cell plus the frame it was recorded</strong> (a timestamp). Each mite
+    carries exactly that one small record. There is no shared blackboard and no manager; the
+    swarm's behaviour <em>emerges entirely from copying this record on contact</em>:</p>
+    <ul style="color:var(--dim)">
+      <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and seek it.</li>
+      <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> record among the
+      mites in your 3×3 (including an empty one) — last-write-wins — then roll the die:
+      <strong>80% seek</strong> the cell, <strong>20% keep wandering</strong> (but still relay it).</li>
+      <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
+      refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
+      gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
+      <em>newest</em> record.</li>
+    </ul>
+    <p>The gossip is made <strong>order-independent</strong> by double-buffering: every mite reads
+    last tick's records and writes this tick's, then the buffers swap, so propagation never
+    depends on iteration order (ties break on lowest index). Drive a tank into the swarm and
+    watch the belief field below: a sighting <strong>diffuses outward</strong> from where it
+    happened and <strong>dissolves</strong> when the position goes stale.</p>
+    <div class="fig">
+      <p class="cap">the belief field on the current screen · a cell is tinted where mites believe a tank is — bright = a fresh sighting, fading as the record ages</p>
+      <div id="w-belief"></div>
+    </div>
+
+    <h2>Cheap agents, no routing</h2>
+    <p>A mite does <strong>not</strong> use the path tables. It steers <strong>greedily</strong>:
+    wander picks a random open, non-full neighbour; seek picks the open, non-full neighbour that
+    most reduces the toroidal distance to the recorded cell. Both are then turned into the same
+    turn/drive input byte the routing tanks produce — <strong>one movement model, two input
+    sources</strong> — and fed through the shared <code>agent_turn</code>/<code>agent_move</code>.
+    A mite stuck behind a wall is resolved by the wander/erase rules and by the swarm's
+    collective coverage: dumb cheap agents, by design. Beside them the four tanks compute exact
+    shortest routes. Same world, two algorithms, each matched to its need.</p>
+
+    <h2>Determinism &amp; the seed</h2>
+    <p>All the randomness — every wander direction and every seek die — comes from a
+    <strong>single integer PRNG</strong> (xorshift32) seeded in the world and advanced as mites
+    are processed in index order. So the whole swarm is a <strong>pure function of the seed and
+    the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
+    to re-scatter the swarm, and tune the rest live:</p>
+    <div class="fig">
+      <p class="cap">the editable seed (re-scatters the swarm) and the tunables · sensing range, cap, P(seek), mite speed/turn</p>
+      <div id="w-mite-tunables"></div>
+    </div>
+
+    <h2>What this bought us</h2>
+    <p>A thousand autonomous units in a few kilobytes of WebAssembly: a flat pool sized to its
+    real domain, a uniform-grid index rebuilt each tick (<code>O(N)</code>, the swarm's
+    acceleration structure), a crowding cap that is one deterministic reservation pass, and
+    shared knowledge that is <strong>one cell and one timestamp copied on contact</strong> — no
+    central state, no per-unit pathfinding. Integer fixed point throughout, no dynamic
+    allocation, the simulation separated from rendering and wasm so the swarm, the gossip, and
+    the cap are all tested natively with no browser or GPU. The render scales with what's
+    <em>visible</em>, not with the population.</p>
+
+    <p class="note">Source for this chapter:
+    <a href="src/mites.c">mites.c</a> ·
+    <a href="src/agent_move.c">agent_move.c</a> ·
+    <a href="src/agent_turn.c">agent_turn.c</a> ·
+    <a href="src/sim.c">sim.c</a> ·
+    <a href="src/render.c">render.c</a> ·
+    <a href="src/wasm.c">wasm.c</a> ·
+    <a href="src/test.c">test.c</a> ·
+    <a href="README.md">README</a> ·
+    <a href="CONTRACT.md">CONTRACT</a></p>
+  </article>
+
+  <script src="version.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
