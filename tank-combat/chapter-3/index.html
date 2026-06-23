@@ -300,6 +300,8 @@
   </article>
 
   <script src="version.js"></script>
-  <script type="module" src="app.js"></script>
+  <!-- cache-bust app.js too (not just the wasm): version.js runs first and sets
+       TANK_VERSION, so a new build always fetches the matching app.js. -->
+  <script type="module">import("./app.js?v=" + (window.TANK_VERSION || "dev"));</script>
 </body>
 </html>

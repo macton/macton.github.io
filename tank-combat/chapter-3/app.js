@@ -82,6 +82,7 @@ async function main() {
 
   // --- WebGPU -------------------------------------------------------------
   const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) throw new Error("no WebGPU adapter (unsupported GPU/driver?)");
   const device = await adapter.requestDevice();
   const canvas = document.getElementById("gpu");
   const ctx = canvas.getContext("webgpu");
@@ -398,7 +399,6 @@ function mountWidgets(wasm, view, C) {
       sync(cap, () => wasm.mite_cap()); sync(pseek, () => wasm.mite_pseek());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn()); });
   }
-  void frameNow;
   return api;
 }
 
@@ -409,4 +409,12 @@ function numField(name, min, max, step, val) {
   const input = el("input"); input.type = "number"; input.min = min; input.max = max; input.step = step; input.value = val;
   wrap.append(span, input); return { wrap, input, span };
 }
-main();
+
+// Never leave the page silently on "loading…": surface any startup failure (the
+// transient state needs an explicit exit). main() is async, so a throw anywhere in
+// setup rejects here.
+main().catch((e) => {
+  const s = document.getElementById("status");
+  if (s) { s.style.display = ""; s.textContent = "Failed to start: " + ((e && e.message) || e); }
+  console.error(e);
+});
