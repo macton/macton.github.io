@@ -1,5 +1,6 @@
 #include "gait.h"
 #include "terrain.h"
+#include "fxmath.h"
 
 /* Leg configuration — constant geometry, read directly (a const table is not
  * state). Eight legs: 0..3 near side front->back, 4..7 far side front->back.
@@ -32,9 +33,14 @@ static const int32_t LEG_SCALE [N_LEGS] = {  100,  78,  78, 100,   100,  78,  78
 static const uint8_t LEG_GROUP [N_LEGS] = {    0,   1,   0,   1,     1,   0,   1,   0 };
 static const int8_t  LEG_BEND  [N_LEGS] = {   +1,  +1,  -1,  -1,    +1,  +1,  -1,  -1 };
 
+/* Hip mounts ride on the body and turn with its lean, so the legs re-solve to
+ * keep their planted feet as the body pitches — that adaptation is the natural
+ * part (and shows the IK working). */
 void gait_hip(const World* w, int leg, int32_t* hx, int32_t* hy) {
-  *hx = w->body_x + LEG_HIPX[leg];
-  *hy = w->body_y + LEG_HIPY[leg];
+  int32_t ox = LEG_HIPX[leg], oy = LEG_HIPY[leg];
+  int32_t c = w->body_cos, s = w->body_sin;
+  *hx = w->body_x + (int32_t)(((int64_t)ox * c - (int64_t)oy * s) >> 14);
+  *hy = w->body_y + (int32_t)(((int64_t)ox * s + (int64_t)oy * c) >> 14);
 }
 int8_t  gait_bend (int leg) { return LEG_BEND[leg]; }
 int32_t gait_scale(int leg) { return LEG_SCALE[leg]; }
@@ -98,14 +104,52 @@ static void set_foot(World* w, int i, uint32_t p, uint32_t swing) {
   w->foot_y[i] = fy < ground ? fy : ground;
 }
 
-static void seat_body(World* w) {
+/* Body weight & lean (the "natural" layer). The body is not a rigid level slab:
+ *  - it rides stand_h above the mean foot height (floored to clear an obstacle
+ *    directly beneath it), with a small gait-synced vertical BOB;
+ *  - it PITCHES toward the ground's grade (sampled over a wide span so it follows
+ *    the slope, not each step), clamped small and smoothed so it leans into hills;
+ *  - plus a small gait-synced pitch SWAY so it rocks as it steps.
+ * On `snap` (init) the orientation is set directly; otherwise it eases toward the
+ * target so it never jerks. */
+#define SLOPE_SPAN    600   /* terrain half-span sampled for the grade, subcells */
+#define PITCH_SIN_MAX 3200  /* clamp the lean to ~11 deg (Q14 sine)              */
+#define ORIENT_SMOOTH  28   /* /256 eased toward the target orientation per tick */
+#define GAIT_SWAY     300   /* gait-synced pitch sway amplitude, angle units     */
+#define BOB_AMP         9   /* gait-synced vertical bob amplitude, subcells      */
+
+static void seat_body(World* w, int snap) {
   int64_t s = 0;
   for (int i = 0; i < N_LEGS; i++) s += w->foot_y[i];
   int32_t ride = (int32_t)(s / N_LEGS) - w->stand_h;          /* ride above the feet */
-  /* but never let the body box sink into ground directly beneath it */
   int32_t under = terrain_max_y_up(w->body_x + BODY_X0, w->body_x + BODY_X1);
-  int32_t clear = under - BODY_LOW - 16;
-  w->body_y = ride < clear ? ride : clear;                    /* the higher of the two */
+  int32_t clear = under - BODY_LOW - 16;                      /* never sink into ground */
+  w->body_y = ride < clear ? ride : clear;
+
+  uint32_t period = w->step_len ? w->step_len : 1;
+  int32_t pm = w->body_x % (int32_t)period; if (pm < 0) pm += period;
+  uint32_t phase = (uint32_t)(((int64_t)pm * ANG_FULL) / period);
+  w->body_y += (BOB_AMP * isin(phase)) >> 14;                 /* subtle bob */
+
+  /* target lean = the ground tangent over a wide span, clamped, then a small sway */
+  int32_t dx = 2 * SLOPE_SPAN;
+  int32_t dy = terrain_y(w->body_x + SLOPE_SPAN) - terrain_y(w->body_x - SLOPE_SPAN);
+  uint32_t mag = isqrt64((uint64_t)((int64_t)dx * dx + (int64_t)dy * dy)); if (!mag) mag = 1;
+  int32_t tsin = (int32_t)((int64_t)dy * TRIG_ONE / (int64_t)mag);
+  if (tsin >  PITCH_SIN_MAX) tsin =  PITCH_SIN_MAX;
+  if (tsin < -PITCH_SIN_MAX) tsin = -PITCH_SIN_MAX;
+  int32_t tcos = (int32_t)isqrt64((uint64_t)((int64_t)TRIG_ONE * TRIG_ONE - (int64_t)tsin * tsin));
+  int32_t sway = (GAIT_SWAY * isin(phase)) >> 14;             /* small angle */
+  int32_t sc = icos((uint32_t)sway), ss = isin((uint32_t)sway);
+  int32_t cx = (int32_t)(((int64_t)tcos * sc - (int64_t)tsin * ss) >> 14);  /* compose */
+  int32_t sx = (int32_t)(((int64_t)tcos * ss + (int64_t)tsin * sc) >> 14);
+
+  if (snap) { w->body_cos = (int16_t)cx; w->body_sin = (int16_t)sx; return; }
+  int32_t bc = w->body_cos + (((cx - w->body_cos) * ORIENT_SMOOTH) >> 8);
+  int32_t bs = w->body_sin + (((sx - w->body_sin) * ORIENT_SMOOTH) >> 8);
+  uint32_t m2 = isqrt64((uint64_t)((int64_t)bc * bc + (int64_t)bs * bs)); if (!m2) m2 = 1;
+  w->body_cos = (int16_t)((int64_t)bc * TRIG_ONE / (int64_t)m2);
+  w->body_sin = (int16_t)((int64_t)bs * TRIG_ONE / (int64_t)m2);
 }
 
 void gait_init(World* w) {
@@ -124,7 +168,7 @@ void gait_init(World* w) {
     }
     set_foot(w, i, p, swing);
   }
-  seat_body(w);
+  seat_body(w, 1);   /* settle orientation directly so the first frame is calm */
 }
 
 void gait_step(World* w) {
@@ -145,5 +189,5 @@ void gait_step(World* w) {
     w->swinging[i] = now_air;
     set_foot(w, i, p, swing);
   }
-  seat_body(w);
+  seat_body(w, 0);   /* ease the lean toward the slope */
 }

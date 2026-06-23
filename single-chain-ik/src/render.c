@@ -93,6 +93,15 @@ static uint32_t draw_overlay(const World* w, Inst* out, uint32_t k, int i, int32
   return k;
 }
 
+/* a body quad at body-local offset (ox,oy), turned with the body's lean (bc,bs)
+ * about the body centre (already at camera-relative (0, rbc)) */
+static uint32_t body_part(Inst* out, uint32_t k, int32_t rbc, int32_t bc, int32_t bs,
+                          int32_t ox, int32_t oy, int32_t hx, int32_t hy, uint32_t col) {
+  int32_t rx = (int32_t)(((int64_t)ox * bc - (int64_t)oy * bs) >> 14);
+  int32_t ry = (int32_t)(((int64_t)ox * bs + (int64_t)oy * bc) >> 14);
+  return push(out, k, rx, rbc + ry, hx, hy, bc, bs, col);
+}
+
 uint32_t build_view(const World* w, Inst* out, int show_stages, int focus) {
   uint32_t k = 0;
   int32_t camx = w->body_x, camy = CAM_Y;
@@ -103,11 +112,12 @@ uint32_t build_view(const World* w, Inst* out, int show_stages, int focus) {
    * body, near legs in front. ---- */
   for (int i = N_LEGS / 2; i < N_LEGS; i++) k = draw_leg(w, out, k, i, camx, camy);
 
-  int32_t rby = w->body_y - camy;
-  k = push(out, k, -96, rby + 6, 78, 60, TRIG_ONE, 0, COL_ABDOMEN);      /* abdomen (rear) */
-  k = push(out, k, -110, rby - 6, 52, 40, TRIG_ONE, 0, COL_ABDOMEN_HI);  /*  + highlight   */
-  k = push(out, k,  44, rby, 52, 38, TRIG_ONE, 0, COL_CEPH);             /* cephalothorax  */
-  k = push(out, k,  92, rby - 2, 14, 12, TRIG_ONE, 0, COL_EYE);          /* head/eyes      */
+  /* body (abdomen, cephalothorax, head), turned with the body's lean about its centre */
+  int32_t rbc = w->body_y - camy, bc = w->body_cos, bs = w->body_sin;
+  k = body_part(out, k, rbc, bc, bs,  -96,  6, 78, 60, COL_ABDOMEN);     /* abdomen (rear) */
+  k = body_part(out, k, rbc, bc, bs, -110, -6, 52, 40, COL_ABDOMEN_HI);  /*  + highlight   */
+  k = body_part(out, k, rbc, bc, bs,   44,  0, 52, 38, COL_CEPH);        /* cephalothorax  */
+  k = body_part(out, k, rbc, bc, bs,   92, -2, 14, 12, COL_EYE);         /* head/eyes      */
 
   for (int i = 0; i < N_LEGS / 2; i++) k = draw_leg(w, out, k, i, camx, camy);
 

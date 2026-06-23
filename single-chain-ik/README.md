@@ -63,6 +63,11 @@ pointing sideways. The opaque ground is drawn **in front of** the legs, so a leg
 that dips into a step is occluded — never seen under the ground — exactly like a
 side-scroller's foreground.
 
+The body carries **weight**: it pitches to lean into the ground's grade (sampled
+wide so it follows the slope, not each step; clamped small and eased), with a
+subtle step-synced sway and bob. The hips ride on the body, so the legs re-solve as
+it leans — feet targets don't change, so the guarantees still hold.
+
 Tunables on the page: walk speed, segment length (shrink it to force clamping),
 stand height, stride, foot lift. Toggle **show the two stages** to see, on the
 focused leg, the length-only pose (faint blue) and the same chain after the single
@@ -107,7 +112,8 @@ appended to the wasm URL to defeat caching.
 - **Collision-aware legs.** The solve places the foot, not the whole chain, so a
   lower leg can dip into a step; here it is *occluded* by the foreground ground
   rather than avoided. Feet and body are always clear (validated by the sweep).
-- **Body tilt** to the ground slope, and excluding swing feet from the body-height
-  average. The body currently stays level and rides the mean foot height.
+- **Excluding swing feet from the body-height average** (the body rides the mean of
+  all feet, including lifted ones). The body now leans to the grade and carries a
+  weight bob/sway; per-leg follow-through (the lower segments lagging) is not done.
 - **End-effector orientation, joint limits, contact friction** — the open
   questions the source thread lists; out of scope for a method visualization.

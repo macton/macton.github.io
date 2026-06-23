@@ -53,7 +53,8 @@ int main(int argc, char** argv) {
   int ticks = argc > 1 ? atoi(argv[1]) : 0;
   World w; sim_init(&w);
   for (int t = 0; t < ticks; t++) sim_tick(&w);
-  printf("frame %u  body=(%d,%d)  curl_max=%u\n", w.frame, w.body_x, w.body_y, w.curl_max);
+  printf("frame %u  body=(%d,%d)  lean_sin=%d (~%.1f deg)  curl_max=%u\n",
+         w.frame, w.body_x, w.body_y, w.body_sin, w.body_sin * 90.0 / 16384.0, w.curl_max);
   frame(&w);
   /* per-leg: joints vs terrain beneath them (penetration = joint_y - terrain_y) */
   for (int i = 0; i < N_LEGS; i++) {

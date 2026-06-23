@@ -148,6 +148,13 @@ product contract — make them so:
   never sinks). **Body height = average foot height − stand height** (smooth over
   steps), **then raised only if the ground under the body's own footprint would
   otherwise poke through** (so it clears an obstacle beneath it without popping).
+- **Body weight (the natural layer):** the body is **not a rigid level slab** — it
+  **pitches to lean into the ground's grade** (sample the slope over a *wide* span
+  so it follows the grade, not each step; clamp the lean small; ease it toward the
+  target so it never jerks) plus a small step-synced **sway and bob**. Mount the
+  hips on the body so **every leg re-solves as it leans** — the foot targets don't
+  change, so this stays inside all the contracts; the visible adaptation is the IK
+  keeping each planted foot put.
 - **Tunables on the page** (walk speed, leg/segment length, stand height, stride,
   foot lift), all integer subcells; shrinking the leg length should drive targets
   out of reach so you can watch the **clamp** flag. (Changing stride live re-phases

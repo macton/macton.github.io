@@ -41,6 +41,10 @@ Over thousands of ticks on the rough terrain:
 - **No popping**: a foot moves a bounded amount per tick (≤ 80 subcells), including
   across lift-off, touch-down, gait re-phasing, and stepping over an obstacle.
 - **Body above feet**: `body_y` is above the average foot height every tick.
+- **Body lean**: the body pitches toward the terrain grade (sampled wide, clamped
+  to ~11°, eased per tick) plus a small step-synced sway/bob; the hips ride on it so
+  the legs re-solve. Feet targets are unchanged, so foot-on-target, no-pop, and the
+  no-penetration tiers below all still hold (verified by the same tests).
 - **First frame is settled**: `gait_init` seats every leg consistent with its
   phase, so tick 0 does not jump.
 

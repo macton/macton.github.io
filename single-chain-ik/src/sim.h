@@ -20,6 +20,7 @@ typedef struct World World;
 struct World {
   /* ---- body ------------------------------------------------------------- */
   int32_t body_x, body_y;          /* world position, subcells (x grows as it walks) */
+  int16_t body_cos, body_sin;      /* body in-plane orientation, Q14 (leans to the slope) */
 
   /* ---- per-leg gait state (SoA) ----------------------------------------- */
   int32_t plant_x [N_LEGS];        /* resting foothold x; its y is the terrain there  */
