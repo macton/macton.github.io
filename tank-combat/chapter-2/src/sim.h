@@ -10,10 +10,12 @@
  *   grid             one uint32_t per screen-row, bit c == column c (1 = wall)
  * Fixed timestep: one sim_tick == one frame; per-tick deltas are the data.
  *
- * CHAPTER 2 adds the 4x4 world, two tank classes, and the precomputed pathing
- * tables (Level 1 per-screen distances, Level 2 edge-point next-hop). The big
- * tables live here because they are simulation data, rebuilt only when the
- * rarely-changing grid/destination changes and read by a per-tick lookup. */
+ * CHAPTER 2: a 4x4 world and self-pathing tanks. All tanks are identical; each
+ * carries a per-tank interaction state (UNSELECTED / AUTOPATH / MANUAL) and may
+ * have a destination it routes to. The big pathing tables (Level 1 per-screen
+ * distances, Level 2 edge-point next-hop) live here because they are simulation
+ * data, rebuilt only when the rarely-changing grid/destination changes and read
+ * by a per-tick lookup. */
 #ifndef TANK_SIM_H
 #define TANK_SIM_H
 
@@ -21,7 +23,7 @@
 #include "grid_paths.h"
 #include "edge_paths.h"
 
-/* pathed-tank status, for the page readout and the tests */
+/* per-tank routing status, for the page readout and the tests */
 #define PS_IDLE    0   /* no destination */
 #define PS_ROUTING 1   /* following a route */
 #define PS_ARRIVED 2   /* reached the destination cell */
@@ -29,24 +31,22 @@
 
 typedef struct World World;
 struct World {
-  /* ---- per-tank movement state (SoA; class is the index partition) -------
-   * Index 0 is the manual tank, 1..N_PATHED are pathed. Both classes share
-   * every field and every transform — only the SOURCE of tank_in differs
-   * (manual: set_input; pathed: tanks_path from the lookup), so there is no
-   * class tag, just the index range. */
+  /* ---- per-tank movement state (SoA) ------------------------------------- */
   uint32_t tank_xy [N_TANKS];   /* packed position x|y<<16, subcells (Q8.8) */
   uint16_t tank_ang[N_TANKS];   /* Q5.11 heading */
   uint8_t  tank_in [N_TANKS];   /* input bitfield (IN_*) */
   uint32_t tank_vxy[N_TANKS];   /* packed last-tick applied move vx|vy<<16 */
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
 
-  /* ---- pathed-only state (sized to N_PATHED, not N_TANKS) ---------------- */
-  uint8_t  pdest_screen[N_PATHED];  /* destination screen (0..15) */
-  uint16_t pdest_cell  [N_PATHED];  /* destination local cell (0..N_CELLS-1) */
-  uint8_t  phas        [N_PATHED];  /* 1 if a destination is set */
-  uint8_t  pgoal       [N_PATHED];  /* cardinal currently followed (DIR_*) or DIR_NONE */
-  uint8_t  pstatus     [N_PATHED];  /* PS_* (idle/routing/arrived/nopath) */
-  uint16_t pg[N_PATHED * N_EDGE_MAX]; /* remaining distance from each edge point to the goal */
+  /* ---- per-tank interaction + routing (every tank can path) -------------- */
+  uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
+  uint8_t  pdest_screen[N_TANKS];   /* destination screen (0..15) */
+  uint16_t pdest_cell  [N_TANKS];   /* destination local cell (0..N_CELLS-1) */
+  uint8_t  phas        [N_TANKS];   /* 1 if a destination is set */
+  uint8_t  pgoal       [N_TANKS];   /* cardinal currently followed (DIR_*) or DIR_NONE */
+  uint8_t  pstatus     [N_TANKS];   /* PS_* (idle/routing/arrived/nopath) */
+  uint16_t pg[N_TANKS * N_EDGE_MAX]; /* remaining distance from each edge point to the goal */
+  uint8_t  selected;                /* the one selected tank (AUTOPATH/MANUAL), or SEL_NONE */
 
   /* ---- the rarely-rebuilt world ----------------------------------------- */
   uint32_t grid[N_SCREENS * GRID_H];  /* wall bitset, screen-major, one word/row */
@@ -67,10 +67,6 @@ struct World {
   uint16_t dist2  [N_EDGE_MAX * N_EDGE_MAX];  /* all-pairs edge-point distance */
   uint8_t  nexthop[N_EDGE_MAX * N_EDGE_MAX];  /* all-pairs next edge point (0xFF none) */
 
-  /* ---- presentation-adjacent sim state (drives the demo) ----------------- */
-  uint8_t  cam_sx, cam_sy;       /* viewport screen (presentation only; never read by the sim) */
-  uint8_t  selected;             /* pathed tank index receiving dest clicks + highlight (1..N_TANKS-1) */
-
   uint32_t frame;
   uint16_t move_speed;           /* subcells per tick */
   uint16_t turn_rate;            /* angle units per tick */
@@ -83,11 +79,10 @@ _Static_assert(N_EDGE_MAX <= 255, "edge-point ids (and 0xFF sentinel) fit a uint
 void sim_init(World* w);    /* load the level, place tanks, build all path tables */
 void sim_tick(World* w);    /* advance one fixed step: path-follow, turn, move */
 
-/* rarely-called mutators that rebuild the affected tables (not per tick) */
-void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy);   /* flip a wall, rebuild L1(screen)+L2+pg */
-void sim_set_dest(World* w, uint32_t tank, uint32_t wcx, uint32_t wcy); /* set a pathed tank's goal */
-void sim_clear_dest(World* w, uint32_t tank);
-void sim_set_selected(World* w, uint32_t tank);
-void sim_scroll(World* w, int dx, int dy);   /* move the viewport by whole screens (toroidal) */
+/* mutators (rebuild only the tables a change can affect; not per tick) */
+void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy);            /* flip a wall, rebuild L1(screen)+L2+pg */
+void sim_set_dest(World* w, uint32_t tank, uint32_t wcx, uint32_t wcy);/* set a tank's destination */
+void sim_cycle_tank(World* w, uint32_t tank);                         /* cycle a tank's state; manage `selected` */
+void sim_deselect(World* w);                                          /* drop selection (UNSELECTED keeps its path) */
 
 #endif

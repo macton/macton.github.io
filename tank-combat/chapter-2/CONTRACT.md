@@ -1,9 +1,9 @@
 # Chapter 2 contract — pathing & viewport
 
 The explicit promises chapter 2 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (40 checks). Chapter 2 **inherits chapter 1's
-movement contract** ([../chapter-1/CONTRACT.md](../chapter-1/CONTRACT.md)) for the
-manual tank — sized footprint, rotate-then-move tick order, auto-steer reacting to
+tests in `src/test.c` enforce them (41 checks). Chapter 2 **inherits chapter 1's
+movement contract** ([../chapter-1/CONTRACT.md](../chapter-1/CONTRACT.md)) for any
+driven tank — sized footprint, rotate-then-move tick order, auto-steer reacting to
 the previous tick's `hit`, slide-on-walls, toroidal wrap, the collide-speed
 modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world.
 
@@ -13,18 +13,22 @@ modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world
   80×60 grid, organised as 4×4 screen-grids. A tank crosses from one screen into
   its neighbour, and around the outer wrap, wherever the edge cell and the
   neighbouring cell are **both open** — the same far-side-wall rule as chapter 1.
-- **The viewport is presentation only.** Scrolling moves what you see by whole
-  screen-grids (toroidally); it never touches the simulation. A tank keeps pathing
-  whether or not its screen is in view. *(tested: scroll then assert tank
-  state/frame unchanged; an off-screen tank still reaches its destination.)*
+  Each screen border has 0–2 matching openings; no screen is an island.
+- **The viewport is presentation only.** The camera follows the selected tank and
+  slides between screens, and the picker lets you look anywhere; none of it touches
+  the simulation. A tank keeps pathing whether or not its screen is in view.
 
-## The two tank classes
+## One kind of tank, three states
 
-- **One manual tank, one control set.** The keyboard and the single on-screen pad
-  drive the manual tank (index 0) only. *(tested: the manual tank is not
-  selectable as a pathed target.)*
-- **Pathed tanks follow the shortest route** produced by the tables, take a
-  wall-free path, cross matched inner edges and the outer wrap, and **stop on
+- **All tanks are identical**, each with a state cycled by tapping it:
+  **auto-path** (selected; a clicked cell becomes its destination), **manual**
+  (selected; driven by the one control set — keyboard + on-screen pad), or
+  **unselected**. At most one tank is selected at a time. *(tested: the cycle, and
+  that selecting one tank deselects the previously selected one.)*
+- **An UNSELECTED tank keeps following any route it was given** until it arrives; a
+  **MANUAL tank ignores its destination** and moves only by its input. *(tested.)*
+- **A routing tank follows the shortest route** produced by the tables, takes a
+  wall-free path, crosses matched openings and the outer wrap, and **stops on
   arrival** at the destination cell.
 
 ## Pathing promises (each has a test)
@@ -48,10 +52,11 @@ modifier, manual-turn suppresses auto-steer — now on the 80×60 toroidal world
 - **An unreachable destination produces no path, not a spin.** If the goal is in a
   sealed region, the tank's status is `PS_NOPATH`, it never drives into a wall, and
   it stays put — no spin, no wall-grind.
-- **Selection & destination are explicit, single-target.** Clicking a pathed tank
-  selects it; clicking a cell sets that tank's destination and **replaces** any
-  prior one; clearing removes it. The highlighted path always reflects the current
-  tables (it is `path_trace`, the same per-tick lookup dry-run).
+- **Selection & destination are explicit, single-target.** Tapping a tank cycles
+  its state; tapping a cell while a tank is *auto-path* sets that tank's
+  destination and **replaces** any prior one. Each routing tank's drawn path is
+  `path_trace` — the same per-tick lookup dry-run — so it always reflects the
+  current tables.
 
 ## Boundaries / non-promises
 

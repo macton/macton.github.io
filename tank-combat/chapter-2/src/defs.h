@@ -22,11 +22,14 @@
 #define BIG_W       (SCREENS_X * GRID_W)           /* 80 cells wide  */
 #define BIG_H       (SCREENS_Y * GRID_H)           /* 60 cells tall  */
 
-/* ---- tanks: one manual + a few pathed (class == index partition) --------- */
-#define N_PATHED    3                  /* self-routing tanks */
-#define N_TANKS     (1 + N_PATHED)     /* index 0 = manual, 1..N_PATHED = pathed */
-#define TANK_MANUAL 0
-#define is_pathed(i) ((i) >= 1)        /* the index range IS the class tag */
+/* ---- tanks: all identical; each can path itself or be driven ------------- */
+#define N_TANKS     4
+/* per-tank interaction state, cycled by clicking the tank. At most one tank is
+ * "selected" (AUTOPATH or MANUAL); the rest are UNSELECTED. */
+#define TS_UNSELECTED 0   /* not selected; keeps following its path if it has one, else idle */
+#define TS_AUTOPATH   1   /* selected; click a cell to set its destination, it routes there   */
+#define TS_MANUAL     2   /* selected; driven by the keyboard / on-screen controls            */
+#define SEL_NONE      0xFFu
 
 #define N_DIRS      32          /* discrete headings: angle >> ANGLE_SHIFT   */
 #define N_PATTERNS  16          /* a cell's 4 orthogonal-neighbour walls: NESW */

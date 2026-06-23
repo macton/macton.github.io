@@ -157,7 +157,7 @@ uint8_t route_next_dir(const World* w, uint32_t p, uint32_t screen, uint32_t cel
 
 uint32_t path_trace(const World* w, uint32_t p, uint16_t* out, uint32_t max) {
   if (!w->phas[p] || max == 0) return 0;
-  uint32_t t = p + 1;                                    /* pathed idx -> tank idx */
+  uint32_t t = p;                                        /* p is the tank index */
   int wcx = xy_lo(w->tank_xy[t]) >> SUB_SHIFT;
   int wcy = xy_hi(w->tank_xy[t]) >> SUB_SHIFT;
   wcx = wrap_wcx(wcx); wcy = wrap_wcy(wcy);

@@ -44,16 +44,23 @@
   .padbtn.r { grid-column: 3; grid-row: 2; } .padbtn.d { grid-column: 2; grid-row: 3; }
 
   /* scroll buttons (move the viewport one screen) */
-  .scrollbtn { position: absolute; z-index: 3; width: 34px; height: 34px; border-radius: 8px;
-               background: #0f1115cc; border: 1px solid var(--line); color: var(--fg);
-               font-size: 17px; line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; padding: 0; }
-  .scrollbtn:hover { border-color: var(--acc); }
+  .scrollbtn { position: absolute; z-index: 4; width: 34px; height: 34px; border-radius: 8px;
+               background: #0f1115ee; border: 1px solid var(--acc); color: var(--fg);
+               font-size: 17px; line-height: 1; cursor: pointer; user-select: none; -webkit-user-select: none; padding: 0;
+               display: none; }      /* shown only while the screen picker is open */
+  .scrollbtn:hover { background: #1b1e25ee; }
   .scrollbtn.su { top: 8px; left: 50%; transform: translateX(-50%); }
   .scrollbtn.sd { bottom: 8px; left: 50%; transform: translateX(-50%); }
   .scrollbtn.sl { left: 8px; top: 50%; transform: translateY(-50%); }
   .scrollbtn.sr { right: 8px; top: 50%; transform: translateY(-50%); }
-  #camlabel { position: absolute; top: 8px; right: 8px; z-index: 3; font-size: 12px; color: var(--acc);
-              background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  #camlabel { position: absolute; top: 8px; right: 8px; z-index: 5; font: inherit; font-size: 12px; color: var(--acc);
+              background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+  #camlabel:hover { border-color: var(--acc); }
+  /* screen picker overlay (a 4x4 map of the world) */
+  #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
+            gap: 6px; padding: 44px; background: #0c0e12dd; }
+  #picker .scr { background: #1b1e25; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  #picker .scr:hover { border-color: var(--acc); background: #232732; }
 
   #status { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--acc); }
   #help { max-width: 720px; margin: 6px auto 0; padding: 0 4px; color: var(--dim); font-size: 14px; }
@@ -123,18 +130,20 @@
 
   <div id="map">
     <canvas id="gpu"></canvas>
-    <div id="camlabel">screen 0,0</div>
-    <button class="scrollbtn su" title="scroll up">▲</button>
-    <button class="scrollbtn sd" title="scroll down">▼</button>
-    <button class="scrollbtn sl" title="scroll left">◄</button>
-    <button class="scrollbtn sr" title="scroll right">►</button>
+    <button id="camlabel">screen 0,0 ▾</button>
+    <div id="picker"></div>
+    <button class="scrollbtn su" title="up">▲</button>
+    <button class="scrollbtn sd" title="down">▼</button>
+    <button class="scrollbtn sl" title="left">◄</button>
+    <button class="scrollbtn sr" title="right">►</button>
   </div>
   <div id="status">loading…</div>
   <div id="help">
-    <b>Manual tank (amber):</b> W/S move · A/D turn, or the on-screen pad. &nbsp;
-    <b>Pathed tanks:</b> tap one to select it, then tap a cell to send it there. The
-    <span class="swatch" style="background:#78e682"></span> dots are its route. Arrows
-    <b>◄ ▲ ▼ ►</b> scroll the viewport one screen.
+    <b>Tap a tank</b> to cycle it:
+    <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
+    <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
+    unselected. A selected tank's screen is <b>followed</b>; its route is drawn in its own colour.
+    Tap <b>screen x,y ▾</b> to pick a screen and look around.
   </div>
 
   <article>
@@ -159,33 +168,36 @@
     below. A tank crosses from one screen into its neighbour wherever the border cell and
     the neighbouring cell are <em>both open</em> — exactly chapter 1's "depends only on the
     wall on the far side" rule, now applied at every inner screen edge and at the outer
-    wrap. The default map leaves a one-cell gap at the centre of each screen border; those
-    gaps line up, so the whole world is connected. Each of the 16 screens has a
-    distinct interior — open, blocks, pillars, rooms, dead-ends, a maze, an enclosed
-    <em>island</em> (try routing a tank into screen 3's pocket — no path) — so they are
+    wrap. Each screen border has <strong>0, 1, or 2 matching openings</strong> — not every
+    border connects, but a randomised spanning tree forces enough that no screen is an
+    island, and the generator fails the build if one is. Each of the 16 screens also has a
+    distinct interior — blocks, pillars, rooms, dead-ends, a maze, an enclosed
+    <em>island</em> of unreachable cells (route a tank into one — no path) — so they are
     easy to tell apart and each gives the flow field below something different to solve.
-    Scroll around with the arrows; the little map shows where you are:</p>
+    Tap the screen badge to open the picker and look around:</p>
     <div class="fig">
       <p class="cap">the 4×4 world · the bordered square is the viewport · dots are tanks · click a screen to jump there</p>
       <div id="w-minimap"></div>
       <div id="w-stats" style="margin-top:10px"></div>
       <div id="w-controls" style="margin-top:8px"></div>
     </div>
-    <p class="note">The viewport is presentation only: scrolling changes what you see,
-    never the simulation. A tank keeps pathing whether or not its screen is in view.</p>
+    <p class="note">The viewport is presentation only: which screen you look at never
+    changes the simulation. A tank keeps pathing whether or not its screen is in view —
+    open the picker and look elsewhere and it carries on.</p>
 
-    <h2>Two tank classes, stored as a partition — no class tag</h2>
-    <p>There is one <strong>manual</strong> tank (amber, index 0), driven exactly as in
-    chapter 1, and three <strong>pathed</strong> tanks (indices 1–3) that route themselves.
-    Both classes share every per-tank field and run through the same
-    <code>turn</code>/<code>move</code> transforms — the <em>only</em> difference is where
-    each tank's input comes from: the manual tank from the keyboard/pad, a pathed tank
-    from the path lookup. So there is no class byte at all; the <strong>index range is the
-    class</strong> (0 manual, 1+ pathed). A pathed tank's per-tick input is just the next
-    cardinal toward its goal, turned into the same button bits the manual tank uses and fed
-    into the same movement model — the movement code is not forked.</p>
+    <h2>One kind of tank, three states</h2>
+    <p>All the tanks are <strong>identical</strong> — there are no classes. Each carries a
+    small <em>state</em> you cycle by tapping it: <strong>auto-path</strong> (tap a cell and
+    it routes there), <strong>manual</strong> (you drive it — the on-screen pad and W/S/A/D
+    appear only now), or <strong>unselected</strong> (it keeps following any route it was
+    given, otherwise sits). At most one tank is selected at a time, and its screen is
+    <em>followed</em> — when it drives across a border, the new screen slides in. The whole
+    behaviour difference between a driven tank and a routing one is just where its one input
+    byte comes from: the controls, or the path lookup — both feed the <em>same</em>
+    <code>turn</code>/<code>move</code> transforms (the movement code is not forked). So a
+    tank is the same data either way; the state only picks the input source.</p>
     <div class="fig">
-      <p class="cap">per-tank data · class is the index · for pathed tanks: goal cell, status, and the current direction lookup</p>
+      <p class="cap">per-tank data · state, destination, status, and the current direction lookup · tap “cycle state” or the tank itself</p>
       <div id="w-tanks"></div>
     </div>
 
@@ -233,7 +245,7 @@
     <strong>on top of Level 1</strong>: two edge points on the same screen are joined by an
     edge weighted with that screen's Level-1 distance; crossing a matched border costs 1.
     So Level 2 never re-walks the grid — it reuses the distances Level 1 already stored, and
-    a small Floyd–Warshall fills the matrix. With the default map there are only 64 edge
+    a small Floyd–Warshall fills the matrix. With the default map there are only ~80 edge
     points, so the matrix is tiny.</p>
     <div class="fig">
       <p class="cap">the connecting edge points (matched gaps) and the next-hop matrix · pick a source edge point to see its row</p>
@@ -246,17 +258,18 @@
     every edge point, the shortest <em>remaining</em> distance to the goal (Level-2 distance
     to a goal-screen entry point, plus that screen's Level-1 distance in to the goal cell).
     That fold happens once, when the destination changes — not per tick. After that, each
-    tick a pathed tank in screen <em>S</em> either follows <em>S</em>'s Level-1 flow
+    tick a routing tank in screen <em>S</em> either follows <em>S</em>'s Level-1 flow
     straight to the goal (if it's there and reachable) or picks the exit edge point that
     minimises <em>distance-to-the-exit + 1 + remaining-from-its-partner</em> — a handful of
     table reads, never a search. Because every step strictly decreases the true remaining
     distance, the route is the globally shortest one, it never enters a wall, and an
-    unreachable destination produces no path at all (shown as such) rather than a spin. The
-    highlighted dots are this route, read straight out of the same tables the tank
-    follows.</p>
-    <p>Tune the pace and drive the manual tank into things to feel the inherited chapter-1
-    movement (slide along walls, auto-steer out of corners) — pathed tanks ride on top of
-    the very same model:</p>
+    unreachable destination produces no path at all (shown as such) rather than a spin. Each
+    routing tank's path is drawn in its own colour, read straight out of the same tables it
+    follows; where two paths share a cell the marker splits into coloured strips so both
+    stay visible.</p>
+    <p>Tune the pace and drive a tank (tap it twice to make it manual) into things to feel
+    the inherited chapter-1 movement (slide along walls, auto-steer out of corners) — the
+    auto-pathing tanks ride on top of the very same model:</p>
     <div class="fig">
       <p class="cap">tunables · per-tick amounts (collide_scale is out of 256)</p>
       <div id="w-tunables"></div>

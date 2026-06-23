@@ -8,12 +8,18 @@
  *   int16  co, si   (Q14)        off 8   rotation (cos, sin)
  *   uint32 rgba                  off 12  color, packed RGBA8888
  *
- * CHAPTER 2 viewport: the world is 4x4 screens but the page shows ONE screen at
- * a time, so the renderer builds quads in SCREEN-LOCAL subcells for the camera
- * screen (cam_sx,cam_sy). The canvas is therefore still a single GRID_W x GRID_H
- * arena, exactly like chapter 1 — only the camera changes what is built. Walls,
- * tanks, the path highlight, and edge-point markers are all clipped to the
- * camera screen. */
+ * CHAPTER 2 viewport: the page shows ONE screen at a time, built in screen-local
+ * subcells. The camera follows the selected tank, and when it changes screen the
+ * page slides the new screen in — so the renderer can build TWO screens at once
+ * (the from-screen at offset 0 and the to-screen at a one-screen offset) and the
+ * host animates the view between them. Because the camera follows, paths update,
+ * and the view slides, the whole view changes every frame, so it is rebuilt each
+ * frame (no static/dynamic split — there is no large static part to hoist).
+ *
+ * Each tank shows its IDENTITY as a body colour and its STATE as an outline
+ * (AUTOPATH / MANUAL / none). A pathing tank's route is drawn in a lighter shade
+ * of its colour; where two tanks' routes share a cell the marker is split into
+ * coloured strips so both are visible. */
 #ifndef TANK_RENDER_H
 #define TANK_RENDER_H
 
@@ -21,25 +27,14 @@
 
 typedef struct { int16_t cx, cy, hx, hy, co, si; uint32_t rgba; } Inst;
 
-/* The instance buffer is split by frequency of change (as in chapter 1):
- *
- *   [0 .. INST_DYN_MAX)            dynamic: tanks in view, the selected tank's
- *                                  path highlight, the selection ring, the
- *                                  current screen's edge-point markers — rebuilt
- *                                  every tick (unused slots are zero-size quads)
- *   [INST_DYN_MAX .. +wall_count)  the camera screen's walls — rebuilt only when
- *                                  the camera moves or a wall is edited
- *
- * Per screen there are at most N_CELLS wall quads and N_CELLS highlight cells. */
-#define INST_DYN_MAX (N_TANKS * 2 + N_CELLS + EP_PER_SCREEN_MAX + 1)
+/* Capacity: up to two screens of walls + path strips + tanks/outlines. */
+#define INST_MAX (2 * (N_CELLS + 512 + N_TANKS * 4))
 
-/* Camera screen's walls, into out[0..]. Returns the wall count. Call only when
- * the camera moves or the grid changes. */
-uint32_t build_walls(const World* w, Inst* out);
-
-/* Dynamic quads (tanks in view + path highlight + selection + edge markers),
- * rewritten every tick into out[0..INST_DYN_MAX). Pads the tail with zero-size
- * quads. Returns INST_DYN_MAX. */
-uint32_t build_dynamic(const World* w, Inst* out, int show_path);
+/* Build the whole view into out[0..) and return the quad count. Draws the camera
+ * screen at local offset 0; if `sliding`, also the `to` screen offset by
+ * (dx,dy) screen-widths (dx,dy in {-1,0,1}). */
+uint32_t build_view(const World* w, Inst* out,
+                    uint32_t cam_sx, uint32_t cam_sy,
+                    int sliding, uint32_t to_sx, uint32_t to_sy, int dx, int dy);
 
 #endif
