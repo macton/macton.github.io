@@ -12,15 +12,15 @@
 
 #define ROLL0_A 40
 #define ROLL1_A 24
-#define TERR_AMP  130         /* terrace envelope, subcells           */
+#define TERR_AMP  190         /* terrace envelope, subcells           */
 #define TERR_FREQ 4           /* up-down cycles of terracing / period */
-#define STEP_H    44          /* riser height — one stair step        */
+#define STEP_H    72          /* riser height — one stair step        */
 
 /* obstacle blocks within one period [0,WORLDP): {x0, x1, height}, sharp edges */
 #define N_OBST 3
 static const int32_t OBST_X0[N_OBST] = {  4864, 15104, 23808 };
 static const int32_t OBST_X1[N_OBST] = {  6144, 15616, 25600 };
-static const int32_t OBST_H [N_OBST] = {    64,    76,    68 };
+static const int32_t OBST_H [N_OBST] = {    66,    78,    70 };
 
 /* round v to the nearest multiple of s, symmetric about zero */
 static int32_t qstep(int32_t v, int32_t s) {

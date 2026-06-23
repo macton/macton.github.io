@@ -127,7 +127,7 @@ async function main() {
     device.queue.writeBuffer(instBuf, 0, view.inst(n));
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({ colorAttachments: [{ view: ctx.getCurrentTexture().createView(),
-      clearValue: { r: 0.07, g: 0.08, b: 0.10, a: 1 }, loadOp: "clear", storeOp: "store" }] });
+      clearValue: { r: 0.74, g: 0.73, b: 0.69, a: 1 }, loadOp: "clear", storeOp: "store" }] });
     pass.setPipeline(pipeline); pass.setBindGroup(0, bind); pass.setVertexBuffer(0, instBuf);
     pass.draw(6, n); pass.end(); device.queue.submit([enc.finish()]);
 

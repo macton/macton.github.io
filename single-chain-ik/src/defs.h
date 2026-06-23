@@ -48,7 +48,7 @@
 /* All are editable on the page; they are the knobs that make the solver's
  * behaviour visible. Shrinking seg_len starves the reach until targets fall
  * outside the reachable interval and the solver has to clamp (watch the flag). */
-#define DEF_WALK_SPEED  10    /* body advance, subcells per tick (~2.3 cells/s) */
+#define DEF_WALK_SPEED   8    /* body advance, subcells per tick (~2.3 cells/s) */
 #define DEF_SEG_LEN    250    /* base segment length, subcells (max reach 3x)   */
 #define DEF_STAND_H    360    /* body height above its feet, subcells           */
 #define DEF_STEP_LEN   190    /* stride length / gait period, subcells          */

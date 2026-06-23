@@ -9,26 +9,30 @@
 #define COL   28        /* terrain sample spacing, subcells                 */
 #define GROUND_BOTTOM (VIEW_H / 2 + 2 * SUB)   /* fill extends below the view */
 
-static const uint32_t COL_GROUND     = RGBA( 60,  72,  68, 255);
-static const uint32_t COL_GROUND_TOP = RGBA(102, 134, 112, 255);
+/* The scene is lit LIGHT so the dark legs read against it (see app.js clear).
+ * Ground is a mid tone — darker than the sky so the stepped silhouette shows,
+ * lighter than the legs so the feet show against it. */
+static const uint32_t COL_GROUND     = RGBA(120, 126, 112, 255);
+static const uint32_t COL_GROUND_TOP = RGBA(150, 162, 134, 255);
 /* body: a big orange abdomen (rear) and a darker cephalothorax (front) */
-static const uint32_t COL_ABDOMEN    = RGBA(222, 142,  60, 255);
-static const uint32_t COL_ABDOMEN_HI = RGBA(238, 170,  92, 255);
-static const uint32_t COL_CEPH       = RGBA( 74,  78,  90, 255);
-static const uint32_t COL_EYE        = RGBA( 24,  26,  32, 255);
-/* legs: an orange femur down to a near-black tarsus; far side dimmer */
-static const uint32_t COL_FEMUR_N    = RGBA(236, 156,  70, 255);
-static const uint32_t COL_FEMUR_F    = RGBA(150, 106,  56, 255);
-static const uint32_t COL_LOWER_N    = RGBA( 40,  42,  50, 255);
-static const uint32_t COL_LOWER_F    = RGBA( 70,  72,  82, 255);
-static const uint32_t COL_KNEE_N     = RGBA(236, 156,  70, 255);
-static const uint32_t COL_KNEE_F     = RGBA(150, 106,  56, 255);
-static const uint32_t COL_FOOT       = RGBA( 28,  30,  36, 255);
-static const uint32_t COL_CLAMP      = RGBA(232,  92,  74, 255);  /* foot can't reach */
+static const uint32_t COL_ABDOMEN    = RGBA(224, 138,  52, 255);
+static const uint32_t COL_ABDOMEN_HI = RGBA(242, 170,  88, 255);
+static const uint32_t COL_CEPH       = RGBA( 58,  62,  74, 255);
+static const uint32_t COL_EYE        = RGBA( 18,  20,  26, 255);
+/* legs: an orange femur down to a near-black tarsus; far side dimmer (but still
+ * clearly darker than the light background, so it stays visible) */
+static const uint32_t COL_FEMUR_N    = RGBA(238, 152,  58, 255);
+static const uint32_t COL_FEMUR_F    = RGBA(176, 118,  58, 255);
+static const uint32_t COL_LOWER_N    = RGBA( 30,  32,  40, 255);
+static const uint32_t COL_LOWER_F    = RGBA( 78,  82,  94, 255);
+static const uint32_t COL_KNEE_N     = RGBA(238, 152,  58, 255);
+static const uint32_t COL_KNEE_F     = RGBA(176, 118,  58, 255);
+static const uint32_t COL_FOOT       = RGBA( 24,  26,  32, 255);
+static const uint32_t COL_CLAMP      = RGBA(214,  64,  48, 255);  /* foot can't reach */
 /* teaching overlay (semi-transparent; the host enables alpha blending) */
-static const uint32_t COL_GHOST      = RGBA(108, 160, 214, 150);  /* pre-aim pose    */
-static const uint32_t COL_REF        = RGBA(108, 160, 214, 120);  /* reference ray   */
-static const uint32_t COL_TARGET     = RGBA(244, 184,  96, 235);  /* the foot target */
+static const uint32_t COL_GHOST      = RGBA( 40, 104, 198, 190);  /* pre-aim pose    */
+static const uint32_t COL_REF        = RGBA( 40, 104, 198, 150);  /* reference ray   */
+static const uint32_t COL_TARGET     = RGBA(228, 120,  36, 245);  /* the foot target */
 
 static uint32_t push(Inst* out, uint32_t k, int32_t cx, int32_t cy, int32_t hx, int32_t hy,
                      int32_t co, int32_t si, uint32_t rgba) {
