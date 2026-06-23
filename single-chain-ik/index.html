@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Single-Chain IK — Length + Direction · by picture</title>
+<style>
+  :root { color-scheme: dark; --fg:#d7dbe0; --dim:#8b93a0; --acc:#f4b860; --acc2:#6ca0d6; --card:#0f1115; --line:#2a2d35; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #16181d; color: var(--fg);
+    font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  code, .mono, .stats, .live, .nf input, #version { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code { background: #0f1115; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: .9em; }
+  a { color: var(--acc); }
+
+  header { max-width: 820px; margin: 0 auto; padding: 18px 16px 6px; }
+  .crumb { color: var(--dim); font-size: 13px; }
+  h1 { font-size: 24px; margin: 4px 0 2px; }
+  .sub { color: var(--dim); margin: 0; }
+  #version {
+    position: fixed; top: 8px; right: 10px; z-index: 10;
+    font-size: 12px; color: var(--acc); background: #0009; border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 7px;
+  }
+
+  /* the scene — first thing on the page (mobile-first) */
+  #stage { position: relative; width: 100%; max-width: 860px; margin: 12px auto 0;
+           aspect-ratio: 16 / 8; background: #11141a; border: 1px solid var(--line);
+           border-radius: 8px; overflow: hidden; }
+  #gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            color: var(--acc); background: #11141a; }
+  #legend { max-width: 860px; margin: 6px auto 0; padding: 0 4px; color: var(--dim); font-size: 13px; }
+  #legend b { color: #c7ccd4; } #legend .k { color: var(--acc2); }
+
+  /* article */
+  article { max-width: 820px; margin: 0 auto; padding: 8px 16px 80px; }
+  article h2 { font-size: 19px; margin: 32px 0 8px; color: var(--acc); }
+  article h2:first-of-type { margin-top: 22px; }
+  article p { margin: 10px 0; }
+  article .note { color: var(--dim); font-size: 14px; }
+  ol li, ul li { margin: 4px 0; }
+  .fig { margin: 14px 0; padding: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .fig .cap { color: var(--dim); font-size: 13px; margin: 0 0 8px; }
+
+  /* widgets */
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { flex: 1; padding: 8px 4px; background: #2b2f3a; color: var(--fg); border: 1px solid #3a3f4c;
+           border-radius: 6px; cursor: pointer; font: inherit; }
+  button:hover { background: #353a47; }
+  select { background: #000; color: var(--fg); border: 1px solid #3a3f4c; border-radius: 6px; padding: 6px; font: inherit; }
+  .stats { padding: 8px 10px; background: #000; border-radius: 6px; font-size: 13px; }
+  .stats b { color: #fff; }
+  .chk { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 14px; cursor: pointer; }
+  .chk input { accent-color: var(--acc); width: 16px; height: 16px; }
+  .nf { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 6px 0; }
+  .nf span { color: var(--dim); font-size: 14px; }
+  .nf input[type=range] { flex: 1; accent-color: var(--acc); }
+  .nf .val { color: #c7ccd4; min-width: 58px; text-align: right; font-family: ui-monospace, monospace; font-size: 13px; }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
+
+  /* per-leg table */
+  .legtab { width: 100%; border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 12.5px; }
+  .legtab th, .legtab td { padding: 3px 6px; border: 1px solid #20232b; text-align: right; color: var(--dim); white-space: nowrap; }
+  .legtab th { color: #c7ccd4; position: sticky; top: 0; background: #0f1115; }
+  .legtab tr.focus td { color: var(--acc); background: #1b1e25; }
+  .legtab td.clamp { color: #e85c4a; }
+  .legtab .near::before { content: "●"; color: var(--acc); margin-right: 5px; }
+  .legtab .far::before  { content: "●"; color: #8a7254; margin-right: 5px; }
+</style>
+</head>
+<body>
+  <div id="version">v…</div>
+  <header>
+    <div class="crumb"><a href="../">Mike Acton</a> · by picture</div>
+    <h1>Single-Chain IK = Length + Direction</h1>
+    <p class="sub">A spider walks over rough ground. Each leg is one kinematic chain, solved by reaching the right length, then aiming it.</p>
+  </header>
+
+  <div id="stage">
+    <canvas id="gpu"></canvas>
+    <div id="status">loading…</div>
+  </div>
+  <div id="legend">
+    <span class="swatch" style="background:#e8c478"></span> near legs ·
+    <span class="swatch" style="background:#927854"></span> far legs ·
+    <span class="swatch" style="background:#f5ecc8;border-radius:50%"></span> foot on target ·
+    <span class="swatch" style="background:#e85c4a;border-radius:50%"></span> <b>out of reach</b> (clamped) ·
+    <span class="k">faint blue</span> = the same leg solved for length but <b>not yet aimed</b>.
+  </div>
+
+  <article>
+    <div class="fig">
+      <div class="row">
+        <button id="b-pause">Pause</button>
+        <button id="b-step">Step</button>
+        <button id="b-reset">Reset</button>
+      </div>
+      <div class="row" style="margin-top:8px; align-items:center">
+        <label class="chk"><input type="checkbox" id="c-stages" checked> show the two stages on a leg</label>
+        <label style="color:var(--dim);font-size:14px">focus leg
+          <select id="s-focus"></select>
+        </label>
+      </div>
+      <p class="cap" style="margin-top:8px">Tap a leg in the scene to focus it. The faint blue chain is stage 1
+      (folded to the right length); the solid leg is stage 2 (that fold aimed at the diamond target).</p>
+    </div>
+
+    <p>This page is about one idea for <strong>single-chain inverse kinematics</strong> — placing the end of a
+    jointed chain (a foot) on a target — from a 2026 thread by
+    <a href="https://twitter.com/kiaran_ritchie">Kiaran Ritchie</a>. Instead of solving the whole positional
+    problem at once, split it in two:</p>
+    <ol>
+      <li><strong>Length.</strong> Configure the chain's internal joints so the straight-line distance from the
+      root (hip) to the end (foot) equals the distance from the hip to the target. Direction does not matter yet —
+      the objective is a single number.</li>
+      <li><strong>Direction.</strong> Rotate the whole solved chain about its root so its hip&#8594;foot vector points
+      at the target. One rigid rotation, applied at the base.</li>
+    </ol>
+    <p>If the chain can reach the target <em>distance</em>, and then that reach is <em>aimed</em> at the target,
+    the foot lands on the target. A coupled 2-D problem becomes a scalar reach followed by one rotation.</p>
+
+    <h2>Stage 1 — solve the length</h2>
+    <p>The length stage asks only: make <code>|foot − hip| = |target − hip|</code>. Here each leg has three
+    segments and folds by a single <em>curl</em> angle shared across its joints — a uniform arc. As the curl
+    increases the foot folds in, so the reach <strong>decreases monotonically</strong>; as it straightens, the
+    reach grows to the sum of the segment lengths. That makes the length solve a one-dimensional, monotone
+    root-find: <strong>bisect the curl</strong> until the squared reach meets the squared target distance. No
+    derivative, and — because it compares <em>squared</em> lengths — no square root in the loop.</p>
+    <p>A target nearer than the most-folded pose or farther than full extension is outside the
+    <strong>reachable interval</strong>; the solver clamps to the nearest end and flags it (the foot turns red
+    and detaches from the ground). Shorten the legs below and watch the feet start to clamp on the deeper ground.</p>
+
+    <h2>Stage 2 — aim the chain</h2>
+    <p>Now the chain has the right reach but points the wrong way. The fix is a single rotation about the hip that
+    turns the current hip&#8594;foot direction onto the hip&#8594;target direction. In this side view the chain bends
+    in one plane, so that "from-to" rotation is exact and needs no trigonometry: with the solved end vector
+    <code>E</code> and the target vector <code>D</code>, the rotation's cosine is <code>(E·D)/(|E||D|)</code> and
+    its sine is <code>(E×D)/(|E||D|)</code> — one dot, one cross, normalised once. Baking that rotation into every
+    joint gives the final pose. Turn on "show the two stages": the <span style="color:var(--acc2)">faint blue</span>
+    chain is the length-only pose before aiming; the solid leg is it after the single hip rotation.</p>
+
+    <div class="fig">
+      <p class="cap">per-leg solve, live from wasm memory · curl is the stage-1 answer, aim is the stage-2 rotation</p>
+      <div style="overflow:auto"><table class="legtab" id="w-legs"></table></div>
+    </div>
+
+    <h2>Why it can look natural</h2>
+    <p>All the gross aiming happens in one rotation <em>at the base joint</em> — the hip or shoulder. That is how
+    many animal limbs move: a ball-like hip swings the whole leg, and the segments past it mostly shape the reach.
+    Watch the spider: the feet are pinned to the ground while the body rides over them, and each leg's big motion
+    is a swing at the hip, not a thrash of the lower joints.</p>
+
+    <h2>What the spider is doing</h2>
+    <p>The body walks at a constant speed; a distance-based gait keeps two alternating groups of legs stepping so
+    the body is always supported. A planted foot stays fixed on the terrain in the world while the body moves —
+    that is what stretches the chain and gives the IK something to solve — and a swinging foot arcs to its next
+    foothold on the ground ahead. The ground is <strong>rough</strong> on purpose: a heightfield (a sum of cosine
+    octaves) so every foothold sits at a different height and each leg has to reach a different distance. The
+    target each leg solves for is just "where my foot should be right now".</p>
+
+    <div class="fig">
+      <p class="cap">tunables · all integer subcells (256 = one cell). Shrink segment length to force clamping; raise stride for longer steps.</p>
+      <div id="w-tunables"></div>
+      <div id="w-stats" style="margin-top:10px"></div>
+    </div>
+
+    <h2>How it is built (and what is real)</h2>
+    <p>Everything in the scene is computed in <strong>integer fixed point</strong> inside a small
+    <a href="ik.wasm">WebAssembly</a> module — no floats until the GPU, which is float hardware. Angles index a
+    baked Q14 cosine table; positions are subcells; the only square roots are the handful used to normalise an aim
+    and to report a length. The simulation is fully separate from rendering and wasm, so the solver runs natively
+    under test with no browser or GPU. The numbers in the table above are read straight out of the module's
+    memory each frame.</p>
+    <p class="note">This is the method <em>specialised to the plane</em>, which is what makes the two stages so
+    clean: the internal pose is one scalar and the aim is one angle. The full 3-D method generalises both — the
+    "from-to" becomes a quaternion, and a bend-plane / pole vector chooses among the many internal poses that hit a
+    given reach (here that choice is the fixed bend side per leg). It is a solver <em>architecture</em>, strongest
+    for limb-like, root-dominant chains; long necks, spines and contact-rich cases need more on top.</p>
+
+    <p class="note">Built to the rules in
+    <a href="https://github.com/macton/nagent/blob/master/context/data-oriented-design.md">data-oriented-design.md</a>.
+    Source:
+    <a href="src/ik.c">ik.c</a> ·
+    <a href="src/gait.c">gait.c</a> ·
+    <a href="src/sim.c">sim.c</a> ·
+    <a href="src/render.c">render.c</a> ·
+    <a href="src/terrain.c">terrain.c</a> ·
+    <a href="src/wasm.c">wasm.c</a> ·
+    <a href="src/test.c">test.c</a> ·
+    <a href="README.md">README</a>.</p>
+  </article>
+
+  <script src="version.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
