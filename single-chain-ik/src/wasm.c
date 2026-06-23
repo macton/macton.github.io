@@ -18,12 +18,14 @@
 static World    g_world;
 static Inst     g_inst[INST_MAX];
 static uint32_t g_inst_count;
-static int      g_show_stages = 1;
+static int      g_show_stages = 0;   /* teaching overlay off by default */
 static int      g_focus = 0;
 
 static void rebuild(void) { g_inst_count = build_view(&g_world, g_inst, g_show_stages, g_focus); }
 
-EXPORT(init) void init(void) { sim_init(&g_world); g_show_stages = 1; g_focus = 0; rebuild(); }
+/* init resets the SIM only; the overlay/focus are presentation state and persist
+ * across a Reset (set by the host or the static defaults above). */
+EXPORT(init) void init(void) { sim_init(&g_world); rebuild(); }
 EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_count; }
 
 /* overlay controls (presentation state — lives here, not in the sim) */
