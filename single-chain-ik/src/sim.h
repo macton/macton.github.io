@@ -26,6 +26,7 @@ struct World {
   uint8_t swinging[N_LEGS];        /* 1 while the foot is in the air                   */
   int32_t swing_fx[N_LEGS];        /* swing start x (where it lifted off)              */
   int32_t swing_tx[N_LEGS];        /* swing end x (where it will plant)                */
+  int32_t swing_peak[N_LEGS];      /* this swing's lift height (raised to clear terrain)*/
   int32_t foot_x  [N_LEGS];        /* current foot target, world subcells             */
   int32_t foot_y  [N_LEGS];
 
@@ -49,6 +50,7 @@ struct World {
   uint16_t step_lift;              /* peak foot lift during a swing, subcells          */
 
   /* ---- derived from seg_len (rebuilt only when it changes) -------------- */
+  int32_t  seg_L[N_SEG];           /* the tapered segment lengths (femur..tarsus)      */
   uint16_t curl_max;               /* monotone ceiling for the length bisection        */
 };
 

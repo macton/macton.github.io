@@ -11,8 +11,12 @@ static void solve_legs(World* w) {
   for (int i = 0; i < N_LEGS; i++) {
     int32_t hx, hy;
     gait_hip(w, i, &hx, &hy);
+    /* per-leg foreshortening: scale the segment lengths. curl_max is the same —
+     * the fold's bottom is at the same curl regardless of overall scale. */
+    int32_t L[N_SEG], sc = gait_scale(i);
+    for (int k = 0; k < N_SEG; k++) L[k] = w->seg_L[k] * sc / 100;
     IkResult r = ik_solve(hx, hy, w->foot_x[i], w->foot_y[i],
-                          w->seg_len, w->curl_max, gait_bend(i));
+                          L, w->curl_max, gait_bend(i));
     for (int k = 0; k < N_JOINT; k++) {
       w->joint_x[i * N_JOINT + k] = r.jx[k];
       w->joint_y[i * N_JOINT + k] = r.jy[k];
@@ -26,11 +30,17 @@ static void solve_legs(World* w) {
   }
 }
 
+/* Segment taper, per-mille of the base length: a slightly long femur down to a
+ * slightly short tarsus (a real leg's proportions, kept mild so the lower joints
+ * stay near the foot and the legs don't cut into steps). */
+static const int32_t SEG_RATIO[N_SEG] = { 1120, 1000, 880 };  /* sums to 3000 */
+
 void sim_set_seg_len(World* w, uint16_t v) {
   w->seg_len = v ? v : 1;
+  for (int k = 0; k < N_SEG; k++) w->seg_L[k] = (int32_t)w->seg_len * SEG_RATIO[k] / 1000;
   /* curl_max depends only on the segment lengths (and is the same for either bend
    * side, since squared reach is), so rebuild it once here, not per solve. */
-  w->curl_max = ik_curl_max(w->seg_len, +1);
+  w->curl_max = ik_curl_max(w->seg_L, +1);
 }
 
 void sim_init(World* w) {

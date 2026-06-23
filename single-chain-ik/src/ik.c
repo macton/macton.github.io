@@ -7,23 +7,23 @@
  * bend_sign*k*curl. This one-parameter family is the chosen null-space policy —
  * of the many internal poses that hit a given reach, we take the uniform arc.
  * Fills the N_JOINT local joint positions; the last is the end (foot). */
-static void fk_local(uint32_t curl, int32_t seg_len, int8_t bend_sign,
+static void fk_local(uint32_t curl, const int32_t* seg, int8_t bend_sign,
                      int32_t* lx, int32_t* ly) {
   lx[0] = 0; ly[0] = 0;
   for (int k = 0; k < N_SEG; k++) {
     uint32_t a = (uint32_t)((int32_t)bend_sign * k * (int32_t)curl);  /* cumulative angle */
-    lx[k + 1] = lx[k] + ((seg_len * icos(a)) >> 14);
-    ly[k + 1] = ly[k] + ((seg_len * isin(a)) >> 14);
+    lx[k + 1] = lx[k] + ((seg[k] * icos(a)) >> 14);
+    ly[k + 1] = ly[k] + ((seg[k] * isin(a)) >> 14);
   }
 }
 
-int64_t ik_reach2(uint32_t curl, int32_t seg_len, int8_t bend_sign) {
+int64_t ik_reach2(uint32_t curl, const int32_t* seg, int8_t bend_sign) {
   int32_t lx[N_JOINT], ly[N_JOINT];
-  fk_local(curl, seg_len, bend_sign, lx, ly);
+  fk_local(curl, seg, bend_sign, lx, ly);
   return (int64_t)lx[N_SEG] * lx[N_SEG] + (int64_t)ly[N_SEG] * ly[N_SEG];
 }
 
-uint16_t ik_curl_max(int32_t seg_len, int8_t bend_sign) {
+uint16_t ik_curl_max(const int32_t* seg, int8_t bend_sign) {
   /* Scan a half-turn of curl for the global argmin of reach (the bottom of the
    * fold) and stop one step short of it, so the bisection interval is monotone.
    * For equal segments this is the geometry-only ~120 deg and is independent of
@@ -32,24 +32,24 @@ uint16_t ik_curl_max(int32_t seg_len, int8_t bend_sign) {
    * maximum and integer rounding makes it wobble by a few units, which must not be
    * mistaken for the bottom of the fold. */
   const uint32_t STEP = ANG_FULL / 1024;       /* fine: ~0.35 deg */
-  int64_t best = ik_reach2(0, seg_len, bend_sign);
+  int64_t best = ik_reach2(0, seg, bend_sign);
   uint32_t best_c = 0;
   for (uint32_t c = STEP; c <= ANG_FULL / 2; c += STEP) {
-    int64_t r = ik_reach2(c, seg_len, bend_sign);
+    int64_t r = ik_reach2(c, seg, bend_sign);
     if (r < best) { best = r; best_c = c; }
   }
   return (uint16_t)(best_c > STEP ? best_c - STEP : 0);
 }
 
 IkResult ik_solve(int32_t sx, int32_t sy, int32_t tx, int32_t ty,
-                  int32_t seg_len, uint16_t curl_max, int8_t bend_sign) {
+                  const int32_t* seg, uint16_t curl_max, int8_t bend_sign) {
   IkResult r;
   int64_t Dx = tx - sx, Dy = ty - sy;
   int64_t d2 = Dx * Dx + Dy * Dy;               /* squared target distance */
 
   int32_t lx[N_JOINT], ly[N_JOINT];
-  int64_t max2 = ik_reach2(0, seg_len, bend_sign);        /* straight: longest reach */
-  int64_t min2 = ik_reach2(curl_max, seg_len, bend_sign); /* most folded we allow    */
+  int64_t max2 = ik_reach2(0, seg, bend_sign);        /* straight: longest reach */
+  int64_t min2 = ik_reach2(curl_max, seg, bend_sign); /* most folded we allow    */
 
   /* ---- STEP 1: LENGTH -----------------------------------------------------
    * Clamp the requested distance into the reachable interval [min, max] (the
@@ -65,11 +65,11 @@ IkResult ik_solve(int32_t sx, int32_t sy, int32_t tx, int32_t ty,
   uint32_t lo = 0, hi = curl_max;
   for (int it = 0; it < 16; it++) {
     uint32_t mid = (lo + hi) >> 1;
-    if (ik_reach2(mid, seg_len, bend_sign) > goal2) lo = mid;  /* more curl = shorter */
+    if (ik_reach2(mid, seg, bend_sign) > goal2) lo = mid;  /* more curl = shorter */
     else hi = mid;
   }
   uint32_t curl = (lo + hi) >> 1;
-  fk_local(curl, seg_len, bend_sign, lx, ly);   /* the solved local pose */
+  fk_local(curl, seg, bend_sign, lx, ly);       /* the solved local pose */
   int64_t ex = lx[N_SEG], ey = ly[N_SEG];
 
   /* ---- STEP 2: DIRECTION --------------------------------------------------

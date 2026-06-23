@@ -45,11 +45,23 @@ that hit a given reach (here that choice is the fixed bend side per leg).
 ## The demo
 
 The body walks at constant speed; a distance-based gait steps two alternating
-leg groups so the body is always supported. A planted foot stays fixed on the
-terrain while the body rides over it (this is what stretches a chain), and a
-swinging foot arcs to the next foothold. The terrain is a heightfield (a sum of
-cosine octaves, stored as nothing — a pure function of world x) so every foothold
-sits at a different height and each leg must reach a different distance.
+leg groups (a diagonal tetrapod) so the body is always supported. A planted foot
+stays fixed on the terrain while the body rides over it (this is what stretches a
+chain), and a swinging foot arcs to the next foothold, lifting just enough to
+clear whatever is between it.
+
+The ground is **rough**: flat treads with vertical risers (**stair steps**) plus
+a few sharp flat-topped **obstacle blocks** — still a pure, seamless-looping
+function of world x (it stores nothing). Every foothold sits at a different
+height, so each leg reaches a different distance and folds to a different shape.
+
+The rig follows a real spider: legs mount on the **cephalothorax** (front), the
+big **abdomen** trails behind with none, and each leg **arches up** to a high knee
+then tapers to a thin foot (the legs are longer than the reach, so the length
+stage folds them). Middle legs are drawn shorter, foreshortened as they would be
+pointing sideways. The opaque ground is drawn **in front of** the legs, so a leg
+that dips into a step is occluded — never seen under the ground — exactly like a
+side-scroller's foreground.
 
 Tunables on the page: walk speed, segment length (shrink it to force clamping),
 stand height, stride, foot lift. Toggle **show the two stages** to see, on the
@@ -64,7 +76,7 @@ natively under test with no browser or GPU.
 | file | role |
 |------|------|
 | `src/ik.c` | **the method** — length bisection + direction from-to (pure functions) |
-| `src/gait.c` | the gait: body advance + per-leg footfall timing (the IK's input) |
+| `src/gait.c` | the gait: body advance, footfall timing, leg mounts/taper (the IK's input) |
 | `src/sim.c` | per-tick orchestration: gait, then IK per leg, into the `World` |
 | `src/terrain.c` | the heightfield (a function of x, read from the trig table) |
 | `src/trig.h` / `src/trig_table.c` | one baked Q14 cosine table, read interpolated (sin is the same table) |
@@ -92,6 +104,9 @@ appended to the wasm URL to defeat caching.
 
 - **Full 3-D** (quaternion from-to; a real pole/bend-plane choice; a depth-buffered
   renderer). The plane is the simplest machine that shows the two stages clearly.
+- **Collision-aware legs.** The solve places the foot, not the whole chain, so a
+  lower leg can dip into a step; here it is *occluded* by the foreground ground
+  rather than avoided. Feet and body are always clear (validated by the sweep).
 - **Body tilt** to the ground slope, and excluding swing feet from the body-height
   average. The body currently stays level and rides the mean foot height.
 - **End-effector orientation, joint limits, contact friction** — the open

@@ -30,20 +30,28 @@
 #define N_JOINT    (N_SEG + 1)/* 4 points per leg: hip, two knees, foot        */
 
 /* ---- the ground ----------------------------------------------------------- */
-/* The terrain is a pure function of world x (a sum of cosine octaves read from
- * the trig table — see terrain.c), so nothing is stored and it repeats every
- * WORLDP subcells. WORLDP is a power of two so x -> table-angle is a shift. */
+/* The terrain is a pure function of world x (stepped terraces + sharp obstacle
+ * blocks + a little roll — see terrain.c), so nothing is stored and it repeats
+ * every WORLDP subcells. WORLDP is a power of two so x -> table-angle is a shift. */
 #define WORLDP     32768      /* terrain period in subcells (== 128 cells)     */
 #define TERRAIN_MID (6 * SUB) /* mean ground line, world-y (y increases down)  */
+
+/* ---- the body's extent box, relative to its centre (subcells) -------------
+ * One source of truth for the body's footprint: the renderer draws its quads
+ * inside this box, the gait keeps the box clear of the ground beneath it, and
+ * the sweep test checks the box never dips under the terrain. +x is forward. */
+#define BODY_X0   (-150)      /* back of the abdomen   */
+#define BODY_X1   ( 82)       /* front of the head     */
+#define BODY_LOW  ( 60)       /* lowest point below the body centre */
 
 /* ---- defaults for the runtime tunables (see sim.h: World) ----------------- */
 /* All are editable on the page; they are the knobs that make the solver's
  * behaviour visible. Shrinking seg_len starves the reach until targets fall
  * outside the reachable interval and the solver has to clamp (watch the flag). */
 #define DEF_WALK_SPEED  10    /* body advance, subcells per tick (~2.3 cells/s) */
-#define DEF_SEG_LEN    235    /* one segment length, subcells (max reach 3x)    */
-#define DEF_STAND_H    320    /* body height above its feet, subcells           */
-#define DEF_STEP_LEN   280    /* stride length / gait period, subcells          */
-#define DEF_STEP_LIFT  150    /* peak foot lift during a swing, subcells        */
+#define DEF_SEG_LEN    250    /* base segment length, subcells (max reach 3x)   */
+#define DEF_STAND_H    360    /* body height above its feet, subcells           */
+#define DEF_STEP_LEN   190    /* stride length / gait period, subcells          */
+#define DEF_STEP_LIFT  124    /* peak foot lift during a swing, subcells        */
 
 #endif

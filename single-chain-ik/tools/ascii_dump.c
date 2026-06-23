@@ -55,5 +55,16 @@ int main(int argc, char** argv) {
   for (int t = 0; t < ticks; t++) sim_tick(&w);
   printf("frame %u  body=(%d,%d)  curl_max=%u\n", w.frame, w.body_x, w.body_y, w.curl_max);
   frame(&w);
+  /* per-leg: joints vs terrain beneath them (penetration = joint_y - terrain_y) */
+  for (int i = 0; i < N_LEGS; i++) {
+    const int32_t* JX = &w.joint_x[i * N_JOINT];
+    const int32_t* JY = &w.joint_y[i * N_JOINT];
+    printf("leg %d %-4s", i, i < 4 ? "near" : "far");
+    for (int j = 0; j <= N_SEG; j++) {
+      int pen = JY[j] - terrain_y(JX[j]);
+      printf("  j%d(x%d y%d t%d %s%d)", j, JX[j], JY[j], terrain_y(JX[j]), pen > 0 ? "UNDER+" : "", pen);
+    }
+    printf("%s\n", w.leg_clamped[i] ? " CLAMP" : "");
+  }
   return 0;
 }

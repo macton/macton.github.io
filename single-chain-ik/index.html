@@ -86,11 +86,10 @@
     <div id="status">loading…</div>
   </div>
   <div id="legend">
-    <span class="swatch" style="background:#e8c478"></span> near legs ·
-    <span class="swatch" style="background:#927854"></span> far legs ·
-    <span class="swatch" style="background:#f5ecc8;border-radius:50%"></span> foot on target ·
-    <span class="swatch" style="background:#e85c4a;border-radius:50%"></span> <b>out of reach</b> (clamped) ·
-    <span class="k">faint blue</span> = the same leg solved for length but <b>not yet aimed</b>.
+    <span class="swatch" style="background:#ec9c46"></span> femur ·
+    <span class="swatch" style="background:#2a2c34"></span> lower leg (near bright / far dim) ·
+    <span class="swatch" style="background:#e85c4a;border-radius:50%"></span> foot <b>out of reach</b> (clamped) ·
+    <span class="k">faint blue</span> = the focus leg solved for length but <b>not yet aimed</b>.
   </div>
 
   <article>
@@ -156,12 +155,22 @@
     is a swing at the hip, not a thrash of the lower joints.</p>
 
     <h2>What the spider is doing</h2>
-    <p>The body walks at a constant speed; a distance-based gait keeps two alternating groups of legs stepping so
-    the body is always supported. A planted foot stays fixed on the terrain in the world while the body moves —
-    that is what stretches the chain and gives the IK something to solve — and a swinging foot arcs to its next
-    foothold on the ground ahead. The ground is <strong>rough</strong> on purpose: a heightfield (a sum of cosine
-    octaves) so every foothold sits at a different height and each leg has to reach a different distance. The
-    target each leg solves for is just "where my foot should be right now".</p>
+    <p>The body walks at a constant speed; a distance-based gait keeps two alternating groups of legs (a diagonal
+    tetrapod) stepping so the body is always supported. A planted foot stays fixed on the terrain in the world
+    while the body moves — that is what stretches the chain and gives the IK something to solve — and a swinging
+    foot arcs to its next foothold, lifting just high enough to clear whatever is between (so it steps <em>over</em>
+    a riser or block). The ground is <strong>rough</strong> on purpose: flat treads with vertical risers
+    (<strong>stair steps</strong>) plus a few sharp flat-topped <strong>obstacles</strong> — still a pure,
+    seamless-looping function of x (it stores nothing). Every foothold sits at a different height, so each leg
+    reaches a different distance and folds to a different shape.</p>
+    <p>The rig follows a real spider: the legs mount on the <strong>cephalothorax</strong> (front) — the big
+    <strong>abdomen</strong> behind carries none — and each leg <strong>arches up</strong> to a high knee then
+    tapers to a thin foot, because the legs are longer than the reach and the length stage folds them. The middle
+    legs are drawn shorter, as they would foreshorten pointing sideways in a real spider.</p>
+    <p class="note">The feet always land on the surface and the body always rides clear of the ground beneath it —
+    checked by a sweep over the whole terrain (see the tests). The length+direction solve isn't collision-aware, so
+    a lower leg can dip into a step; the ground is drawn <em>in front of</em> the legs, so — as in any side-scroller
+    — that dip is simply hidden, and a leg is never seen under the ground.</p>
 
     <div class="fig">
       <p class="cap">tunables · all integer subcells (256 = one cell). Shrink segment length to force clamping; raise stride for longer steps.</p>

@@ -24,20 +24,25 @@ static int32_t idist(int32_t ax, int32_t ay, int32_t bx, int32_t by) {
   return (int32_t)isqrt64((uint64_t)(dx * dx + dy * dy));
 }
 
+/* equal-length segments — the solver is exercised generally here; the walk uses
+ * the World's real tapered lengths. */
+static void eqseg(int32_t L[N_SEG], int32_t s) { for (int k = 0; k < N_SEG; k++) L[k] = s; }
+
 /* The LENGTH stage hits any goal across the reachable band — for a range of
  * segment lengths, not just the default. This is what the bisection promises;
  * its monotone-on-[0,curl_max] premise is what makes it true (away from the flat
  * top, where reach is at its rounding-noisy maximum and any curl there is fine). */
 static void test_reach_band(void) {
   for (int seg = 80; seg <= 400; seg += 40) {
-    uint16_t cmax = ik_curl_max(seg, +1);
+    int32_t L[N_SEG]; eqseg(L, seg);
+    uint16_t cmax = ik_curl_max(L, +1);
     CHECK(cmax > 0, "curl_max==0 for seg=%d", seg);
-    int32_t maxr = (int32_t)isqrt64((uint64_t)ik_reach2(0, seg, +1));
-    int32_t minr = (int32_t)isqrt64((uint64_t)ik_reach2(cmax, seg, +1));
+    int32_t maxr = (int32_t)isqrt64((uint64_t)ik_reach2(0, L, +1));
+    int32_t minr = (int32_t)isqrt64((uint64_t)ik_reach2(cmax, L, +1));
     CHECK(abs(maxr - 3 * seg) <= 2, "max reach %d != 3*seg=%d", maxr, 3 * seg);
     CHECK(minr < maxr / 2, "fold too shallow: min %d max %d", minr, maxr);
     for (int32_t goal = minr + 12; goal <= maxr - 12; goal += (maxr - minr) / 20 + 1) {
-      IkResult r = ik_solve(0, 0, goal, 0, seg, cmax, +1);  /* target straight ahead */
+      IkResult r = ik_solve(0, 0, goal, 0, L, cmax, +1);  /* target straight ahead */
       CHECK(!r.clamped, "seg=%d goal=%d unexpectedly clamped", seg, goal);
       CHECK(abs(r.reach - goal) <= 8, "seg=%d reach %d != goal %d", seg, r.reach, goal);
       int e = idist(r.jx[N_SEG], r.jy[N_SEG], goal, 0);
@@ -49,7 +54,8 @@ static void test_reach_band(void) {
 /* Both stages: a reachable target ends up under the foot; the aim is a unit. */
 static void test_reach_targets(void) {
   const int32_t seg = DEF_SEG_LEN;
-  const uint16_t cmax = ik_curl_max(seg, +1);
+  int32_t L[N_SEG]; eqseg(L, seg);
+  const uint16_t cmax = ik_curl_max(L, +1);
   const int32_t maxr = 3 * seg;
   const int32_t sx = 1000, sy = 1000;
   int worst = 0;
@@ -57,7 +63,7 @@ static void test_reach_targets(void) {
     for (int32_t ty = sy - maxr; ty <= sy + maxr; ty += 37) {
       int32_t d = idist(sx, sy, tx, ty);
       if (d > maxr - 20 || d < 40) continue;             /* stay inside the reachable band */
-      IkResult r = ik_solve(sx, sy, tx, ty, seg, cmax, +1);
+      IkResult r = ik_solve(sx, sy, tx, ty, L, cmax, +1);
       CHECK(!r.clamped, "unexpected clamp d=%d", d);
       int e = idist(r.jx[N_SEG], r.jy[N_SEG], tx, ty);   /* foot vs target */
       if (e > worst) worst = e;
@@ -73,10 +79,11 @@ static void test_reach_targets(void) {
 /* Out of reach: clamp flagged, foot at max extension straight toward the target. */
 static void test_clamp(void) {
   const int32_t seg = DEF_SEG_LEN;
-  const uint16_t cmax = ik_curl_max(seg, +1);
+  int32_t L[N_SEG]; eqseg(L, seg);
+  const uint16_t cmax = ik_curl_max(L, +1);
   const int32_t maxr = 3 * seg;
   int32_t sx = 0, sy = 0, tx = 4000, ty = 1500;          /* far away */
-  IkResult r = ik_solve(sx, sy, tx, ty, seg, cmax, +1);
+  IkResult r = ik_solve(sx, sy, tx, ty, L, cmax, +1);
   CHECK(r.clamped, "far target not clamped");
   CHECK(abs(r.reach - maxr) <= 4, "clamped reach %d != max %d", r.reach, maxr);
   /* foot direction parallel to target direction: cross product ~ 0 */
@@ -124,6 +131,50 @@ static void test_walk(void) {
   printf("  walk: worst foot error %d sub, worst per-tick foot move %d sub\n", worst_foot, worst_pop);
 }
 
+/* Sweep the whole terrain period (every gait phase over every kind of ground)
+ * and validate that nothing falls under/into the terrain. Two tiers:
+ *  - The FEET (contacts) and the BODY (mass) must never be below the surface —
+ *    the spider never sinks into or falls through the ground. This is the hard
+ *    guarantee (feet are clamped to min(arc, terrain); the body rides clear), so
+ *    it holds to solver rounding (FOOT_TOL).
+ *  - The interior knee joints may dip into a step on this stepped/obstacled
+ *    ground (the length+direction solve is not terrain-aware), but the renderer
+ *    draws the opaque ground IN FRONT of the legs, so such a dip is never visible
+ *    — it is occluded exactly like a side-scroller's foreground. We still bound it
+ *    (KNEE_BOUND) so a gross regression is caught, and report the real worst. */
+static void test_no_penetration(void) {
+  World w; sim_init(&w);
+  int worst_foot = -1000000, worst_knee = -1000000, worst_body = -1000000;
+  int ticks = WORLDP / DEF_WALK_SPEED + 600;        /* a full loop of the ground + margin */
+  const int FOOT_TOL = 3;                            /* solver rounding only */
+  const int KNEE_BOUND = SUB / 2;                    /* occluded; just catch gross errors */
+  for (int t = 0; t < ticks; t++) {
+    sim_tick(&w);
+    for (int i = 0; i < N_LEGS; i++) {
+      /* the foot CONTACT (its target) is on/above the ground at its own x — the
+       * exact guarantee. (The solved foot tracks this target to <=8 sub; see
+       * test_walk. terrain at the *solved* x is meaningless right at a riser edge,
+       * where it would read the neighbouring tread — hence we test the target.) */
+      int fpen = w.foot_y[i] - terrain_y(w.foot_x[i]);
+      if (fpen > worst_foot) worst_foot = fpen;
+      CHECK(fpen <= FOOT_TOL, "tick %d leg %d FOOT under terrain by %d", t, i, fpen);
+      /* interior knees: occluded by the foreground ground; bounded only */
+      for (int j = 1; j < N_SEG; j++) {
+        int pen = w.joint_y[i * N_JOINT + j] - terrain_y(w.joint_x[i * N_JOINT + j]);
+        if (pen > worst_knee) worst_knee = pen;
+        CHECK(pen <= KNEE_BOUND, "tick %d leg %d knee %d under terrain by %d (bound %d)",
+              t, i, j, pen, KNEE_BOUND);
+      }
+    }
+    int bpen = (w.body_y + BODY_LOW) - terrain_max_y_up(w.body_x + BODY_X0, w.body_x + BODY_X1);
+    if (bpen > worst_body) worst_body = bpen;
+    CHECK(bpen <= FOOT_TOL, "tick %d BODY under terrain by %d", t, bpen);
+  }
+  printf("  sweep: %d ticks · feet worst %d, body worst %d (<=%d, the guarantee)"
+         " · knees worst %d (occluded by ground, bound %d)\n",
+         ticks, worst_foot, worst_body, FOOT_TOL, worst_knee, KNEE_BOUND);
+}
+
 static void test_terrain_periodic(void) {
   for (int32_t x = 0; x < 4000; x += 333)
     CHECK(terrain_y(x) == terrain_y(x + WORLDP), "terrain not periodic at x=%d", x);
@@ -135,6 +186,7 @@ int main(void) {
   test_reach_targets();
   test_clamp();
   test_walk();
+  test_no_penetration();
   test_terrain_periodic();
   if (g_fail) { printf("\n%d CHECK(s) FAILED\n", g_fail); return 1; }
   printf("\nall tests passed\n");

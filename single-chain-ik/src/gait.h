@@ -16,7 +16,8 @@ void gait_step(World* w);                 /* advance body, update every foot tar
 
 /* Leg configuration is constant geometry (hip mounts, bend side), read directly
  * by the solver step; exposed as functions so the const tables stay private. */
-void   gait_hip (const World* w, int leg, int32_t* hx, int32_t* hy); /* hip world pos */
-int8_t gait_bend(int leg);                /* the leg's bend side (pole sign) */
+void    gait_hip  (const World* w, int leg, int32_t* hx, int32_t* hy); /* hip world pos */
+int8_t  gait_bend (int leg);              /* the leg's bend side (pole sign)          */
+int32_t gait_scale(int leg);              /* per-leg length scale, per-100 (foreshorten) */
 
 #endif

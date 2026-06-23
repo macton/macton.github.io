@@ -1,1 +1,1 @@
-window.IK_VERSION = "2026.06.23-012853";
+window.IK_VERSION = "2026.06.23-022553";

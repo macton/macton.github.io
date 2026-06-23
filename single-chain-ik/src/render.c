@@ -5,17 +5,25 @@
 #define RGBA(r, g, b, a) \
   ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24))
 
-#define COL   32        /* terrain sample spacing, subcells (~0.125 cell)   */
+/* Vertical reference the camera holds steady (CAM_Y, render.h). */
+#define COL   28        /* terrain sample spacing, subcells                 */
 #define GROUND_BOTTOM (VIEW_H / 2 + 2 * SUB)   /* fill extends below the view */
 
-static const uint32_t COL_GROUND     = RGBA( 58,  70,  66, 255);
-static const uint32_t COL_GROUND_TOP = RGBA(104, 138, 116, 255);
-static const uint32_t COL_BODY       = RGBA(214, 156,  78, 255);
-static const uint32_t COL_ABDOMEN    = RGBA(170, 116,  58, 255);
-static const uint32_t COL_LEG_NEAR   = RGBA(232, 196, 120, 255);
-static const uint32_t COL_LEG_FAR    = RGBA(146, 120,  84, 255);
-static const uint32_t COL_JOINT      = RGBA( 36,  40,  48, 255);
-static const uint32_t COL_FOOT       = RGBA(245, 236, 200, 255);
+static const uint32_t COL_GROUND     = RGBA( 60,  72,  68, 255);
+static const uint32_t COL_GROUND_TOP = RGBA(102, 134, 112, 255);
+/* body: a big orange abdomen (rear) and a darker cephalothorax (front) */
+static const uint32_t COL_ABDOMEN    = RGBA(222, 142,  60, 255);
+static const uint32_t COL_ABDOMEN_HI = RGBA(238, 170,  92, 255);
+static const uint32_t COL_CEPH       = RGBA( 74,  78,  90, 255);
+static const uint32_t COL_EYE        = RGBA( 24,  26,  32, 255);
+/* legs: an orange femur down to a near-black tarsus; far side dimmer */
+static const uint32_t COL_FEMUR_N    = RGBA(236, 156,  70, 255);
+static const uint32_t COL_FEMUR_F    = RGBA(150, 106,  56, 255);
+static const uint32_t COL_LOWER_N    = RGBA( 40,  42,  50, 255);
+static const uint32_t COL_LOWER_F    = RGBA( 70,  72,  82, 255);
+static const uint32_t COL_KNEE_N     = RGBA(236, 156,  70, 255);
+static const uint32_t COL_KNEE_F     = RGBA(150, 106,  56, 255);
+static const uint32_t COL_FOOT       = RGBA( 28,  30,  36, 255);
 static const uint32_t COL_CLAMP      = RGBA(232,  92,  74, 255);  /* foot can't reach */
 /* teaching overlay (semi-transparent; the host enables alpha blending) */
 static const uint32_t COL_GHOST      = RGBA(108, 160, 214, 150);  /* pre-aim pose    */
@@ -31,7 +39,7 @@ static uint32_t push(Inst* out, uint32_t k, int32_t cx, int32_t cy, int32_t hx, 
   return k + 1;
 }
 
-/* an oriented quad (a segment/limb) between two camera-relative points, half-width hw */
+/* an oriented quad (a limb segment / ray) between two camera-relative points */
 static uint32_t cap(Inst* out, uint32_t k, int32_t ax, int32_t ay, int32_t bx, int32_t by,
                     int32_t hw, uint32_t rgba) {
   int32_t dx = bx - ax, dy = by - ay;
@@ -41,33 +49,28 @@ static uint32_t cap(Inst* out, uint32_t k, int32_t ax, int32_t ay, int32_t bx, i
   return push(out, k, (ax + bx) / 2, (ay + by) / 2, (int32_t)len / 2, hw, co, si, rgba);
 }
 
-/* draw one solved leg: its segments, joints, and the foot marker */
+/* one leg's chain: orange femur, dark tibia, thin dark tarsus, with knee knuckles.
+ * The foot marker is drawn LATER (after the ground), so it stays on top. */
 static uint32_t draw_leg(const World* w, Inst* out, uint32_t k, int i, int32_t camx, int32_t camy) {
   int near = (i < N_LEGS / 2);
-  uint32_t segcol = near ? COL_LEG_NEAR : COL_LEG_FAR;
-  int32_t base_hw = near ? 13 : 9;
   const int32_t* JX = &w->joint_x[i * N_JOINT];
   const int32_t* JY = &w->joint_y[i * N_JOINT];
-
-  for (int s = 0; s < N_SEG; s++) {
-    int32_t ax = JX[s] - camx,     ay = JY[s] - camy;
-    int32_t bx = JX[s + 1] - camx, by = JY[s + 1] - camy;
-    k = cap(out, k, ax, ay, bx, by, base_hw - 2 * s, segcol);   /* tapers toward the foot */
-  }
-  for (int j = 0; j <= N_SEG; j++) {
-    int32_t hw = (j == 0) ? base_hw - 1 : base_hw - 4;          /* hip knuckle a bit bigger */
-    k = push(out, k, JX[j] - camx, JY[j] - camy, hw, hw, TRIG_ONE, 0, COL_JOINT);
-  }
-  int32_t fx = JX[N_SEG] - camx, fy = JY[N_SEG] - camy;
-  k = push(out, k, fx, fy, base_hw - 3, base_hw - 3, TRIG_ONE, 0,
-           w->leg_clamped[i] ? COL_CLAMP : COL_FOOT);
+  uint32_t fem = near ? COL_FEMUR_N : COL_FEMUR_F;
+  uint32_t low = near ? COL_LOWER_N : COL_LOWER_F;
+  uint32_t kn  = near ? COL_KNEE_N  : COL_KNEE_F;
+  int32_t hw[N_SEG]; /* per-segment half-width: thick femur -> thin tarsus */
+  hw[0] = near ? 13 : 9; hw[1] = near ? 9 : 6; hw[2] = near ? 5 : 4;
+  for (int s = 0; s < N_SEG; s++)
+    k = cap(out, k, JX[s] - camx, JY[s] - camy, JX[s + 1] - camx, JY[s + 1] - camy,
+            hw[s], s == 0 ? fem : low);
+  /* knee knuckles at the interior joints */
+  for (int j = 1; j < N_SEG; j++)
+    k = push(out, k, JX[j] - camx, JY[j] - camy, hw[j] + 1, hw[j] + 1, TRIG_ONE, 0, kn);
   return k;
 }
 
 /* the length/direction teaching overlay for one leg: the pre-aim (length-only)
- * pose recovered by un-rotating the solved chain, plus the target marker. The
- * faint chain is the chain folded to the right reach but NOT yet aimed; the solid
- * chain (drawn elsewhere) is the same chain after the single hip rotation. */
+ * pose recovered by un-rotating the solved chain, plus the target marker. */
 static uint32_t draw_overlay(const World* w, Inst* out, uint32_t k, int i, int32_t camx, int32_t camy) {
   int32_t hx = w->joint_x[i * N_JOINT], hy = w->joint_y[i * N_JOINT];
   int32_t dcos = w->leg_dcos[i], dsin = w->leg_dsin[i];
@@ -75,16 +78,13 @@ static uint32_t draw_overlay(const World* w, Inst* out, uint32_t k, int i, int32
   for (int j = 0; j < N_JOINT; j++) {
     int32_t wx = w->joint_x[i * N_JOINT + j] - hx;
     int32_t wy = w->joint_y[i * N_JOINT + j] - hy;
-    /* local = R(-delta) * (world - hip): undo the aim to see the length-only pose */
-    int32_t lx = (int32_t)(((int64_t)wx * dcos + (int64_t)wy * dsin) >> 14);
+    int32_t lx = (int32_t)(((int64_t)wx * dcos + (int64_t)wy * dsin) >> 14);   /* R(-delta) */
     int32_t ly = (int32_t)((-(int64_t)wx * dsin + (int64_t)wy * dcos) >> 14);
     gx[j] = hx + lx - camx;
     gy[j] = hy + ly - camy;
   }
   for (int s = 0; s < N_SEG; s++) k = cap(out, k, gx[s], gy[s], gx[s + 1], gy[s + 1], 6, COL_GHOST);
-  /* reference ray: hip -> pre-aim end (the direction the aim rotates AWAY from) */
-  k = cap(out, k, gx[0], gy[0], gx[N_SEG], gy[N_SEG], 3, COL_REF);
-  /* the target the foot is solving for, as a diamond (rotated square, ~45 deg) */
+  k = cap(out, k, gx[0], gy[0], gx[N_SEG], gy[N_SEG], 3, COL_REF);            /* reference ray */
   k = push(out, k, w->foot_x[i] - camx, w->foot_y[i] - camy, 15, 15, 11585, 11585, COL_TARGET);
   return k;
 }
@@ -93,31 +93,40 @@ uint32_t build_view(const World* w, Inst* out, int show_stages, int focus) {
   uint32_t k = 0;
   int32_t camx = w->body_x, camy = CAM_Y;
 
-  /* ---- terrain: fill columns + a lighter surface line ---- */
-  int32_t x0 = camx - VIEW_W / 2 - COL, x1 = camx + VIEW_W / 2 + COL;
-  int32_t psx = 0, psy = 0; int have = 0;
-  for (int32_t x = x0; x <= x1; x += COL) {
-    int32_t rx = x - camx;
-    int32_t rty = terrain_y(x) - camy;
-    k = push(out, k, rx, (rty + GROUND_BOTTOM) / 2, COL / 2 + 2, (GROUND_BOTTOM - rty) / 2,
-             TRIG_ONE, 0, COL_GROUND);
-    if (have) k = cap(out, k, psx, psy, rx, rty, 7, COL_GROUND_TOP);
-    psx = rx; psy = rty; have = 1;
-  }
-
-  /* ---- far legs (behind) ---- */
+  /* ---- the walker, drawn first so the OPAQUE ground (below) occludes any part
+   * of a leg that dips below the surface — a leg is never seen under the ground,
+   * the same way a side-scroller's foreground ground hides it. far legs behind,
+   * body, near legs in front. ---- */
   for (int i = N_LEGS / 2; i < N_LEGS; i++) k = draw_leg(w, out, k, i, camx, camy);
 
-  /* ---- body: abdomen (rear), cephalothorax, a small head bump (forward = +x) ---- */
   int32_t rby = w->body_y - camy;
-  k = push(out, k, -84, rby + 8, 66, 52, TRIG_ONE, 0, COL_ABDOMEN);
-  k = push(out, k,   0, rby,     56, 40, TRIG_ONE, 0, COL_BODY);
-  k = push(out, k,  58, rby - 2, 24, 22, TRIG_ONE, 0, COL_BODY);
+  k = push(out, k, -96, rby + 6, 78, 60, TRIG_ONE, 0, COL_ABDOMEN);      /* abdomen (rear) */
+  k = push(out, k, -110, rby - 6, 52, 40, TRIG_ONE, 0, COL_ABDOMEN_HI);  /*  + highlight   */
+  k = push(out, k,  44, rby, 52, 38, TRIG_ONE, 0, COL_CEPH);             /* cephalothorax  */
+  k = push(out, k,  92, rby - 2, 14, 12, TRIG_ONE, 0, COL_EYE);          /* head/eyes      */
 
-  /* ---- near legs (in front) ---- */
   for (int i = 0; i < N_LEGS / 2; i++) k = draw_leg(w, out, k, i, camx, camy);
 
-  /* ---- teaching overlay on the focus leg ---- */
+  /* ---- the ground ON TOP: fill columns (opaque) then a stepped tread highlight.
+   * Drawing fill here hides the below-surface part of any leg behind it. ---- */
+  int32_t x0 = camx - VIEW_W / 2 - COL, x1 = camx + VIEW_W / 2 + COL;
+  for (int32_t x = x0; x <= x1; x += COL) {
+    int32_t rty = terrain_y(x) - camy;
+    k = push(out, k, x - camx, (rty + GROUND_BOTTOM) / 2, COL / 2 + 2, (GROUND_BOTTOM - rty) / 2,
+             TRIG_ONE, 0, COL_GROUND);
+    k = push(out, k, x - camx, rty, COL / 2 + 2, 4, TRIG_ONE, 0, COL_GROUND_TOP);  /* tread cap */
+  }
+
+  /* ---- feet ON TOP of the ground (the contact points stay visible) ---- */
+  for (int i = 0; i < N_LEGS; i++) {
+    int32_t fx = w->joint_x[i * N_JOINT + N_SEG] - camx;
+    int32_t fy = w->joint_y[i * N_JOINT + N_SEG] - camy;
+    int near = (i < N_LEGS / 2);
+    k = push(out, k, fx, fy, near ? 5 : 4, near ? 6 : 5, TRIG_ONE, 0,
+             w->leg_clamped[i] ? COL_CLAMP : COL_FOOT);
+  }
+
+  /* ---- teaching overlay on the focus leg (on top of everything) ---- */
   if (show_stages) {
     if (focus < 0) focus = 0;
     if (focus >= N_LEGS) focus = N_LEGS - 1;

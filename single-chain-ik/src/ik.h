@@ -39,19 +39,20 @@ typedef struct {
   int16_t  dcos, dsin; /* DIRECTION answer: the hip aim rotation, Q14 unit           */
 } IkResult;
 
-/* Solve one chain: root at (sx,sy), target at (tx,ty), N_SEG segments each
- * seg_len long, internal bend limited to [0, curl_max] (from ik_curl_max),
- * bending to the side given by bend_sign (+1 / -1 — the pole choice). */
+/* Solve one chain: root at (sx,sy), target at (tx,ty), with the N_SEG segment
+ * lengths in seg[] (a long femur down to a short tarsus, as in a real leg),
+ * internal bend limited to [0, curl_max] (from ik_curl_max), bending to the side
+ * given by bend_sign (+1 / -1 — the pole choice). */
 IkResult ik_solve(int32_t sx, int32_t sy, int32_t tx, int32_t ty,
-                  int32_t seg_len, uint16_t curl_max, int8_t bend_sign);
+                  const int32_t* seg, uint16_t curl_max, int8_t bend_sign);
 
 /* Squared root-to-end distance at a given curl — the LENGTH objective, exposed so
  * the tests can confirm it is monotone on the bisection interval. */
-int64_t ik_reach2(uint32_t curl, int32_t seg_len, int8_t bend_sign);
+int64_t ik_reach2(uint32_t curl, const int32_t* seg, int8_t bend_sign);
 
 /* The largest curl for which reach is still monotonically decreasing (the bottom
  * of the fold). Bisection runs on [0, curl_max]; below it the squared-length
  * objective is strictly monotone, which is the bisection's precondition. */
-uint16_t ik_curl_max(int32_t seg_len, int8_t bend_sign);
+uint16_t ik_curl_max(const int32_t* seg, int8_t bend_sign);
 
 #endif

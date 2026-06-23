@@ -38,20 +38,38 @@ Over thousands of ticks on the rough terrain:
   subcells) unless that leg is clamped.
 - **Planted feet are on the ground**: a non-swinging foot's `y` equals
   `terrain_y(foot_x)` exactly.
-- **No popping**: a foot moves a bounded amount per tick (≤ 80 subcells; observed
-  ≤ 49), including across lift-off, touch-down, and gait re-phasing.
+- **No popping**: a foot moves a bounded amount per tick (≤ 80 subcells), including
+  across lift-off, touch-down, gait re-phasing, and stepping over an obstacle.
 - **Body above feet**: `body_y` is above the average foot height every tick.
 - **First frame is settled**: `gait_init` seats every leg consistent with its
   phase, so tick 0 does not jump.
 
+## Nothing falls under/in the terrain (`test_no_penetration`)
+
+Swept over a full terrain period (every gait phase × every kind of ground):
+
+- **Feet** never sit below the surface at their contact x — the spider never
+  sinks into or falls through the ground. Exact to solver rounding (≤ 3 subcells).
+  Guaranteed by construction: a swinging foot is clamped to `min(arc, terrain)`,
+  and a planted foot is `terrain_y` at its foothold.
+- **Body** never dips below the ground beneath its footprint (`body_y + BODY_LOW`
+  stays above `terrain_max_y_up` over `[BODY_X0, BODY_X1]`); the gait raises the
+  body to clear obstacles directly under it.
+- **Interior knees** may dip into a step (the length+direction solve is not
+  collision-aware). The renderer draws the **opaque ground in front of the legs**,
+  so any such dip is occluded — never visible. The sweep still bounds it
+  (< `SUB/2`) to catch a gross regression and reports the real worst.
+
 ## Terrain
 
-- `terrain_y` is a pure function of `x`, **periodic** with period `WORLDP`
+- `terrain_y` is a pure function of `x` (stepped terraces + sharp obstacle blocks
+  + a little roll), **periodic** with period `WORLDP`
   (`terrain_y(x) == terrain_y(x + WORLDP)`), so the walk loops seamlessly and world
   x can grow without a seam. It stores nothing.
 
 ## Non-promises
 
-End-effector orientation, joint limits, ground friction/contact, body tilt, and
-true 3-D posing are out of scope (see README "Deferred"). This is a visualization
-of the length+direction method, not a production IK rig.
+Collision-aware leg posing, end-effector orientation, joint limits, ground
+friction/contact, body tilt, and true 3-D posing are out of scope (see README
+"Deferred"). This is a visualization of the length+direction method, not a
+production IK rig.

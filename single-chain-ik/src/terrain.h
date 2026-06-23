@@ -13,4 +13,7 @@
 
 int32_t terrain_y(int32_t x);   /* ground surface world-y at world x, subcells */
 
+/* highest ground (smallest y) over [x0,x1] — for keeping the body clear of it */
+int32_t terrain_max_y_up(int32_t x0, int32_t x1);
+
 #endif
