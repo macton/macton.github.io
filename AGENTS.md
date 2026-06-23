@@ -351,3 +351,15 @@ is just there to explain why.
 - **Link the source spec.** When a project is built to follow a referenced
   document or standard, link that document from its README so the contract is
   discoverable. *Origin: "Link the data-oriented design doc in the README."*
+- **Write explanation the way you size data: minimal, honest, no phantoms.**
+  State what a thing *is* — its parts, how it is computed, its size and layout,
+  how often it is built and read, the principle it shows — as positive fact.
+  Don't define it by contrast with an alternative that isn't present, whether
+  hypothetical ("we store a `uint8`, not two") or a prior/abandoned state ("the
+  movement code is not forked"); like a needless parameter, a phantom comparison
+  invites the reader to imagine options that don't exist. Give the fact instead
+  ("each distance is one byte — 45,150 pairs = 45 KB/screen"). Keep a comparison
+  only where the contrast itself is the subject — a real, documented trade-off or
+  migration. Cut repetition and filler: state each idea once, and drop any
+  sentence that doesn't aid understanding. *Origin: "you don't compare against
+  things that aren't there … the text is generally too wordy."*
