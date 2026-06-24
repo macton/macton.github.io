@@ -95,8 +95,10 @@ tick, for each mite (`mites_records`):
 - **Arrive (hunt).** A hunting mite within one cell of its recorded cell: tank there →
   **refresh** (stamp now); gone → **erase** (empty, stamp now) and wander. The
   empty-stamped-now record is newest, so "it's gone" propagates back.
-- **Arrive (home).** A homing mite that reaches its nest idles there (a small local
-  wander) until a newer record interrupts it.
+- **Arrive (home).** A homing mite that reaches its nest has delivered the sighting:
+  it **drops the record and reverts to wander** (empty, stamp now), rejoining the swarm.
+  So a mite is nest-tinted only while *in transit*; without this, homed mites pile up at
+  the nests, stay `MM_HOME` forever (perpetually nest-coloured), and relay a stale record.
 
 The gossip is **order-independent**: every mite reads last tick's records and writes
 this tick's into a **second buffer**, then they swap (double-buffered LWW). Timestamps
@@ -260,15 +262,16 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **103 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **105 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index**; the **crowding cap** (every tick,
 naturally, under forced convergence, **and with firing on** — kills + nest respawns);
 the **gossip** (one-hop-per-tick propagation = order-independent, newer overwrites
 older, older never overwrites newer, a newer *empty* propagates); the **behaviour**
 (sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
-boundaries and statistically, a newer record interrupts a homing mite and re-rolls);
-the **nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
+boundaries and statistically, a newer record interrupts a homing mite and re-rolls, a
+mite that reaches its nest **reverts to wander** with its record cleared — so homed mites
+don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
 **distinct-destination peak is measured and stays within `N_FIELDS`** — ~28 with combat
@@ -284,7 +287,7 @@ the tank combat-state hash, with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (103 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (105 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

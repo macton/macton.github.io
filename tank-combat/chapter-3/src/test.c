@@ -547,6 +547,12 @@ static void t_mite_nests_fields(void) {
   uint16_t home = W.nest_cell[nest_of(0)]; int reached_home = 0;
   for (int i = 0; i < 1200 && !reached_home; i++) { sim_tick(&W); if (W.mite_cell[0] == home) reached_home = 1; }
   check(reached_home, "a homing mite paths to its nest cell");
+  /* on arrival it delivers the sighting and rejoins the wanderers — so it does not stay
+   * stuck in MM_HOME (perpetually nest-coloured) with a stale record. */
+  int became_wander = 0;
+  for (int i = 0; i < 60 && !became_wander; i++) { sim_tick(&W); if (W.mite_mode[0] == MM_WANDER) became_wander = 1; }
+  check(became_wander, "reaching its nest reverts the mite to wander (delivered, not stuck homing)");
+  check(get_rec_cell(&W, 0) == REC_EMPTY, "the carried record is cleared on arriving home");
 
   /* a hunting mite reaches its recorded cell (a tank sits there, so it converges).
    * Firing off: tank 1 sits ON the goal, and would otherwise shoot the mite before

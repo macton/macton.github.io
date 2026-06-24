@@ -191,10 +191,15 @@ void mites_records(World* w) {
         for (uint32_t t = 0; t < N_TANKS; t++) if (tank_cell(w, t) == my_c) { tank_here = 1; break; }
         if (tank_here) { new_c = my_c; new_t = frame; }
         else { new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER; }
+      } else if (mode == MM_HOME && mc == w->nest_cell[nest_of(m)]) {
+        /* 3b. Arrive (home): the sighting has been carried to the nest — drop it and
+         *     rejoin the wanderers. Without this, homed mites pile up at the nest, stay
+         *     MM_HOME forever (perpetually nest-tinted), and keep relaying a stale
+         *     record; the empty-stamped-now record propagates "nothing here" like 3. */
+        new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER;
       }
-      /* 4. else keep the current record, mode, and destination.
-       *    (A homing mite that reaches its nest just idles there — handled by the
-       *    movement's local wander — until a newer record interrupts it here.) */
+      /* 4. else keep the current record, mode, and destination (still wandering, or
+       *    still in transit to a hunt/home cell it has not yet reached). */
     }
 
     /* resolve the destination from the final mode */

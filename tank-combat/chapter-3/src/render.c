@@ -17,10 +17,12 @@ static const uint32_t COL_PATH[N_TANKS] = {   /* a lighter variation of the body
 static const uint32_t COL_AUTOPATH = RGBA(120, 235, 140, 255);
 static const uint32_t COL_MANUAL   = RGBA(245, 225, 90, 255);
 
-/* a mite's tint shows its role: idle teal (wander, no record) -> hunting red,
- * fading hot to cold as the sighting ages -> homing in its NEST's colour (the 20%
- * carrying the record back to one of the four nests). Watch a sighting diffuse out
- * from a contact, swarm in, and dissolve when it goes stale. */
+/* a mite's tint shows its CURRENT role (re-derived every tick, so it is never stale):
+ * idle teal (wander, no record) -> hunting red, fading hot to cold as the sighting ages
+ * -> homing in its NEST's colour (the 20% carrying a record back to one of the four
+ * nests). Homing is transient: on reaching its nest a mite delivers the record and
+ * reverts to wander (teal), so nest-tint means "in transit", not a permanent state.
+ * Watch a sighting diffuse out from a contact, swarm in, and dissolve when it goes stale. */
 static const uint32_t COL_MITE_IDLE     = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD= RGBA(150,  64,  74, 255);

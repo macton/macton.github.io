@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (103 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (105 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -62,8 +62,10 @@ the inherited tests still pass and the baked escape table is byte-identical.
   refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
   now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
   *(tested: both refresh and erase.)*
-- **Arrive (home).** A homing mite that reaches its nest idles there (a small local
-  wander) until a newer record interrupts it.
+- **Arrive (home).** A homing mite that reaches its nest **delivers the sighting and
+  reverts to wander** (record erased, stamped now). So a mite carries the nest tint only
+  while in transit — it does not get stuck `MM_HOME` (nest-coloured) at the nest.
+  *(tested: on reaching its nest the mite reverts to wander with its record cleared.)*
 - **An empty record means wander.** A mite with no recorded cell wanders.
 
 ## Nests & shared route fields
