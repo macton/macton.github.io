@@ -88,7 +88,13 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
  * turns on its attackers — emergent escalation from the same gossip. */
 #define TARGET_MAX_R 12         /* turret search radius, in cells */
 #define TGT_NONE     0xFFFFu    /* tank has no target */
-#define FIRE_CONE    2048       /* fire only when the turret is within this of the target (Q5.11, ~11 deg) */
+#define LASER_MAX    64         /* max beam length in cells (it stops at the first wall) */
+#define LASER_TICKS  6          /* ticks a fired beam stays drawn (~0.1 s at 60 ticks/s) */
+
+/* destruction effects: a small fixed ring of expanding/fading bursts, one per mite the
+ * laser destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */
+#define N_FX         256        /* effect ring capacity (bursts overwrite the oldest) */
+#define FX_DURATION  8          /* ticks a burst is drawn before it expires */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u

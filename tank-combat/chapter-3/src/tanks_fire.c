@@ -44,10 +44,71 @@ static uint16_t turn_toward(uint16_t cur, uint16_t want, int rate) {
   return (uint16_t)((int)cur + d);
 }
 
+/* record a destruction burst at a mite's position (cosmetic ring; overwrite the oldest) */
+static void spawn_fx(World* w, uint32_t xy) {
+  w->fx_xy[w->fx_head] = xy;
+  w->fx_t [w->fx_head] = FX_DURATION;
+  w->fx_head = (uint8_t)((w->fx_head + 1u) % N_FX);
+}
+
+/* destroy mite m: a burst, mark it dead (respawn timer), freeze the corpse, and the
+ * "death cry" — every live mite within 2x sensing range of it learns the firing tank's
+ * cell (record stamped now + hunt), written into the current record buffer (read next
+ * tick), so a kill turns the nearby swarm on its attacker. */
+static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
+  uint16_t deadcell = w->mite_cell[m];
+  spawn_fx(w, w->mite_xy[m]);
+  w->mite_resp[m] = w->mite_respawn ? w->mite_respawn : 1;
+  w->mite_in[m] = 0; w->mite_hit[m] = 0;
+  int rad = 2 * (int)w->mite_sense, dcx = wc_x(deadcell), dcy = wc_y(deadcell);
+  uint32_t buf = w->rec_buf;
+  for (int oy = -rad; oy <= rad; oy++) for (int ox = -rad; ox <= rad; ox++) {
+    uint32_t c = (uint32_t)wc_pack(wrap_wcx(dcx + ox), wrap_wcy(dcy + oy));
+    uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
+    for (uint8_t j = 0; j < k; j++) {
+      uint32_t p = w->mite_list[c * MITE_CAP + j];
+      if (p == m || w->mite_resp[p]) continue;            /* skip self + the already-dead */
+      w->mite_rec_cell[buf][p] = tcell; w->mite_rec_time[buf][p] = frame;
+      w->mite_mode[p] = MM_HUNT; w->mite_dest[p] = tcell;
+    }
+  }
+}
+
+/* Fire the laser: a ray from the tank cell along the turret heading, marched cell by
+ * cell (the LOS Bresenham, extended), destroying every live mite in each cell it crosses
+ * until it meets a wall. Returns the last open cell (the beam's end, for drawing). */
+static uint16_t laser_sweep(World* w, int tcx, int tcy, int co, int si, uint16_t tcell, uint32_t frame) {
+  int bx = tcx + ((co * LASER_MAX) >> TRIG_SHIFT);        /* a far point along the beam */
+  int by = tcy + ((si * LASER_MAX) >> TRIG_SHIFT);
+  int dx = bx - tcx, dy = by - tcy;
+  int adx = iabs(dx), ady = iabs(dy), sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+  int x = tcx, y = tcy, err = adx - ady;
+  uint16_t endc = (uint16_t)wc_pack(wrap_wcx(tcx), wrap_wcy(tcy));
+  for (int g = 0; g < LASER_MAX + 2; g++) {
+    int e2 = 2 * err;
+    if (e2 > -ady) { err -= ady; x += sx; }
+    if (e2 <  adx) { err += adx; y += sy; }
+    int wx = wrap_wcx(x), wy = wrap_wcy(y);
+    if (cell_is_wall(w->grid, wx, wy)) break;              /* the beam stops at the wall */
+    endc = (uint16_t)wc_pack(wx, wy);
+    uint32_t c = (uint32_t)endc;
+    uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
+    for (uint8_t j = 0; j < k; j++) {
+      uint32_t p = w->mite_list[c * MITE_CAP + j];
+      if (w->mite_resp[p]) continue;                       /* already destroyed (this or another beam) */
+      kill_mite(w, p, tcell, frame);
+    }
+    if (x == bx && y == by) break;
+  }
+  return endc;
+}
+
 void tanks_fire(World* w) {
   uint32_t frame = w->frame;
   int period = w->fire_period;
   int rate = w->turret_rate;
+
+  for (uint32_t i = 0; i < N_FX; i++) if (w->fx_t[i]) w->fx_t[i]--;   /* age the bursts */
 
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
@@ -88,33 +149,16 @@ void tanks_fire(World* w) {
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
     if (w->tank_tracer[t]   > 0) w->tank_tracer[t]--;
 
-    /* fire only once the barrel has swung onto the target (within FIRE_CONE) and the
-     * cooldown is ready (period 0 = off). One shot kills it. */
-    int err = (int16_t)(want - w->tank_turret[t]); if (err < 0) err = -err;
-    if (period > 0 && target != TGT_NONE && err <= FIRE_CONE && w->tank_cooldown[t] == 0) {
-      uint32_t m = target;
-      uint16_t deadcell = w->mite_cell[m];
-      w->mite_resp[m] = w->mite_respawn ? w->mite_respawn : 1;   /* dead until it revives */
-      w->mite_in[m] = 0; w->mite_hit[m] = 0;                      /* freeze the corpse this tick */
-      w->tank_cooldown[t] = (uint16_t)period;
-      w->tank_shot_cell[t] = deadcell; w->tank_tracer[t] = 4;     /* a brief tracer */
-
-      /* death cry: every mite within 2x sensing range of the dead one learns the
-       * firing tank's cell — record stamped now + hunt — so the swarm turns on the
-       * attacker. Written into the current record buffer (read next tick). */
+    /* fire only once the barrel has swung EXACTLY onto the target bearing (so the beam
+     * runs precisely along the barrel — a line shot can't be a cone) and the cooldown is
+     * ready (period 0 = off). The shot is a LASER: a beam along the barrel that destroys
+     * every mite in its path until it meets a wall. */
+    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0) {
+      uint32_t bd = w->tank_turret[t] >> ANGLE_SHIFT;            /* beam = barrel heading */
       uint16_t tcell = (uint16_t)wc_pack(tcx, tcy);
-      int rad = 2 * (int)w->mite_sense, dcx = wc_x(deadcell), dcy = wc_y(deadcell);
-      uint32_t buf = w->rec_buf;
-      for (int oy = -rad; oy <= rad; oy++) for (int ox = -rad; ox <= rad; ox++) {
-        uint32_t c = (uint32_t)wc_pack(wrap_wcx(dcx + ox), wrap_wcy(dcy + oy));
-        uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
-        for (uint8_t j = 0; j < k; j++) {
-          uint32_t p = w->mite_list[c * MITE_CAP + j];
-          if (p == m) continue;
-          w->mite_rec_cell[buf][p] = tcell; w->mite_rec_time[buf][p] = frame;
-          w->mite_mode[p] = MM_HUNT; w->mite_dest[p] = tcell;
-        }
-      }
+      w->tank_shot_cell[t] = laser_sweep(w, tcx, tcy, dir_cos(bd), dir_sin(bd), tcell, frame);
+      w->tank_cooldown[t]  = (uint16_t)period;
+      w->tank_tracer[t]    = LASER_TICKS;                        /* draw the beam ~0.1 s */
     }
   }
 }

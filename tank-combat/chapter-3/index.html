@@ -150,10 +150,11 @@
     <span class="swatch" style="background:#e8c448"></span><span class="swatch" style="background:#78c4e8"></span><span class="swatch" style="background:#96d282"></span><span class="swatch" style="background:#ce8ce2"></span> homing (briefly, in its nest’s colour) ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
     Each tank’s <b>turret</b> turns at its own rate onto the mite it can most easily hit — the one
-    closest to where the barrel already points — and fires once it swings on
-    (<span class="swatch" style="background:#ffee96"></span> tracer); a hit kills the mite — which
-    revives (memory wiped) at its nest after a few seconds — and the <b>death cry</b> tells every
-    nearby mite where the shot came from, so the swarm turns on its attackers.
+    closest to where the barrel already points — and, once aligned, fires a <b>laser</b>
+    (<span class="swatch" style="background:#ff6040"></span> beam) that reaches to the nearest wall and
+    <b>destroys every mite along the line</b> (<span class="swatch" style="background:#fff0be"></span>
+    burst). Destroyed mites revive (memory wiped) at their nest after a few seconds, and each one’s
+    <b>death cry</b> tells nearby mites where the shot came from, so the swarm turns on its attackers.
   </div>
 
   <article>
@@ -296,16 +297,19 @@
     current direction</strong>, needing the least rotation, not the spatially nearest. It scans the
     per-cell mite index over its search box, takes one <strong>line-of-sight</strong> test per cell
     (an integer Bresenham walk over the wall grid), and tracks the smallest bearing change. The turret
-    swings onto that target and, once on it (and the cooldown elapsed), fires at a fixed rate (default
-    <strong>2 shots/sec</strong>); one shot <strong>kills</strong> the mite, which leaves the board and
-    <strong>revives — its memory wiped — at its nest</strong> after a timeout (default <strong>5 s</strong>).
-    Reviving respects the same crowding cap as spawning — a full nest just waits a tick — so no rule the
-    swarm obeys is broken by combat. The four nests sit away from the tanks' start screen, so revived
-    mites don't pop up under a barrel.</p>
-    <p>The payoff is the feedback loop. A kill is a <strong>death cry</strong>: every mite within
+    swings onto that target and, once exactly on it (and the cooldown elapsed), fires at a fixed rate
+    (default <strong>2 shots/sec</strong>). The shot is a <strong>laser</strong>: the same Bresenham
+    walk, now run <em>outward from the tank</em> until it meets a wall, <strong>destroying every mite in
+    the cells it crosses</strong> — one beam, a whole line, again just reading the per-cell index. The
+    beam is drawn for ~0.1 s and each destroyed mite leaves a small expanding <strong>burst</strong>.
+    A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
+    <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
+    so no rule the swarm obeys is broken by combat. The four nests sit away from the tanks' start
+    screen, so revived mites don't pop up under a barrel.</p>
+    <p>The payoff is the feedback loop. Every kill is a <strong>death cry</strong>: each mite within
     <strong>2× sensing range</strong> of the dead one has its record overwritten with the
     <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
-    kill doesn't thin the swarm quietly, it <strong>broadcasts the shooter's position</strong> into
+    laser that mows a line doesn't thin the swarm quietly, it <strong>broadcasts the shooter's position</strong> into
     the very same gossip that spreads any sighting, and the survivors converge on the attacker. It
     writes through the ordinary record buffer and the ordinary route fields; the belief field above
     lights up around a tank that is firing. And it is <strong>deterministic</strong> — firing draws
@@ -334,8 +338,9 @@
     allocation, the simulation separated from rendering and wasm so the swarm, the gossip, the
     cap, and the route table are all tested natively with no browser or GPU. The render scales
     with what's <em>visible</em>, not with the population. And when the tanks shoot back, combat
-    <strong>added no new structures</strong> — aiming reads the per-cell index, the death cry writes
-    the existing record buffer, respawn obeys the existing cap — the proof that the layout, not the
+    leans on what's <strong>already here</strong> — aiming and the laser both just walk the per-cell
+    index, the death cry writes the existing record buffer, respawn obeys the existing cap; the only
+    addition is a small fixed ring of cosmetic destruction bursts — the proof that the layout, not the
     feature list, is what the volume bought.</p>
 
     <p class="note">Source for this chapter:

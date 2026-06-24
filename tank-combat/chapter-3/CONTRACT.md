@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (105 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (109 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -108,15 +108,20 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Line of sight is required.** A mite is targetable only if an integer Bresenham walk
   from the tank cell to the mite cell crosses no wall. *(tested: a mite behind a wall is
   not targeted.)*
-- **Fire is fixed-rate, aimed, and one-shot-kill.** The tank fires only once the turret
-  has swung onto the target (within `FIRE_CONE`) and the cooldown is elapsed, every
-  `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only) — so the turn
-  rate gates firing. One shot kills the target mite: it is marked dead and leaves the
-  per-cell index on the next rebuild — a corpse is not drawn (on the map either),
-  gossiped, or targeted. *(tested: the kill, the cooldown, the corpse leaving the index,
-  and an off-axis target not shot until the turret swings on.)*
-- **A kill is a death cry.** Every mite within **2× `mite_sense`** cells of the dead one
-  has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
+- **Fire is a fixed-rate, exactly-aimed laser.** The tank fires only once the turret has
+  swung **exactly** onto the target bearing (so the beam runs precisely along the barrel —
+  a line shot is never a cone, so the turn rate gates firing) and the cooldown is elapsed,
+  every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only). The shot
+  is a **laser**: a ray marched from the tank along the barrel that **destroys every mite
+  in the cells it crosses until it meets a wall** (length capped at `LASER_MAX`); the beam
+  is drawn for `LASER_TICKS` (~0.1 s). Each destroyed mite is marked dead and leaves the
+  per-cell index next rebuild — a corpse is not drawn (on the map either), gossiped, or
+  targeted — and spawns a cosmetic destruction burst. *(tested: the laser destroys the
+  target + a burst; it destroys a whole line of mites; it stops at a wall (a collinear mite
+  beyond survives); the cooldown; the corpse leaving the index; an off-axis target not shot
+  until the turret swings on.)*
+- **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
+  destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
   that spreads any sighting. *(tested.)*
 - **A dead mite revives at its nest with its memory cleared, after `mite_respawn` ticks**
@@ -147,10 +152,11 @@ the inherited tests still pass and the baked escape table is byte-identical.
   the mites share a few fields keyed by destination. A mite stuck where no field route
   exists (overflow, or a sealed goal) falls back to greedy and relies on the
   wander/erase rules and the swarm's collective coverage.
-- **The shot is hitscan, and only mites take damage.** A shot is an instant
-  line-of-sight kill, not a travelling projectile; tanks fire but are not damaged by the
-  swarm (tank health/score is not promised here). A turret parked on a nest legitimately
-  suppresses it — a revived mite in a tank's sights is shot again.
+- **The laser is hitscan, and only mites take damage.** The beam is an instant line to
+  the nearest wall, not a travelling projectile; tanks fire but are not damaged by the
+  swarm (tank health/score is not promised here). A turret parked facing a nest
+  legitimately suppresses it — a revived mite in the beam's path is destroyed again.
+  Destruction bursts are cosmetic only (no gameplay effect).
 - **The viewport is presentation only** (inherited): following, sliding, the picker,
   and which mites are drawn never change the simulation.
 

@@ -615,20 +615,41 @@ static void t_mite_nests_fields(void) {
 
 /* ---- combat: the tanks shoot the swarm ----------------------------------- */
 static void t_tanks_fire(void) {
-  printf("combat — aim in line of sight, one-shot kill, death cry, nest respawn:\n");
+  printf("combat — laser aim/line-kill/stop-at-wall, death cry, nest respawn:\n");
 
-  /* a tank kills the nearest mite it has line of sight to (open corridor, 3 cells) */
+  /* a tank lasers the mite it can hit: the target is destroyed, a burst is spawned */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
   W.fire_period = 30; W.mite_respawn = 300;
   sim_tick(&W);
   check(W.tank_target[0] == 0, "the turret acquires the mite in line of sight");
-  check(W.mite_resp[0] > 0, "one shot kills the targeted mite");
+  check(W.mite_resp[0] > 0, "the laser destroys the targeted mite");
   check(W.tank_cooldown[0] > 0, "the tank goes on cooldown after firing");
+  int anyfx = 0; for (uint32_t i = 0; i < N_FX; i++) if (W.fx_t[i]) anyfx = 1;
+  check(anyfx, "a destruction burst is spawned for the destroyed mite");
   sim_tick(&W);   /* the next index rebuild drops the corpse */
   check(W.mite_cnt[wcell(5, 7)] == 0, "a dead mite leaves the per-cell index (not drawn, not targetable)");
 
-  /* line of sight is required: a mite behind the central wall block is NOT shot */
+  /* the laser is a LINE: it destroys every mite along the beam, not just the target */
+  sim_init(&W); gossip_setup(&W, 3);
+  place_tank(&W, 0, 1, 7);                                /* turret east, open corridor on row 7 */
+  mite_reset(&W, 0, 3, 7); mite_reset(&W, 1, 5, 7); mite_reset(&W, 2, 7, 7);
+  W.fire_period = 30; W.mite_respawn = 300;
+  sim_tick(&W);
+  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0 && W.mite_resp[2] > 0,
+        "the laser destroys every mite along the beam line");
+
+  /* the beam stops at a wall: a collinear mite beyond the wall survives */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 1, 7);
+  mite_reset(&W, 0, 5, 7);                                /* before the central block (col 8) */
+  mite_reset(&W, 1, 13, 7);                               /* beyond it (cols 8..11 are walls) */
+  W.fire_period = 30; W.mite_respawn = 300;
+  sim_tick(&W);
+  check(W.mite_resp[0] > 0, "the laser destroys the mite before the wall");
+  check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the beam stops at the wall)");
+
+  /* line of sight is required: a mite behind the central wall block is NOT targeted */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 5, 7); mite_reset(&W, 0, 15, 7);      /* cols 8..11 (walls) lie between them */
   W.fire_period = 30;

@@ -33,11 +33,12 @@
 
 typedef struct { int16_t cx, cy, hx, hy, co, si; uint32_t rgba; } Inst;
 
-/* Capacity per built view: up to two screens of walls + path strips +
- * tanks/outlines, plus the mites the camera shows. A mite is on exactly one
- * screen, so at most N_MITES mite quads are ever visible across the (<=2) built
- * screens — render scales with the visible swarm, capped by the whole pool. */
-#define INST_MAX (2 * (N_CELLS + 512 + N_TANKS * 4 + NEST_COUNT) + N_MITES)
+/* Capacity per built view: up to two screens of walls + path strips + tanks (outline
+ * + body + barrel + a 2-quad laser beam = 5 each) + nests, plus the mites the camera
+ * shows and the active destruction bursts. A mite/burst is on exactly one screen, so at
+ * most N_MITES + N_FX of those are ever visible across the (<=2) built screens — render
+ * scales with what's shown, capped by the pools. */
+#define INST_MAX (2 * (N_CELLS + 512 + N_TANKS * 5 + NEST_COUNT) + N_MITES + N_FX)
 
 /* Build the whole view into out[0..) and return the quad count. Draws the camera
  * screen at local offset 0; if `sliding`, also the `to` screen offset by

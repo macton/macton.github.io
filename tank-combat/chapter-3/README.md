@@ -142,8 +142,9 @@ editable on the page.
 
 ### Combat — the tanks shoot back (`tanks_fire.c`)
 
-Combat is its own transform and **adds no new structures** — it reuses the per-cell
-index, the record gossip, and the nests already here. Per tank, each tick:
+Combat is its own transform that **leans on the structures already here** — the per-cell
+index, the record gossip, the nests — adding only a small fixed ring of cosmetic
+destruction bursts. Per tank, each tick:
 
 - **Aim.** The turret aims **independently of the body** (`tank_turret`, separate from
   the movement heading `tank_ang`) and **turns at its own rate** (`turret_rate`, default
@@ -153,15 +154,19 @@ index, the record gossip, and the nests already here. Per tank, each tick:
   one **line-of-sight** test per cell (an integer Bresenham walk over the wall grid, the
   whole cell in or out), and keeps the smallest bearing change (lowest index breaks ties).
   The turret then swings toward that bearing at its turn rate.
-- **Fire.** Once the turret has **swung onto the target** (within `FIRE_CONE`) and the
+- **Fire (a laser).** Once the turret has swung **exactly** onto the target bearing (so
+  the beam runs precisely along the barrel — a line shot can't fire in a cone) and the
   cooldown is elapsed, fire on a fixed rate (`fire_period`, default 30 ticks = **2/sec**;
-  `0` = aim-only). One shot **kills** the target: it is marked dead (`mite_resp` = the
-  respawn timer) and drops out of the index next rebuild, so a corpse is never drawn,
-  gossiped, or targeted (the minimap skips it too).
-- **Death cry.** A kill writes the **firing tank's cell** into the record of every mite
-  within **2× sensing range** of the dead one (stamped now, mode → hunt), through the
-  ordinary record buffer — so a kill broadcasts the shooter's position into the same
-  gossip that spreads any sighting, and the survivors converge on the attacker.
+  `0` = aim-only). The shot is a **laser**: the same Bresenham walk run *outward* from the
+  tank until it meets a wall, **destroying every mite in the cells it crosses** (`LASER_MAX`
+  caps the length). Each destroyed mite is marked dead (`mite_resp` = the respawn timer),
+  drops out of the index next rebuild (never drawn — minimap included — gossiped, or
+  targeted), and spawns a **destruction burst**. The beam is drawn for `LASER_TICKS` (~0.1 s).
+- **Death cry.** Each kill writes the **firing tank's cell** into the record of every live
+  mite within **2× sensing range** of the destroyed one (stamped now, mode → hunt), through
+  the ordinary record buffer — so a laser that mows a line broadcasts the shooter's position
+  from every body it drops, into the same gossip that spreads any sighting, and the
+  survivors converge on the attacker.
 
 A dead mite **revives at its nest with its memory wiped** (record emptied, mode reset to
 wander) after `mite_respawn` ticks (default 300 = **5 s**), respecting the crowding cap:
@@ -184,8 +189,9 @@ Firing draws **no randomness**, so the swarm stays a pure function of the seed a
    hunters' cells), fold a route field for each new one, reuse resident, free dropped.
 5. **`mites_step`** — the crowding cap (in-order reservation) + steer each mite along
    its field (or greedy on overflow, or wander); write `mite_in`.
-   5b. **`tanks_fire`** — aim each turret at the nearest mite in line of sight, fire on
-   cooldown, one-shot kill + death cry (revival already happened in 1b).
+   5b. **`tanks_fire`** — swing each turret onto the most-hittable mite, fire the laser on
+   cooldown (line-kill to the wall + bursts + death cry); age the effect ring (revival
+   already happened in 1b).
 6. **`agent_turn`** over the tanks (`turn_rate`) and the mites (`mite_turn`).
 7. **`agent_move`** over the tanks (`TANK_R`) and the mites (`MITE_R`).
 8. Advance the `World` frame counter (the record timestamp clock).
@@ -203,25 +209,27 @@ New in chapter 3:
 | file | responsibility |
 |------|----------------|
 | `src/mites.c/.h` | the swarm: spawn, the per-cell index, the record gossip, the shared route-field table, and the cap-gated movement (hunt/home via fields, greedy on overflow, wander), plus the xorshift32 PRNG and the nests |
-| `src/tanks_fire.c/.h` | combat: per-tank turret aim (turns at a rate toward the most-hittable mite — closest to the turret's bearing — via a box scan + Bresenham line of sight), the fixed-rate fire + one-shot kill, the death-cry gossip, and the cap-respecting nest respawn |
+| `src/tanks_fire.c/.h` | combat: per-tank turret aim (turns at a rate toward the most-hittable mite — closest to the turret's bearing — via a box scan + Bresenham line of sight), the fixed-rate **laser** (a Bresenham beam to the nearest wall destroying every mite on the line) + destruction bursts, the death-cry gossip, and the cap-respecting nest respawn |
 
 `defs.h` adds the mite vocabulary (`N_MITES`, `MITE_R`, `MITE_CAP`, `NEST_COUNT`,
 `nest_of`, `N_FIELDS`, the modes, `REC_EMPTY`, world-cell + toroidal-distance helpers,
-the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NONE`).
+the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NONE`,
+`LASER_MAX`, `LASER_TICKS`, `N_FX`, `FX_DURATION`).
 `sim.h`'s `World` gains the mite pool (SoA, incl. `mite_dest` and `mite_resp`), the
 double-buffered records, the per-cell index, the four nests, the shared route-field
-table, the field active/peak counters, the per-tank turret/cooldown/target/tracer
-state, the PRNG, and the mite + combat tunables (`fire_period`, `mite_respawn`,
-`turret_rate`).
+table, the field active/peak counters, the per-tank turret/cooldown/target/beam state,
+the **destruction-effect ring** (`fx_xy`/`fx_t`), the PRNG, and the mite + combat
+tunables (`fire_period`, `mite_respawn`, `turret_rate`).
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
-`tank_turret` (separate from the body) and a firing tracer, plus the four nest markers;
-the minimap (`app.js`) shows the whole swarm and the nests.
+`tank_turret` (separate from the body), the **laser beam** (glow + core) and the
+**destruction bursts**, plus the four nest markers; the minimap (`app.js`) shows the
+whole live swarm and the nests (it skips the dead too).
 
 ## Memory budget (static, no dynamic allocation)
 
 The wasm linear memory is **2 MiB** (raised from chapter 2's 1 MiB in the first
-increment); measured high-water mark (`__heap_base`) ≈ **1.04 MiB** (1,088,408 bytes).
+increment); measured high-water mark (`__heap_base`) ≈ **1.04 MiB** (1,093,584 bytes).
 Everything is static, integer, allocation-free.
 
 | data | size |
@@ -232,7 +240,7 @@ Everything is static, integer, allocation-free.
 | mite SoA: `xy`,`vxy`,`ang`,`in`,`hit`,`mode`,`dest`,`cell`,`tgt`,`resp` × 1000 | ~21 KB |
 | records (double-buffered): `rec_cell` (u16) + `rec_time` (u32), ×2 | ~12 KB |
 | shared route fields: `field_pg[64 · 128]` (u16) + `field_dest[64]` | ~16 KB |
-| combat: per-tank turret/cooldown/target/shot/tracer (×4) | <1 KB |
+| combat: per-tank turret/cooldown/target/beam (×4) + effect ring `fx_xy`/`fx_t`[256] | ~2 KB |
 | `mites.c` BFS/scatter/tally/dest-mark scratch (file-static) | ~34 KB |
 | instance buffer (2 screens + up to `N_MITES` mite quads + nests) | ~43 KB |
 | 4 nests, PRNG state, mite + combat tunables, 128 KB stack | — |
@@ -262,7 +270,7 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **105 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **109 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index**; the **crowding cap** (every tick,
 naturally, under forced convergence, **and with firing on** — kills + nest respawns);
@@ -276,18 +284,20 @@ reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-fi
 route equals the tank pathing ground truth** for the same destination; the
 **distinct-destination peak is measured and stays within `N_FIELDS`** — ~28 with combat
 on; a forced overflow falls back to greedy without breaking the cap or determinism);
-**combat** (the turret acquires a mite in line of sight; one shot kills it and it
-leaves the index; a wall blocks line of sight; the turret **swings at a turn rate** and
-does not snap; targeting picks the mite **closest to the turret's direction**, not the
-spatially nearest; the **turn rate gates firing** — an off-axis target isn't shot until
-the turret swings on; the death cry teaches a nearby mite the shooter's cell and flips
-it to hunt; a dead mite revives at its nest **with its memory cleared** after the
-timeout); **wall safety** at `MITE_R`; and **determinism** (the swarm state hash **and**
-the tank combat-state hash, with firing on by default).
+**combat** (the turret acquires a mite in line of sight and the **laser destroys** it,
+spawning a **burst**; it leaves the index; the **laser is a line** — every mite along the
+beam dies; the **beam stops at a wall** — a collinear mite beyond it survives; a wall
+blocks line of sight; the turret **swings at a turn rate** and does not snap; targeting
+picks the mite **closest to the turret's direction**, not the spatially nearest; the
+**turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
+death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
+revives at its nest **with its memory cleared** after the timeout); **wall safety** at
+`MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
+with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (105 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (109 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the
@@ -308,6 +318,6 @@ the tank combat-state hash, with firing on by default).
 Spawning waves and despawn (a free-list / generational handles over the pool); mites
 damaging the tanks back (tanks kill mites, but take no damage — tank health/score is a
 future step); mite-vs-mite or mite-vs-tank physical collision; projectiles as bodies
-(the shot is hitscan — an instant line-of-sight kill, not a travelling round); more than
+(the laser is hitscan — an instant beam to the wall, not a travelling projectile); more than
 one faction; flocking/alignment beyond the cap; **per-mite route fields** (the
 experiment shares a few instead). Each is its own future step.

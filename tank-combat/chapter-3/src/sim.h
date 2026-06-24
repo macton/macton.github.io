@@ -49,12 +49,19 @@ struct World {
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
 
   /* ---- per-tank turret/firing (the body heading drives movement; the turret
-   *      aims independently at the nearest mite in line of sight) ------------- */
+   *      aims independently and fires a laser that mows down the line) --------- */
   uint16_t tank_turret  [N_TANKS];  /* turret aim angle (Q5.11), separate from the body heading */
   uint16_t tank_cooldown[N_TANKS];  /* ticks until the next shot (0 = ready) */
   uint16_t tank_target  [N_TANKS];  /* targeted mite index, or TGT_NONE */
-  uint16_t tank_shot_cell[N_TANKS]; /* world cell of the last shot (for the tracer) */
-  uint8_t  tank_tracer  [N_TANKS];  /* ticks the shot tracer is still drawn */
+  uint16_t tank_shot_cell[N_TANKS]; /* world cell where the last beam ended (wall hit), for drawing */
+  uint8_t  tank_tracer  [N_TANKS];  /* ticks the fired beam is still drawn (LASER_TICKS at fire) */
+
+  /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite the
+   *      laser destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
+   *      drawn by render; deterministic (no RNG), so it never perturbs the swarm. ----- */
+  uint32_t fx_xy[N_FX];   /* burst position (packed subcells, the mite's last position) */
+  uint16_t fx_t [N_FX];   /* ticks remaining (0 = inactive); set to FX_DURATION on spawn */
+  uint8_t  fx_head;       /* ring write cursor (wraps; bursts overwrite the oldest) */
 
   /* ---- per-tank interaction + routing (every tank can path) -------------- */
   uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
