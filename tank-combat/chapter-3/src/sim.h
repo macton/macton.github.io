@@ -152,6 +152,7 @@ struct World {
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
   uint16_t fire_period;          /* tank shot interval in ticks (0 = firing off); 30 = 2/sec at 60 ticks/sec */
   uint16_t mite_respawn;         /* ticks a killed mite stays dead before reviving at its nest (300 = 5 s) */
+  uint16_t nest_ttl;             /* ticks a nest remembers a tank sighting before it expires (0 = never); 600 = 10 s */
 };
 
 _Static_assert(GRID_W <= 32, "a screen-grid row must fit in one uint32_t");

@@ -47,6 +47,7 @@ void sim_init(World* w) {
   w->mite_seed  = 1337;       /* the editable swarm seed */
   w->fire_period  = 30;       /* tank shots every 30 ticks = 2/sec (0 = firing off) */
   w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */
+  w->nest_ttl     = 600;      /* a nest forgets a tank sighting after 600 ticks = 10 s (0 = never) */
 
   /* the four nests (home cells), spread across the world on open ring cells. Nest 0
    * sits in screen (1,1), NOT in screen (0,0) where all four tanks start — so revived

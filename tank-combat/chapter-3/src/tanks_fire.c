@@ -206,11 +206,11 @@ void mites_respawn(World* w) {
       /* adopt the nest's stored gossip: hunt the last-known tank position it holds, or
        * wander if it knows nothing. Both record buffers are seeded so the next gossip
        * step reads a consistent record whichever buffer is current. */
-      uint16_t nrc = w->nest_rec_cell[n]; uint32_t nrt = w->nest_rec_time[n];
+      uint16_t nrc = w->nest_rec_cell[n]; uint32_t nrt = w->nest_rec_time[n];   /* always a sighting or REC_EMPTY */
       w->mite_rec_cell[0][m] = nrc; w->mite_rec_cell[1][m] = nrc;
       w->mite_rec_time[0][m] = nrt; w->mite_rec_time[1][m] = nrt;
-      if (nrc != REC_EMPTY) { w->mite_mode[m] = MM_HUNT;   w->mite_dest[m] = nrc; }
-      else                  { w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; }
+      if (rec_is_sighting(nrc)) { w->mite_mode[m] = MM_HUNT;   w->mite_dest[m] = rec_cell_of(nrc); }
+      else                      { w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; }
       w->mite_resp[m] = 0;
       w->mite_list[(uint32_t)nest * MITE_CAP + seg_of(m)] = (uint16_t)m;   /* into its sub-segment slot */
       w->mite_cnt[nest]++; occ[n] |= bit;

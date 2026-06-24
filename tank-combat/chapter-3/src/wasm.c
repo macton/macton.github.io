@@ -98,6 +98,9 @@ EXPORT(fire_period)      uint32_t fire_period(void)        { return g_world.fire
 EXPORT(set_fire_period)  void     set_fire_period(uint32_t v)  { g_world.fire_period = (uint16_t)(v > 6000 ? 6000 : v); }
 EXPORT(mite_respawn)     uint32_t mite_respawn(void)       { return g_world.mite_respawn; }
 EXPORT(set_mite_respawn) void     set_mite_respawn(uint32_t v) { g_world.mite_respawn = (uint16_t)(v < 1 ? 1 : (v > 60000 ? 60000 : v)); }
+/* nest memory timeout in ticks (0 = the nest never forgets a sighting) */
+EXPORT(nest_ttl)         uint32_t nest_ttl(void)           { return g_world.nest_ttl; }
+EXPORT(set_nest_ttl)     void     set_nest_ttl(uint32_t v) { g_world.nest_ttl = (uint16_t)(v > 60000 ? 60000 : v); }
 
 /* pointers — only the World fields the page reads (the chapter-2 path tables stay
  * simulation-internal in chapter 3, so they are no longer exported) */

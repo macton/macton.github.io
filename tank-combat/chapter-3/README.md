@@ -84,26 +84,43 @@ forced-convergence stress and the one-mite-per-sub-segment invariant.
 
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
-One **record** per mite: the **last known tank position** as a world cell (or
-`REC_EMPTY`), plus the **frame it was recorded** (a timestamp). A **last-write-wins
-register**; the swarm's behaviour emerges entirely from copying it on contact. Per
-tick, for each mite (`mites_records`):
+One **record** per mite, a **last-write-wins register** packed into a `uint16` cell +
+a `uint32` timestamp. The cell is **typed** (the top bit, since a cell index needs only
+13 of 16 bits — see `defs.h`):
 
-- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record its cell, stamped
+- a **sighting** `X` — "a tank is at X",
+- a **gone** `X | GONE_FLAG` — "cell X is empty" (a dispersal broadcast),
+- **no info** (`REC_EMPTY`).
+
+The swarm's behaviour emerges from copying records on contact. Per tick, for each mite
+(`mites_records`):
+
+- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record a **sighting**, stamped
   now, and **hunt** it. A self-sensed tank is always hunted.
-- **Read a peer.** Otherwise adopt the **newest** record among the mites in the 3×3
-  (read from the index), if strictly newer — including an *empty* one (LWW, lowest
-  index breaks ties). On adopting, roll the **role die**: `mite_phunt`% (80) → **hunt**
-  the recorded cell, else → **home** (path to this mite's nest). It fires **even while
-  already hunting/homing** — a newer record interrupts and re-rolls. Either way the
-  mite keeps and relays the record; an adopted *empty* record means **wander**.
+- **Read a peer.** Otherwise adopt the **newest** qualifying record in the 3×3 (read from
+  the index), if strictly newer (LWW, lowest index breaks ties). A **sighting** qualifies
+  for anyone. A **gone-of-X** qualifies **only for a mite that is hunting X** — so "X is
+  empty" reaches X's hunters and no one else. On adopting a sighting, roll the **role
+  die**: `mite_phunt`% (80) → **hunt** the cell, else → **home** (carry it to the nest);
+  it re-rolls **even while already hunting/homing**. On adopting a gone-of-X, **stand down
+  to wander** (and relay it onward to the rest of the X-cluster).
 - **Arrive (hunt).** A hunting mite within one cell of its recorded cell: tank there →
-  **refresh** (stamp now); gone → **erase** (empty, stamp now), then `MITE_PREPORT`% (50)
-  → **home** to carry that "it's gone" update to the nest, else **wander**. The
-  empty-stamped-now record is newest, so "it's gone" propagates back either way.
-- **Arrive (home).** A homing mite that reaches its nest **deposits its record in the
+  **refresh** (stamp now, keep hunting); gone → **broadcast a gone-of-X** (stamped now)
+  and **wander**.
+- **Arrive (home).** A homing mite that reaches its nest **deposits its sighting in the
   nest if it is newer** than what the nest holds (see *the nest as a hub* below), then
-  drops the record and reverts to wander, rejoining the swarm.
+  drops the record and reverts to wander.
+
+> **Why the record is typed — the swarm used to "forget" a tank that never moved.** An
+> earlier version stored an untyped cell and erased it to a fresh-stamped *empty* on
+> arrival. That empty was the newest record in the system, so it propagated like any other
+> and a single stale "gone" swept the whole swarm back to wander — a tank parked away from
+> a nest was wiped to green within seconds (confirmed in simulation). Typing the record
+> fixes it: a **gone-of-X** is adopted **only by mites already hunting X**, so it disperses
+> a stale cluster off X (when a tank actually leaves, its hunters clear within a couple of
+> seconds) **without ever wiping a live sighting of some other cell**. A moving tank is
+> tracked the whole time, because each new cell is a newer *sighting* that supersedes the
+> old via ordinary last-write-wins.
 
 The gossip is **order-independent**: every mite reads last tick's records and writes
 this tick's into a **second buffer**, then they swap (double-buffered LWW). Timestamps
@@ -111,20 +128,22 @@ are monotone.
 
 ### The nest as a knowledge hub
 
-Each nest keeps its own record (`nest_rec_cell`/`nest_rec_time`) — the latest tank intel
-carried home. Two flows feed it and one drains it:
+Each nest keeps its own record (`nest_rec_cell`/`nest_rec_time`) — the latest tank
+**sighting** carried home. Two flows feed it and a timer drains it:
 
-- **Deposit.** A homing mite that reaches its nest overwrites the nest's record **iff its
-  own is newer** (newest-wins, like the per-mite register). Both a fresh *sighting* (the
-  20% that carry a contact home) and a *"gone" erase* (the 50% that report a stale
-  sighting) arrive this way, so the nest tracks the freshest thing anyone brought back.
+- **Deposit.** A homing mite (the `1 − mite_phunt` ≈ 20% that carry a contact home) that
+  reaches its nest overwrites the nest's record **iff its own sighting is newer**
+  (newest-wins, like the per-mite register). Only sightings are ever deposited — a courier
+  never *erases* the nest, so a "gone" can't wipe the hub's knowledge.
 - **Dispatch.** A mite **revived** at the nest **adopts the nest's record**: it hunts the
   last-known tank cell (reinforcements to the front), or just wanders if the nest knows
   nothing. So killing mites doesn't reset the swarm's knowledge — the nest remembers it
   and seeds the next wave.
-- **Self-correction.** A dispatched hunter that finds the tank gone erases the record and
-  may report it home, clearing the nest — so a stale nest record costs at most a wasted
-  patrol before it is corrected. No expiry needed.
+- **Timeout.** Because the deposit flow can't erase the nest, a nest sighting that no
+  courier refreshes would otherwise re-seed hunters at a ghost forever. So a nest record
+  older than `nest_ttl` (default 600 ticks = 10 s; `0` = never) simply **expires**. That
+  is the nest's only forgetting mechanism — a stale entry costs at most `nest_ttl` of
+  wasted reinforcements before it clears (editable live on the page).
 
 ### Navigation — a handful of shared route fields for a thousand mites
 
@@ -301,13 +320,15 @@ shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
 sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
 convergence, **and with firing on** — kills + nest respawns; ≤1 mite per sub-segment);
 the **gossip** (one-hop-per-tick propagation = order-independent, newer overwrites
-older, older never overwrites newer, a newer *empty* propagates); the **behaviour**
-(sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
-boundaries and statistically, a newer record interrupts a homing mite and re-rolls, the
-**~50% report-home** roll on a stale-sighting arrival, a mite that reaches its nest
-reverts to wander); **nest gossip** (a homing mite deposits its newer record in the nest;
-older gossip doesn't overwrite; a revived mite adopts the nest's record and hunts it, or
-wanders if the nest is empty); the **nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
+older, older never overwrites newer, a newer no-info record does **not** overwrite a
+sighting); the **behaviour** (sense → hunt, arrive refresh / gone-of-X broadcast, the
+80/20 hunt/home split at the `P_HUNT` boundaries and statistically, a newer sighting
+interrupts a homing mite and re-rolls, **a gone-of-X clears an X-hunter but never a
+Y-hunter**, a mite that reaches its nest reverts to wander); **nest gossip** (a homing
+mite deposits its newer sighting; older gossip doesn't overwrite; an empty courier never
+erases the nest; **a nest sighting expires past `nest_ttl`** and is kept within it; a
+revived mite adopts the nest's record and hunts it, or wanders if the nest is empty); the
+**nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
 **distinct-destination peak is measured and stays within `N_FIELDS`** — ~32 with combat

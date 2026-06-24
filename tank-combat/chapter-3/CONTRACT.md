@@ -56,36 +56,45 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Behaviour
 
-- **Sense → record + hunt.** A tank within `mite_sense` cells sets the record to the
-  tank's cell, stamped this frame, and the mite hunts it. A self-sensed tank is always
-  hunted. *(tested.)*
-- **Adopt → 80/20 hunt/home.** On adopting a newer peer record, the mite rolls the role
-  die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
-  **paths home** to its nest; either way it keeps and relays the record. The roll fires
-  **even while already hunting or homing** — a newer record interrupts and re-rolls.
-  *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
-  RNG stream statistically, and a newer record interrupts a homing mite.)*
+- **The record is typed.** A record cell is a **sighting** "tank at X" (a plain cell), a
+  **gone** "X is empty" (`X | GONE_FLAG`, the top bit), or **no info** (`REC_EMPTY`). Only
+  sightings and matching gones propagate; no-info never does. *(tested.)*
+- **Sense → sighting + hunt.** A tank within `mite_sense` cells sets the record to a
+  sighting of the tank's cell, stamped this frame, and the mite hunts it. A self-sensed
+  tank is always hunted. *(tested.)*
+- **Adopt → 80/20 hunt/home.** On adopting a newer peer **sighting**, the mite rolls the
+  role die: with probability `mite_phunt` (= 80%) it **hunts** the cell, else it **paths
+  home** to its nest; either way it keeps and relays the sighting. The roll fires **even
+  while already hunting or homing**. *(tested: boundaries `P_HUNT = 0`/`100` exact, default
+  split matches the RNG stream, and a newer sighting interrupts a homing mite.)*
+- **Targeted "gone".** A **gone-of-X** record is adopted **only by a mite that is hunting
+  X** — it then stands down to wander and relays the gone onward. A gone-of-X never touches
+  a mite hunting a *different* cell, so it disperses a stale cluster off X without ever
+  wiping a live sighting elsewhere (the swarm cannot "forget" a tank that has not moved).
+  *(tested: a gone-of-X clears an X-hunter and is ignored by a Y-hunter.)*
 - **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
-  refreshes the record (stamp now) if a tank is there; if the tank is **gone** it erases
-  the record (empty, stamp now) and then with probability `MITE_PREPORT` (50%) **heads
-  home to report** the stale sighting, else wanders — the erase, being newest, propagates
-  "it's gone" either way. *(tested: refresh; erase; the ~50% report-home split.)*
-- **Arrive (home).** A homing mite that reaches its nest **deposits its record in the
-  nest if it is newer** than the nest's, then reverts to wander. So a mite carries the
-  nest tint only while in transit. *(tested: it reverts to wander; the deposit promise
-  below.)*
-- **An empty record means wander.** A mite with no recorded cell wanders.
+  refreshes the sighting (stamp now) if a tank is there; if the tank is **gone** it
+  broadcasts a **gone-of-X** (stamp now) and wanders. *(tested: refresh; the gone-of-X
+  broadcast.)*
+- **Arrive (home).** A homing mite that reaches its nest **deposits its sighting in the
+  nest if it is newer** than the nest's, then reverts to wander. *(tested: it reverts to
+  wander; the deposit promise below.)*
+- **A no-info record means wander.** A mite with no recorded cell wanders.
 
 ## Nests as knowledge hubs
 
-- **Each nest stores the latest gossip** (`nest_rec_cell`/`nest_rec_time`). A homing mite
-  that reaches its nest overwrites it **iff the mite's record is newer** (newest-wins) —
-  both fresh sightings and "gone" erases arrive this way. *(tested: a newer record is
-  deposited; an older one is not.)*
+- **Each nest stores the latest sighting** (`nest_rec_cell`/`nest_rec_time`). A homing mite
+  that reaches its nest overwrites it **iff the mite's sighting is newer** (newest-wins).
+  Only sightings are deposited — a courier never erases the nest. *(tested: a newer sighting
+  is deposited; an older one is not; an empty courier never erases it.)*
 - **A revived mite adopts its nest's gossip**: it hunts the nest's last-known tank cell,
   or wanders if the nest knows nothing — so killing the swarm doesn't erase its knowledge;
   the nest seeds the next wave. *(tested: revive-and-hunt with intel; revive-and-wander
   without.)*
+- **Nest memory times out.** A nest sighting older than `nest_ttl` (default 600 ticks =
+  10 s; `0` = never) expires — the nest's only forgetting mechanism, so it stops re-seeding
+  hunters at a position no courier has refreshed. *(tested: expires past the TTL; kept
+  within it.)*
 
 ## Nests & shared route fields
 
