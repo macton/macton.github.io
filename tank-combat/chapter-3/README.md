@@ -104,6 +104,16 @@ drifts *back*; it needs ~60% to reach escape velocity. Even so it is a polish on
 jam detector (which does the heavy lifting): the nest cluster is mostly transiting hunters,
 which the bias doesn't touch.
 
+**Leave-home period.** The bias only moves *wanderers*, and the second escape-velocity
+problem above is the real obstacle: a freed or freshly-revived mite re-adopts a hunt from
+the dense neighbours before it can drift away. So after a mite **gives up a jam OR revives at
+its nest**, it spends `MITE_REFRAC_TICKS` (= 120, ~2 s) as a forced wanderer — it ignores
+second-hand hunts and drifts out (with the bias) before re-engaging, so the revived hunters
+sift off the nest instead of funnelling straight back into a knot. A tank it *directly
+senses* still overrides at once, so the front line is unaffected. Applying it on **revival**
+(the knot's source) is what makes it bite — measured near-nest density falls ~145 → ~134 on
+top of the bias, with the live count and kill rate unchanged.
+
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
 One **record** per mite, a **last-write-wins register** packed into a `uint16` cell +

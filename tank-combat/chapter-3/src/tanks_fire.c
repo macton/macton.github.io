@@ -229,6 +229,7 @@ void mites_respawn(World* w) {
       w->mite_rec_time[0][m] = nrt; w->mite_rec_time[1][m] = nrt;
       if (rec_is_sighting(nrc)) { w->mite_mode[m] = MM_HUNT;   w->mite_dest[m] = rec_cell_of(nrc); }
       else                      { w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; }
+      w->mite_refrac[m] = MITE_REFRAC_TICKS;    /* leave home first: drift out, then path to the front */
       w->mite_resp[m] = 0;
       w->mite_list[c * MITE_CAP + seg] = (uint16_t)m;      /* into its sub-segment slot */
       w->mite_cnt[c]++; g_revocc[c] |= bit;

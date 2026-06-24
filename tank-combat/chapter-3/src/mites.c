@@ -100,7 +100,7 @@ void mites_spawn(World* w) {
     w->mite_ang[m] = (uint16_t)(CARD_DI[xs32(&w->rng) & 3] << ANGLE_SHIFT);
     w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
     w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_resp[m] = 0;
-    w->mite_stuck[m] = 0;
+    w->mite_stuck[m] = 0; w->mite_refrac[m] = 0;
     w->mite_cell[m] = (uint16_t)cell; w->mite_tgt[m] = (uint16_t)cell;
     w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
     w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
@@ -167,6 +167,7 @@ void mites_records(World* w) {
     uint32_t mc = w->mite_cell[m];
     uint16_t my_c = rc_in[m]; uint32_t my_t = rt_in[m];
     uint16_t new_c = my_c; uint32_t new_t = my_t; uint8_t mode = w->mite_mode[m];
+    uint8_t refr = w->mite_refrac[m]; if (refr) w->mite_refrac[m] = refr - 1;  /* "leave home" countdown */
 
     /* 1. Sense a tank within `sense` cells (Chebyshev): record a SIGHTING, stamp now, hunt.
      *    A few tanks, so scan directly; nearest (Manhattan) wins, low index ties. */
@@ -178,7 +179,10 @@ void mites_records(World* w) {
       if (!sensed || md < best_md) { best_md = md; seen_c = (uint16_t)tc; sensed = 1; }
     }
     if (sensed) {
-      new_c = seen_c; new_t = frame; mode = MM_HUNT;
+      new_c = seen_c; new_t = frame; mode = MM_HUNT; w->mite_refrac[m] = 0;  /* direct contact ends leave-home */
+    } else if (refr) {
+      /* leaving home: hold the record (no adopt / arrive) so the forced outward wander in
+       * mites_step carries this just-revived / just-freed mite clear of the nest first. */
     } else {
       /* 2. Read a peer: the newest record strictly newer than mine in the 3x3 (from the
        *    index). A SIGHTING is always a candidate. A GONE-of-X is a candidate ONLY if I
@@ -296,7 +300,7 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   uint8_t mode = w->mite_mode[m];
   uint16_t dest = w->mite_dest[m];
   int bi = 0;
-  if (mode == MM_WANDER) {
+  if (mode == MM_WANDER || w->mite_refrac[m]) {       /* leaving home: wander out even if still flagged HUNT */
     uint32_t r = xs32(&w->rng);
     if (nv > 1 && (r % 100u) < (uint32_t)w->wander_bias) {
       /* slight outward bias: step in the direction that points away from the NEAREST nest, so
@@ -397,6 +401,7 @@ void mites_step(World* w) {
       if ((w->mite_mode[m] == MM_HUNT || w->mite_mode[m] == MM_HOME) && w->mite_tgt[m] == mc) {
         if (++w->mite_stuck[m] >= MITE_STUCK_MAX) {
           w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_stuck[m] = 0;
+          w->mite_refrac[m] = MITE_REFRAC_TICKS;      /* leave home before re-engaging */
         }
       } else {
         w->mite_stuck[m] = 0;

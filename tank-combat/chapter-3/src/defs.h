@@ -114,6 +114,15 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
  * — a gentle outward drift, so mites that just revived or gave up a jam sift off the nest
  * rather than re-clumping on it. (The value lives in World, not here, so it is tunable live.) */
 
+/* "Leave home" period (ticks): after a mite gives up a jam OR revives at its nest, it spends
+ * this many ticks as a forced wanderer — it ignores second-hand hunts and just drifts (with
+ * the outward bias above) so it clears the nest before re-engaging, instead of the revived
+ * hunters funnelling straight back into a knot. A tank it directly SENSES still overrides at
+ * once, so the front line is unaffected. 0 = disabled. */
+#ifndef MITE_REFRAC_TICKS
+#define MITE_REFRAC_TICKS 120
+#endif
+
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
  * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction

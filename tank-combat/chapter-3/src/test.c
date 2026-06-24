@@ -538,6 +538,23 @@ static void t_mite_behaviour(void) {
           "a wander-biased mite steps further from its nest (outward), not toward it");
     check(W.mite_tgt[0] == (uint16_t)wcell(nx + 4, ny),
           "the outward step is the away direction (east here), not the north tie-break"); }
+
+  /* leave-home refractory: a freed/revived mite ignores second-hand hunts for a window (so it
+   * drifts off the nest), but a directly-sensed tank still overrides immediately */
+  sim_init(&W); gossip_setup(&W, 2); W.mite_sense = 1;
+  mite_reset(&W, 0, 1, 6); mite_reset(&W, 1, 1, 7);
+  set_rec(&W, 1, (uint16_t)wcell(40, 40), 500); W.mite_mode[1] = MM_HUNT; W.mite_dest[1] = (uint16_t)wcell(40, 40);
+  set_rec(&W, 0, REC_EMPTY, 0); W.mite_mode[0] = MM_WANDER; W.mite_refrac[0] = 5; W.frame = 600;
+  mites_build_index(&W); mites_records(&W);
+  check(W.mite_mode[0] == MM_WANDER && get_rec_cell(&W, 0) == REC_EMPTY && W.mite_refrac[0] == 4,
+        "a leaving-home mite ignores a peer's sighting and counts its window down");
+
+  sim_init(&W); gossip_setup(&W, 1); W.mite_sense = 2;
+  place_tank(&W, 0, 10, 7); mite_reset(&W, 0, 11, 7);
+  W.mite_mode[0] = MM_WANDER; W.mite_refrac[0] = 5; W.frame = 700;
+  mites_build_index(&W); mites_records(&W);
+  check(W.mite_mode[0] == MM_HUNT && W.mite_refrac[0] == 0,
+        "a directly sensed tank overrides the leave-home window");
 }
 
 /* ---- wall safety at MITE_R ----------------------------------------------- */

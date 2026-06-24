@@ -53,6 +53,12 @@ the inherited tests still pass and the baked escape table is byte-identical.
   with the nest→mite vector), not max distance (which ties and would bias north). A gentle
   polish on the jam detector, not a replacement. *(tested: a biased wanderer steps strictly
   further from its nest, in the away direction.)*
+- **Leave-home period.** After a mite gives up a jam OR revives at its nest, it spends
+  `MITE_REFRAC_TICKS` (= 120) as a forced wanderer: it ignores second-hand hunts (won't adopt
+  a peer's sighting) and drifts out, so revived hunters sift off the nest before re-engaging
+  instead of funnelling back into a knot. A directly **sensed** tank overrides immediately, so
+  the front holds. *(tested: a leaving-home mite ignores a peer's sighting and counts down; a
+  sensed tank overrides it.)*
 
 ## The shared record (last-write-wins)
 
