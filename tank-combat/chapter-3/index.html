@@ -232,7 +232,8 @@
     <h2>The crowding cap: a sub-segment rule, not a collision</h2>
     <p>Mites do not physically collide with each other. Instead each cell is quartered into a
     <strong>2×2 grid of sub-segments</strong>, and a mite is assigned to one by index
-    (<code>index &amp; 3</code>) and <strong>parks at that sub-segment's centre</strong> — a
+    (<code>(index &gt;&gt; 2) &amp; 3</code> — deliberately <em>not</em> the same bits as the nest, so a
+    nest's mites use all four segments and revive in parallel) and <strong>parks at that sub-segment's centre</strong> — a
     quarter-cell off the cell centre. The rule is <strong>at most one mite per (cell,
     sub-segment)</strong>: a mite steps into a cell only if its own sub-segment there is free
     (so still at most 4 per cell), else it picks another open neighbour, or holds. This spreads

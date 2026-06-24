@@ -23,14 +23,16 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Rebuilt every tick from current positions.** A cell is quartered into `MITE_CAP` (= 4)
   **sub-segments** (2×2); `mite_list[cell*4 + seg]` is the mite in that sub-segment (or
   `REC_EMPTY`), and `mite_cnt[cell]` is the number of occupied sub-segments. Each mite
-  occupies its own slot, `seg_of(m) = m & 3`. *(tested.)* It is the swarm's `O(N)`
+  occupies its own slot, `seg_of(m) = (m >> 2) & 3`. *(tested.)* It is the swarm's `O(N)`
   acceleration structure — "which mites are within one cell of me" is reading a 3×3
   neighbourhood, not a 1000×1000 scan.
 
 ## The crowding cap
 
 - **At most one mite per (cell, sub-segment)** — so ≤ `mite_cap` (≤ 4) mites per cell —
-  after every tick. A mite is assigned a sub-segment by index (`m & 3`), moves into it
+  after every tick. A mite is assigned a sub-segment by index (`(m >> 2) & 3` — distinct
+  from `nest_of = m & 3`, so a nest's mites spread over all four segments and revive in
+  parallel rather than one at a time), moves into it
   (parking a quarter-cell off the cell centre, which spreads the swarm out), and enters a
   cell only if its own sub-segment there is free. Enforced by a deterministic in-order
   reservation — a per-cell **bitmask** of reserved sub-segments (current occupants +

@@ -62,9 +62,13 @@
  * physically collide with each other). */
 #define MITE_CAP    4
 #define SUBQ        (SUB / 4)   /* 64: a sub-segment centre's offset from the cell centre */
-static inline int seg_of(uint32_t mite) { return (int)(mite & 3u); }            /* 0..3 (NW,NE,SW,SE) */
-static inline int seg_ox(uint32_t mite) { return (mite & 1u) ? SUBQ : -SUBQ; }  /* east half? +x : -x */
-static inline int seg_oy(uint32_t mite) { return (mite & 2u) ? SUBQ : -SUBQ; }  /* south half? +y : -y */
+/* a mite's sub-segment, 0..3 (NW,NE,SW,SE). Keyed off the UPPER index bits, NOT m&3 —
+ * because nest_of(m) is m&3, and if the segment were m&3 too then every mite of a nest
+ * would want the SAME sub-segment of that one nest cell, serializing revival to one at a
+ * time. Using (m>>2)&3 spreads a nest's mites over all four segments. */
+static inline int seg_of(uint32_t mite) { return (int)((mite >> 2) & 3u); }
+static inline int seg_ox(uint32_t mite) { return (seg_of(mite) & 1) ? SUBQ : -SUBQ; }  /* east half? +x : -x */
+static inline int seg_oy(uint32_t mite) { return (seg_of(mite) & 2) ? SUBQ : -SUBQ; }  /* south half? +y : -y */
 static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u) + ((b >> 2) & 1u) + ((b >> 3) & 1u)); }
 
 /* Every mite belongs to one of NEST_COUNT home cells, assigned by index. A nest

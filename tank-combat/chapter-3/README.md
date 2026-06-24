@@ -69,9 +69,12 @@ spectrum** from the path tables, which rebuild only on a (rare) wall edit.
 ### The crowding cap — a sub-segment rule, not a collision
 
 Each cell is quartered into **`MITE_CAP` (= 4) sub-segments** (a 2×2 grid). A mite is
-assigned to one by index — `seg_of(m) = m & 3` — and **parks at that sub-segment's
-centre** (a quarter-cell off the cell centre), so the swarm spreads out inside cells
-instead of stacking on the centre (and is a little harder to mow down in a single line).
+assigned to one by index — `seg_of(m) = (m >> 2) & 3`, the upper bits **not** `m & 3`
+(that is `nest_of`, so reusing it would make every mite of a nest want the same
+sub-segment of its one nest cell — serializing revival to one at a time) — and **parks at
+that sub-segment's centre** (a quarter-cell off the cell centre), so the swarm spreads out
+inside cells instead of stacking on the centre (and is a little harder to mow down in a
+single line).
 The cap is **at most one mite per (cell, sub-segment)**: a mite enters a cell only if its
 own sub-segment there is free (and the cell holds fewer than `mite_cap` segments total) —
 a *decision-level* rule, not physics. It is enforced **deterministically** by processing

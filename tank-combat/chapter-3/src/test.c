@@ -749,6 +749,19 @@ static void t_tanks_fire(void) {
   check(get_rec_cell(&W, 0) == REC_EMPTY, "a revived mite's memory (its record) is cleared");
   check(W.mite_mode[0] == MM_WANDER, "a revived mite starts wandering (no stale hunt/home)");
 
+  /* revival is PARALLEL across a nest's sub-segments, not serialized: with the whole swarm
+   * dead and reviving, a nest cell fills more than one sub-segment. (If seg_of were tied to
+   * nest_of, every nest mite would want the same segment and only one could revive at once.) */
+  sim_init(&W); W.fire_period = 0;
+  for (uint32_t m = 0; m < N_MITES; m++) W.mite_resp[m] = 3;
+  for (int i = 0; i < 30; i++) sim_tick(&W);
+  int maxsegs = 0;
+  for (int n = 0; n < NEST_COUNT; n++) {
+    int occ = 0; for (int s = 0; s < MITE_CAP; s++) if (W.mite_list[(uint32_t)W.nest_cell[n] * MITE_CAP + s] != REC_EMPTY) occ++;
+    if (occ > maxsegs) maxsegs = occ;
+  }
+  check(maxsegs >= 2, "a nest revives mites into multiple sub-segments in parallel (seg decoupled from nest)");
+
   /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and
    * confirm reviving never pushes the nest cell over MITE_CAP */
   sim_init(&W);
