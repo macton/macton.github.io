@@ -144,19 +144,24 @@ for that destination: the same Level-1/Level-2 composition the tanks use, with t
 remaining-distance vector (`pg`) **keyed by destination cell** instead of by tank.
 
 Because the swarm shares destinations, the set of *distinct* destinations in flight
-is tiny — the 4 nests, plus the handful of recent tank-sighting cells the gossip is
-converging on — even though 1000 mites are moving. So keep a **fixed table of route
-fields** (`N_FIELDS`, e.g. 64), keyed by destination cell:
+is **small and practically bounded** — the 4 nests, plus the handful of recent
+tank-sighting cells the gossip is converging on — even though 1000 mites are moving.
+So keep a **fixed table of route fields** (`N_FIELDS`), keyed by destination cell:
 
 - The **4 nest fields stay resident** (re-folded only on a wall edit).
 - A **tank-goal field is folded the first tick its cell becomes an active
   destination and reused while it stays active**; its slot is freed once no mite
   wants it.
-- If more distinct destinations are live than slots (early, before gossip
-  converges), the **overflow mites fall back to greedy steering** toward their
-  destination for that tick. Show the live **distinct-destinations / `N_FIELDS`**
-  count on the page — a thousand mites served by a handful of routes is the
-  chapter's payoff.
+- **Size `N_FIELDS` from a measured peak, not a guess.** Instrument the distinct
+  active-destination count, run representative scenarios (idle tanks, fleeing tanks,
+  several sightings at once), take the high-water mark, and size `N_FIELDS` to it
+  with headroom — the prove/measure/detect discipline `AGENTS.md` applies to the
+  Level-1 byte, here applied to a runtime peak you can simulate.
+- The **overflow → greedy fallback** is the safety net: if the live count ever
+  exceeds `N_FIELDS`, those mites steer greedily that tick (no crash, no cap break).
+  Surface the live **distinct-destinations / `N_FIELDS`** count **and its peak** on
+  the page — a thousand mites served by a handful of routes is the chapter's payoff,
+  and the peak is how you size the table.
 
 Turning a destination into the input byte is the tank path-follow, unchanged: the
 field gives the next cardinal from the mite's current cell; turn toward
@@ -274,9 +279,10 @@ These are requirements, not suggestions.
   - **Nests & shared fields:** `nest_of(i)` partitions the swarm into four; a homing
     mite reaches its nest cell; a hunting mite reaches its recorded cell; a mite's
     route lookup into a shared field equals the tank pathing ground truth for the
-    same destination (the field is the tank route keyed by destination); the
-    distinct-destination count stays small once gossip converges, and overflow falls
-    back to greedy without breaking the cap or determinism.
+    same destination (the field is the tank route keyed by destination); over
+    representative runs the **peak distinct-destination count** is measured and stays
+    within `N_FIELDS`, and a forced overflow falls back to greedy without breaking the
+    cap or determinism.
   - **Wall safety:** a mite's footprint (`MITE_R`) never overlaps a wall cell across
     a run — proving the radius-parameterised collision serves both sizes.
   - **Determinism:** same seed + same inputs ⇒ identical state hash after K ticks.
@@ -294,7 +300,8 @@ These are requirements, not suggestions.
     last-known position diffuse out from a sighting and dissolve when it goes
     stale*,
   - the **four nests** drawn on the map, mites tintable by nest, and the live
-    **distinct-destinations / `N_FIELDS`** count (the handful of shared routes),
+    **distinct-destinations / `N_FIELDS`** count **and its peak** (the handful of
+    shared routes, and how you size the table),
   - the editable **seed** and tunables (`N_MITES` shown, sensing range, cap,
     `P_HUNT`, nest positions, mite size/speed/turn rate).
 - `build.sh`/`test.sh` (extended), a visible cache-busted version, `README.md`, and
@@ -331,7 +338,7 @@ real numbers):
 | mite SoA: `xy`,`vxy`,`ang`,`in`,`hit`,`mode`,`dest` × 1000 | ~15 KB |
 | records (double-buffered): `rec_cell` (u16) + `rec_time` (u32), ×2 | ~12 KB |
 | per-cell index: `count[4800]` (u8) + `list[4800·4]` (u16) | ~43 KB |
-| route fields: `N_FIELDS`(64) × (`pg`[128] u16 + dest cell + stamp) | ~17 KB |
+| route fields: `N_FIELDS` × (`pg`[128] u16 + dest + stamp), ~256 B each | sized from peak (64 ⇒ ~17 KB) |
 | 4 nest cells, RNG state, tunables | < 1 KB |
 
 That is well under chapter 2's tables (~706 KB for Level 1); the existing **1 MiB**
