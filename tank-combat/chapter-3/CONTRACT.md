@@ -157,13 +157,16 @@ the inherited tests still pass and the baked escape table is byte-identical.
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
   that spreads any sighting. *(tested.)*
-- **A dead mite revives at its nest with its memory cleared, after `mite_respawn` ticks**
-  (default 300 = 5 s). The record is emptied and the mode reset to wander, so it does not
-  resume an old hunt. Revival **respects the crowding cap** (current occupancy + inbound
-  reservations); if the nest is full it waits a tick. The four nests sit **off the tanks'
-  start screen** so revived mites don't appear under a barrel. *(tested: revival at the
-  nest after the timeout with the record cleared; the cap holds across thousands of ticks
-  with firing on.)*
+- **A dead mite revives near its nest after `mite_respawn` ticks** (default 300 = 5 s),
+  adopting the nest's gossip (hunt the last-known cell, or wander if the nest knows nothing).
+  Revival **respects the crowding cap** (current occupancy + inbound reservations). Because
+  the nest cell sits on the hunt routes and is usually full of passing hunters, revival
+  searches an **expanding ring** around the nest (`MITE_REVIVE_R`, the nest cell first, then
+  outward) for a free `(cell, sub-segment)` slot, so the respawn queue does not jam on the
+  one cell; only if the whole neighbourhood is full does it wait a tick. The four nests sit
+  **off the tanks' start screen** so revived mites don't appear under a barrel. *(tested:
+  revival at/next to the nest after the timeout; revival into the neighbourhood when the nest
+  cell is full; the cap holds across thousands of ticks with firing on.)*
 
 ## Determinism
 

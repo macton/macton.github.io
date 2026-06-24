@@ -211,13 +211,19 @@ destruction bursts. Per tank, each tick:
   from every body it drops, into the same gossip that spreads any sighting, and the
   survivors converge on the attacker.
 
-A dead mite **revives at its nest with its memory wiped** (record emptied, mode reset to
-wander) after `mite_respawn` ticks (default 300 = **5 s**), respecting the crowding cap:
-it revives only if the nest cell has a free slot once current occupancy **and inbound
-reservations** are counted (the same tally `mites_step` uses), else it waits a tick.
-Reviving happens right after the index is built (step 1b) so the revived mite is an
-ordinary live mite for the rest of the tick. The **four nests sit off the tanks' start
-screen** (nest 0 moved to screen (1,1)), so revived mites don't pop up under a barrel.
+A dead mite **revives near its nest** after `mite_respawn` ticks (default 300 = **5 s**),
+**adopting the nest's gossip** (hunt the last-known tank cell, or wander if the nest knows
+nothing — see *the nest as a hub*). Revival respects the crowding cap (a free
+`(cell, sub-segment)` slot once current occupancy **and inbound reservations** are counted,
+the same tally `mites_step` uses). But the nest *cell itself* sits on the swarm's hunt
+routes and is usually full of passing hunters — so revival searches an **expanding ring**
+around the nest (`MITE_REVIVE_R = 3`: the nest cell first, then outward) for a free slot,
+rather than waiting on the one cell. Without the ring the respawn queue **jams**: once the
+swarm reliably hunts (the typed-gossip fix), hunters camp the nest cells, dead mites can't
+revive, and the live count bleeds away (measured: ~480 alive and falling vs ~925 stable
+with the ring). Reviving happens right after the index is built (step 1b) so the revived
+mite is an ordinary live mite for the rest of the tick. The **four nests sit off the tanks'
+start screen** (nest 0 moved to screen (1,1)), so revived mites don't pop up under a barrel.
 Firing draws **no randomness**, so the swarm stays a pure function of the seed and inputs.
 
 ## Per-tick order (`sim.c`)
@@ -342,7 +348,8 @@ picks the mite **closest to the turret's direction**, not the spatially nearest;
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
 **turret is locked while the beam is live** and free again once it fades; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
-revives at its nest **with its memory cleared** after the timeout); **wall safety** at
+revives **at or next to its nest** after the timeout, and **into the neighbourhood when the
+nest cell is full**); **wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
 with firing on by default).
 

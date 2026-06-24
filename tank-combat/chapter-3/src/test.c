@@ -760,7 +760,7 @@ static void t_tanks_fire(void) {
   uint16_t nest0 = W.nest_cell[nest_of(0)];
   int revived = 0; for (int i = 0; i < 60 && !revived; i++) { sim_tick(&W); if (!W.mite_resp[0]) revived = 1; }
   check(revived, "a dead mite revives after the respawn timeout");
-  check(W.mite_cell[0] == nest0, "the revived mite reappears at its nest cell");
+  check(cell_chebyshev(W.mite_cell[0], nest0) <= MITE_REVIVE_R, "the revived mite reappears at (or next to) its nest cell");
   check(get_rec_cell(&W, 0) == REC_EMPTY, "a revived mite's memory (its record) is cleared");
   check(W.mite_mode[0] == MM_WANDER, "a revived mite starts wandering (no stale hunt/home)");
 
@@ -776,6 +776,21 @@ static void t_tanks_fire(void) {
     if (occ > maxsegs) maxsegs = occ;
   }
   check(maxsegs >= 2, "a nest revives mites into multiple sub-segments in parallel (seg decoupled from nest)");
+
+  /* revival falls back to the nest's NEIGHBOURHOOD when the nest cell is full (the fix for
+   * the respawn jam: hunters camped on the nest cell must not starve revival) */
+  sim_init(&W); gossip_setup(&W, 0); W.fire_period = 0;       /* all mites parked far away */
+  { uint16_t nz = W.nest_cell[0];
+    uint32_t fill[4] = {0, 4, 8, 12};                          /* nest 0, sub-segments 0..3 */
+    for (int k = 0; k < 4; k++) { uint32_t fm = fill[k]; W.mite_resp[fm] = 0; W.mite_tgt[fm] = nz;
+      W.mite_xy[fm] = xy_pack(wc_x(nz) * SUB + SUB/2 + seg_ox(fm), wc_y(nz) * SUB + SUB/2 + seg_oy(fm)); }
+    W.mite_resp[16] = 1;                                       /* nest 0, sub-segment 0 (taken) — due to revive */
+    mites_build_index(&W);
+    int full = (W.mite_cnt[nz] == MITE_CAP);
+    mites_respawn(&W);
+    check(full && W.mite_resp[16] == 0, "a due mite revives even when its nest cell's sub-segment is full");
+    check(W.mite_cell[16] != nz && cell_chebyshev(W.mite_cell[16], nz) <= MITE_REVIVE_R,
+          "it revives into a free slot in the nest's neighbourhood, not the full nest cell"); }
 
   /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and
    * confirm reviving never pushes the nest cell over MITE_CAP */

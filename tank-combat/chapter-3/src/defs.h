@@ -76,6 +76,16 @@ static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u
 #define NEST_COUNT  4
 static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 
+/* A killed mite revives at its nest — but the nest CELL sits on the swarm's hunt routes
+ * and is usually full of passing hunters (the crowding cap is per (cell, sub-segment)).
+ * So revival searches an expanding ring around the nest (radius 0 = the nest cell first,
+ * then out to MITE_REVIVE_R) for a free sub-segment, instead of waiting on the one cell.
+ * Without this the respawn queue jams: dead mites pile up with expired timers because the
+ * exact nest cell never frees, and the live swarm bleeds away. */
+#ifndef MITE_REVIVE_R
+#define MITE_REVIVE_R 3      /* a 7x7 search; measured to keep revival ahead of a 4-tank camp */
+#endif
+
 /* The shared route-field table: a fixed pool of remaining-distance fields keyed by
  * destination cell (the NEST_COUNT resident nests + cached tank-sighting goals).
  * Sized from a MEASURED peak distinct-destination count, not a guess: across
