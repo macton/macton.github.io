@@ -37,7 +37,7 @@ typedef struct { int16_t cx, cy, hx, hy, co, si; uint32_t rgba; } Inst;
  * tanks/outlines, plus the mites the camera shows. A mite is on exactly one
  * screen, so at most N_MITES mite quads are ever visible across the (<=2) built
  * screens — render scales with the visible swarm, capped by the whole pool. */
-#define INST_MAX (2 * (N_CELLS + 512 + N_TANKS * 4) + N_MITES)
+#define INST_MAX (2 * (N_CELLS + 512 + N_TANKS * 4 + NEST_COUNT) + N_MITES)
 
 /* Build the whole view into out[0..) and return the quad count. Draws the camera
  * screen at local offset 0; if `sliding`, also the `to` screen offset by

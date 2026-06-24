@@ -143,9 +143,10 @@
     The <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
-    unselected. Drive a tank through the swarm and watch a sighting spread:
-    <span class="swatch" style="background:#e05c3c"></span> seeking ·
-    <span class="swatch" style="background:#deb64a"></span> relaying ·
+    unselected. Drive a tank through the swarm and watch a sighting spread — 80% then
+    <b>hunt</b> it while 20% carry it <b>home</b> to a nest:
+    <span class="swatch" style="background:#e05c3c"></span> hunting ·
+    <span class="swatch" style="background:#e8c448"></span> homing ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
   </div>
 
@@ -160,10 +161,11 @@
 
     <p>The chapter's lesson is <strong>scale</strong>. One entity is easy; a thousand is a
     <em>data layout</em>. The volume forces the structures volume needs — a fixed pool with no
-    allocation, a per-cell index rebuilt every tick, a deterministic integer PRNG, and a piece
-    of shared knowledge that is just <strong>timestamped data copied on contact</strong>, with
-    no central manager and no per-unit pathfinding. The four tanks keep routing exactly as
-    before: <strong>4 routed units beside 1000 cheap ones — the algorithm matched to the
+    allocation, a per-cell index rebuilt every tick, a deterministic integer PRNG, a piece of
+    shared knowledge that is just <strong>timestamped data copied on contact</strong> with no
+    central manager, and — the payoff — <strong>a handful of shared route fields</strong>
+    standing in for a thousand per-unit routes. The four tanks keep routing exactly as before:
+    <strong>4 routed units beside 1000 that share a few routes — the algorithm matched to the
     need.</strong></p>
 
     <h2>The world &amp; the tanks (recap)</h2>
@@ -237,10 +239,11 @@
     carries exactly that one small record. There is no shared blackboard and no manager; the
     swarm's behaviour <em>emerges entirely from copying this record on contact</em>:</p>
     <ul style="color:var(--dim)">
-      <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and seek it.</li>
+      <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and <strong>hunt</strong> it.</li>
       <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> record among the
-      mites in your 3×3 (including an empty one) — last-write-wins — then roll the die:
-      <strong>80% seek</strong> the cell, <strong>20% keep wandering</strong> (but still relay it).</li>
+      mites in your 3×3 (including an empty one) — last-write-wins — then roll the role die:
+      <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest (a
+      newer record interrupts and re-rolls; either way you keep relaying it).</li>
       <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
       refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
       gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
@@ -256,36 +259,50 @@
       <div id="w-belief"></div>
     </div>
 
-    <h2>Cheap agents, no routing</h2>
-    <p>A mite does <strong>not</strong> use the path tables. It steers <strong>greedily</strong>:
-    wander picks a random open, non-full neighbour; seek picks the open, non-full neighbour that
-    most reduces the toroidal distance to the recorded cell. Both are then turned into the same
-    turn/drive input byte the routing tanks produce — <strong>one movement model, two input
-    sources</strong> — and fed through the shared <code>agent_turn</code>/<code>agent_move</code>.
-    A mite stuck behind a wall is resolved by the wander/erase rules and by the swarm's
-    collective coverage: dumb cheap agents, by design. Beside them the four tanks compute exact
-    shortest routes. Same world, two algorithms, each matched to its need.</p>
+    <h2>A thousand movers, a handful of shared routes</h2>
+    <p>A hunting or homing mite has a <strong>destination</strong> — its recorded tank cell, or
+    its nest — and it navigates with the very same path tables the tanks built. But it does
+    <strong>not</strong> own a route. <em>What is the minimal routing data the swarm depends
+    on?</em> Across 1000 mites the <em>distinct</em> destinations in flight are few — the
+    <strong>four nests</strong> plus the handful of recent sighting cells the gossip is
+    converging on — so we keep a small fixed table of <strong>shared route fields</strong>
+    (<code>N_FIELDS</code>), each a remaining-distance vector keyed by a destination cell, and
+    many mites read the same field. The four nest fields stay resident; a sighting field is
+    folded the first tick it is wanted and freed when no mite wants it. Turning a destination
+    into the input byte is exactly the tanks' path-follow — <strong>one movement model, two
+    input sources</strong> — through the shared <code>agent_turn</code>/<code>agent_move</code>.</p>
+    <p>Every mite belongs to one of <strong>four nests</strong> (by index, <code>i % 4</code>),
+    drawn on the map and used to tint the homing mites. <strong>How big is the table?</strong>
+    Not a guess: instrumenting the distinct active-destination count across idle, roaming, and
+    fleeing tanks puts the high-water mark at <strong>~22</strong>, so <code>N_FIELDS = 64</code>
+    gives roughly 3× headroom — the same prove/measure/detect discipline the Level-1 byte got,
+    applied to a runtime peak. If the live count ever exceeds the table, those mites steer
+    greedily that tick — a safety net, never a crash. The counters above show the live
+    <strong>active / 64</strong> routes and the running <strong>peak</strong>: a thousand movers
+    served by a handful of routes is the chapter's payoff. Beside them the four tanks each
+    compute their own exact route — same world, the cost matched to the need.</p>
 
     <h2>Determinism &amp; the seed</h2>
-    <p>All the randomness — every wander direction and every seek die — comes from a
+    <p>All the randomness — every wander direction and every hunt/home roll — comes from a
     <strong>single integer PRNG</strong> (xorshift32) seeded in the world and advanced as mites
     are processed in index order. So the whole swarm is a <strong>pure function of the seed and
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
-    to re-scatter the swarm, and tune the rest live:</p>
+    to re-scatter the swarm, move the four nests, and tune the rest live:</p>
     <div class="fig">
-      <p class="cap">the editable seed (re-scatters the swarm) and the tunables · sensing range, cap, P(seek), mite speed/turn</p>
+      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), mite speed/turn</p>
       <div id="w-mite-tunables"></div>
     </div>
 
     <h2>What this bought us</h2>
     <p>A thousand autonomous units in a few kilobytes of WebAssembly: a flat pool sized to its
     real domain, a uniform-grid index rebuilt each tick (<code>O(N)</code>, the swarm's
-    acceleration structure), a crowding cap that is one deterministic reservation pass, and
-    shared knowledge that is <strong>one cell and one timestamp copied on contact</strong> — no
-    central state, no per-unit pathfinding. Integer fixed point throughout, no dynamic
-    allocation, the simulation separated from rendering and wasm so the swarm, the gossip, and
-    the cap are all tested natively with no browser or GPU. The render scales with what's
-    <em>visible</em>, not with the population.</p>
+    acceleration structure), a crowding cap that is one deterministic reservation pass, shared
+    knowledge that is <strong>one cell and one timestamp copied on contact</strong>, and a
+    handful of <strong>shared route fields</strong> — sized from a measured peak — standing in
+    for a thousand routes. No central state. Integer fixed point throughout, no dynamic
+    allocation, the simulation separated from rendering and wasm so the swarm, the gossip, the
+    cap, and the route table are all tested natively with no browser or GPU. The render scales
+    with what's <em>visible</em>, not with the population.</p>
 
     <p class="note">Source for this chapter:
     <a href="src/mites.c">mites.c</a> ·

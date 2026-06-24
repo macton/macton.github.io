@@ -37,14 +37,24 @@ void sim_init(World* w) {
   w->mite_turn  = 2048;       /* nimble: ~8 ticks per 90 degrees */
   w->mite_sense = 1;          /* sense a tank within one cell (Chebyshev) */
   w->mite_cap   = MITE_CAP;   /* at most 4 mite centres per cell */
-  w->mite_pseek = 80;         /* 80% seek on adopting a newer peer record */
+  w->mite_phunt = 80;         /* 80% hunt the sighting on adopting a record; 20% carry it home */
   w->mite_seed  = 1337;       /* the editable swarm seed */
+
+  /* the four nests (home cells): one open ring cell in each corner screen */
+  w->nest_cell[0] = wc_pack( 1,  7);
+  w->nest_cell[1] = wc_pack(78,  7);
+  w->nest_cell[2] = wc_pack( 1, 52);
+  w->nest_cell[3] = wc_pack(78, 52);
 
   /* Build the rarely-changing path tables once: Level 1, then Level 2 on top, then
    * each tank's remaining-distance vector (empty until a destination is set). */
   w->l1_maxdist = (uint16_t)l1_build_all(w->l1dist, w->grid, w->l1_screen_max);
   l2_build(w);
   for (uint32_t t = 0; t < N_TANKS; t++) l2_compute_pg(w, t);
+
+  /* fold the resident nest route fields (needs Level 2); reset the field peak */
+  mites_fold_nests(w);
+  w->field_active = 0; w->field_peak = 0;
 
   /* scatter the thousand mites across the open reachable cells from the seed,
    * then build the per-cell index once so it is valid before the first tick. */
@@ -57,17 +67,23 @@ void sim_tick(World* w) {
   mites_build_index(w);
   /* 2. tank input (controls for MANUAL, route lookup for the rest) — unchanged */
   tanks_path(w);
-  /* 3. mite input: records gossip (double-buffered LWW) + crowding cap + wander/seek */
+  /* 3. records: gossip the last-known tank position (double-buffered LWW); each
+   *    mite's mode + destination fall out (sense->hunt, adopt->hunt/home, arrive) */
+  mites_records(w);
+  /* 4. route fields: a handful of shared routes keyed by destination (the nests +
+   *    the active sighting cells) — fold the new, reuse resident, free dropped */
+  mites_update_fields(w);
+  /* 5. mite movement: crowding cap (in-order reservation) + steer along the field */
   mites_step(w);
-  /* 4. turn + auto-steer: tanks at TANK turn rate, mites at the mite turn rate */
+  /* 6. turn + auto-steer: tanks at TANK turn rate, mites at the mite turn rate */
   agent_turn(w->tank_xy, w->tank_ang, w->tank_in, w->tank_hit, N_TANKS, w->turn_rate, w->grid);
   agent_turn(w->mite_xy, w->mite_ang, w->mite_in, w->mite_hit, N_MITES, w->mite_turn, w->grid);
-  /* 5. move + wall collision: tanks pass TANK_R, mites pass the smaller MITE_R */
+  /* 7. move + wall collision: tanks pass TANK_R, mites pass the smaller MITE_R */
   agent_move(w->tank_xy, w->tank_vxy, w->tank_hit, w->tank_ang, w->tank_in,
              N_TANKS, (int32_t)w->move_speed, (int32_t)w->collide_scale, w->grid, TANK_R);
   agent_move(w->mite_xy, w->mite_vxy, w->mite_hit, w->mite_ang, w->mite_in,
              N_MITES, (int32_t)w->mite_speed, (int32_t)w->collide_scale, w->grid, MITE_R);
-  /* 6. advance the frame counter — it is the record timestamp clock */
+  /* 8. advance the frame counter — it is the record timestamp clock */
   w->frame++;
 }
 
@@ -85,6 +101,7 @@ void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy) {
     if (w->l1_screen_max[s] > w->l1_maxdist) w->l1_maxdist = w->l1_screen_max[s];
   l2_build(w);
   for (uint32_t t = 0; t < N_TANKS; t++) l2_compute_pg(w, t);
+  mites_fold_nests(w);   /* routes changed: re-fold the resident nests + drop the stale cache */
 }
 
 void sim_set_dest(World* w, uint32_t tank, uint32_t wcx, uint32_t wcy) {
@@ -114,4 +131,11 @@ void sim_cycle_tank(World* w, uint32_t tank) {
 void sim_set_seed(World* w, uint32_t seed) {           /* re-seed and re-scatter the swarm */
   w->mite_seed = (uint16_t)seed;
   mites_spawn(w);
+}
+
+void sim_set_nest(World* w, uint32_t nest, uint32_t wcx, uint32_t wcy) {  /* move a nest, re-fold its field */
+  if (nest >= NEST_COUNT) return;
+  wcx = (uint32_t)wrap_wcx((int32_t)wcx); wcy = (uint32_t)wrap_wcy((int32_t)wcy);
+  w->nest_cell[nest] = wc_pack((int32_t)wcx, (int32_t)wcy);
+  mites_fold_nest(w, nest);
 }

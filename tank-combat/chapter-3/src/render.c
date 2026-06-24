@@ -17,20 +17,24 @@ static const uint32_t COL_PATH[N_TANKS] = {   /* a lighter variation of the body
 static const uint32_t COL_AUTOPATH = RGBA(120, 235, 140, 255);
 static const uint32_t COL_MANUAL   = RGBA(245, 225, 90, 255);
 
-/* the belief field, drawn right on the mites: idle teal (no record) -> relaying
- * amber (carrying a record while wandering) -> seeking red, fading from hot to
- * cold as the recorded sighting ages. Watch a sighting diffuse out and dissolve. */
-static const uint32_t COL_MITE_IDLE      = RGBA( 96, 150, 138, 255);
-static const uint32_t COL_MITE_RELAY     = RGBA(222, 182,  74, 255);
-static const uint32_t COL_MITE_SEEK_HOT  = RGBA(240,  92,  60, 255);
-static const uint32_t COL_MITE_SEEK_COLD = RGBA(150,  64,  74, 255);
-#define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the belief tint */
+/* a mite's tint shows its role: idle teal (wander, no record) -> hunting red,
+ * fading hot to cold as the sighting ages -> homing in its NEST's colour (the 20%
+ * carrying the record back to one of the four nests). Watch a sighting diffuse out
+ * from a contact, swarm in, and dissolve when it goes stale. */
+static const uint32_t COL_MITE_IDLE     = RGBA( 96, 150, 138, 255);
+static const uint32_t COL_MITE_HUNT_HOT = RGBA(240,  92,  60, 255);
+static const uint32_t COL_MITE_HUNT_COLD= RGBA(150,  64,  74, 255);
+/* the four nests, drawn on the map and used to tint the mites homing to each */
+static const uint32_t COL_NEST[NEST_COUNT] = {
+  RGBA(232, 196, 72, 255), RGBA(120, 196, 232, 255), RGBA(150, 210, 130, 255), RGBA(206, 140, 226, 255) };
+#define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
 
 static uint32_t mite_colour(const World* w, uint32_t m) {
-  if (w->mite_rec_cell[w->rec_buf][m] == REC_EMPTY) return COL_MITE_IDLE;   /* no belief */
-  if (w->mite_mode[m] == MM_SEEK)
-    return (w->frame - w->mite_rec_time[w->rec_buf][m]) < MITE_AGE_HOT ? COL_MITE_SEEK_HOT : COL_MITE_SEEK_COLD;
-  return COL_MITE_RELAY;                                                    /* holds a record, wandering */
+  uint8_t mode = w->mite_mode[m];
+  if (mode == MM_HOME) return COL_NEST[nest_of(m)];                          /* carrying it home */
+  if (mode == MM_HUNT)
+    return (w->frame - w->mite_rec_time[w->rec_buf][m]) < MITE_AGE_HOT ? COL_MITE_HUNT_HOT : COL_MITE_HUNT_COLD;
+  return COL_MITE_IDLE;                                                      /* wander (no belief) */
 }
 
 static uint32_t push(Inst* out, uint32_t k, int32_t cx, int32_t cy, int32_t hx, int32_t hy,
@@ -82,9 +86,18 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
 
   int sox = (int)(screen % SCREENS_X) * GRID_W * SUB, soy = (int)(screen / SCREENS_X) * GRID_H * SUB;
 
+  /* the nests (home cells) on this screen: a large marker per nest, under the
+   * mites, in the nest's colour — the homes the 20% carry sightings back to. */
+  for (uint32_t n = 0; n < NEST_COUNT; n++) {
+    int nwx = wc_x(w->nest_cell[n]), nwy = wc_y(w->nest_cell[n]);
+    if ((uint32_t)((nwy / GRID_H) * SCREENS_X + (nwx / GRID_W)) != screen) continue;
+    int lx = ox + (nwx % GRID_W) * SUB + SUB / 2, ly = oy + (nwy % GRID_H) * SUB + SUB / 2;
+    k = push(out, k, lx, ly, 116, 116, 16384, 0, COL_NEST[n]);
+  }
+
   /* the mites on THIS screen only — build instances for what the camera shows, so
    * the cost scales with the visible swarm, not the 1000-strong pool. Each is one
-   * small quad rotated to its heading, tinted by its belief (mite_colour). */
+   * small quad rotated to its heading, tinted by its role (mite_colour). */
   for (uint32_t m = 0; m < N_MITES; m++) {
     int wcx = wrap_wcx(xy_lo(w->mite_xy[m]) >> SUB_SHIFT), wcy = wrap_wcy(xy_hi(w->mite_xy[m]) >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;

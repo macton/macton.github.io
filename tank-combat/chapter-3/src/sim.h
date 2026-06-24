@@ -83,7 +83,8 @@ struct World {
   uint8_t  mite_in  [N_MITES];   /* input bitfield (IN_*), derived by mites_step */
   uint32_t mite_vxy [N_MITES];   /* packed last-tick applied move (agent_move's sink) */
   uint8_t  mite_hit [N_MITES];   /* last tick's blocked-axis bitmask */
-  uint8_t  mite_mode[N_MITES];   /* MM_WANDER / MM_SEEK */
+  uint8_t  mite_mode[N_MITES];   /* MM_WANDER / MM_HUNT / MM_HOME */
+  uint16_t mite_dest[N_MITES];   /* destination world cell (hunt=record, home=nest), or REC_EMPTY when wandering */
   uint16_t mite_cell[N_MITES];   /* current centre world cell, recomputed each tick from position */
   uint16_t mite_tgt [N_MITES];   /* reserved destination cell (== mite_cell at rest); the cap slot it owns */
 
@@ -100,6 +101,19 @@ struct World {
   uint8_t  mite_cnt [N_WORLD_CELLS];            /* mites whose centre is in each cell (0..MITE_CAP) */
   uint16_t mite_list[N_WORLD_CELLS * MITE_CAP]; /* their indices, MITE_CAP per cell */
 
+  /* the four nests (home cells), spread across the world; editable on the page */
+  uint16_t nest_cell[NEST_COUNT];
+
+  /* the shared route-field table: a remaining-distance vector (pg, keyed by edge
+   * point, exactly the tank's) per active destination cell. Slots 0..NEST_COUNT-1
+   * are the resident nests (re-folded only on a wall edit / nest move); the rest
+   * cache tank-sighting goals, folded when first wanted and freed when no mite
+   * wants them. field_dest is the slot's destination cell, or REC_EMPTY if free. */
+  uint16_t field_dest[N_FIELDS];
+  uint16_t field_pg  [N_FIELDS * N_EDGE_MAX];
+  uint32_t field_active;         /* distinct active destinations this tick (incl. overflow) */
+  uint32_t field_peak;           /* high-water mark of field_active (sizes N_FIELDS) */
+
   uint32_t rng;                  /* xorshift32 state: the whole swarm's randomness, one stream */
 
   uint32_t frame;
@@ -111,7 +125,7 @@ struct World {
   uint16_t mite_turn;            /* mite turn: angle units per tick */
   uint8_t  mite_sense;           /* tank-sensing range, in cells (Chebyshev) */
   uint8_t  mite_cap;             /* crowding cap in effect, 1..MITE_CAP */
-  uint8_t  mite_pseek;           /* P(seek) on adopting a newer peer record, percent (0..100) */
+  uint8_t  mite_phunt;           /* P(hunt) on adopting a newer peer record, percent (0..100); else go home */
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
 };
 
@@ -129,5 +143,6 @@ void sim_toggle_wall(World* w, uint32_t wcx, uint32_t wcy);            /* flip a
 void sim_set_dest(World* w, uint32_t tank, uint32_t wcx, uint32_t wcy);/* set a tank's destination */
 void sim_cycle_tank(World* w, uint32_t tank);                         /* cycle a tank's state; manage `selected` */
 void sim_set_seed(World* w, uint32_t seed);                           /* re-seed + re-scatter the mite swarm */
+void sim_set_nest(World* w, uint32_t nest, uint32_t wcx, uint32_t wcy);/* move a nest, re-fold its resident field */
 
 #endif

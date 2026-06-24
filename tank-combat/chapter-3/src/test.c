@@ -2,7 +2,8 @@
  * render, no GPU. Covers the inherited chapter-1/2 movement + pathing (a
  * regression after the agent_turn/agent_move rename) AND the new swarm: the mite
  * pool & per-cell index, the crowding cap, the last-write-wins gossip, the
- * sense/seek/arrive behaviour, wall safety at MITE_R, and determinism.
+ * sense/hunt/home behaviour, the nests + shared route fields, wall safety at
+ * MITE_R, and determinism.
  *
  * Build & run: ./test.sh */
 
@@ -305,6 +306,7 @@ static uint32_t mite_hash(World* w) {
     h = (h ^ w->mite_xy[m]) * 16777619u;
     h = (h ^ w->mite_ang[m]) * 16777619u;
     h = (h ^ ((uint32_t)w->mite_mode[m] | ((uint32_t)w->mite_tgt[m] << 8))) * 16777619u;
+    h = (h ^ ((uint32_t)w->mite_dest[m] << 3)) * 16777619u;
     h = (h ^ w->mite_rec_cell[b][m]) * 16777619u;
     h = (h ^ w->mite_rec_time[b][m]) * 16777619u;
   }
@@ -349,19 +351,19 @@ static void t_mite_cap(void) {
   check(!breach, "no cell ever exceeds the cap across 4000 natural ticks");
   check(reached, "cells do reach the cap (the bound is binding, not vacuous)");
 
-  /* stress: force the whole swarm to converge on ONE cell every tick */
+  /* stress: force the whole swarm to hunt ONE cell every tick */
   sim_init(&W);
   uint16_t C = (uint16_t)wcell(10, 7);
   int breach2 = 0;
   for (int i = 0; i < 2500; i++) {
     for (uint32_t m = 0; m < N_MITES; m++) {
       W.mite_rec_cell[W.rec_buf][m] = C; W.mite_rec_time[W.rec_buf][m] = 1000000u + (uint32_t)i;
-      W.mite_mode[m] = MM_SEEK;
+      W.mite_mode[m] = MM_HUNT; W.mite_dest[m] = C;
     }
     sim_tick(&W);
     for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (W.mite_cnt[c] > MITE_CAP) breach2 = 1;
   }
-  check(!breach2, "cap holds under forced convergence (many mites targeting one cell)");
+  check(!breach2, "cap holds under forced convergence (many mites hunting one cell)");
 }
 
 /* ---- gossip: last-write-wins, double-buffered ---------------------------- */
@@ -373,11 +375,11 @@ static void t_mite_gossip(void) {
   uint16_t PC = (uint16_t)wcell(30, 30);
   set_rec(&W, (uint32_t)(L - 1), PC, 100);           /* plant at the far end */
 
-  mites_build_index(&W); mites_step(&W);             /* one gossip step (frozen positions) */
+  mites_build_index(&W); mites_records(&W);          /* one gossip step (frozen positions) */
   int holders1 = 0; for (int i = 0; i < L; i++) if (get_rec_cell(&W, (uint32_t)i) == PC) holders1++;
   check(holders1 == 2, "one step spreads exactly one hop (reads the previous tick: order-independent)");
 
-  for (int s = 0; s < L; s++) { mites_build_index(&W); mites_step(&W); }
+  for (int s = 0; s < L; s++) { mites_build_index(&W); mites_records(&W); }
   int all = 1; for (int i = 0; i < L; i++) if (get_rec_cell(&W, (uint32_t)i) != PC) all = 0;
   check(all, "the planted record propagates along the whole in-range chain");
 
@@ -386,7 +388,7 @@ static void t_mite_gossip(void) {
   mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);
   set_rec(&W, 1, (uint16_t)wcell(30, 30), 100);
-  mites_build_index(&W); mites_step(&W);
+  mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 0) == 100, "a newer record overwrites an older one on contact");
   check(get_rec_cell(&W, 1) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 1) == 100, "an older record never overwrites a newer one (timestamps monotone)");
 
@@ -395,30 +397,30 @@ static void t_mite_gossip(void) {
   mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);
   set_rec(&W, 1, REC_EMPTY, 100);
-  mites_build_index(&W); mites_step(&W);
+  mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 100, "a newer EMPTY record propagates (overwrites an older cell)");
 }
 
-/* ---- behaviour: sense / seek / arrive / erase / refresh / 80-20 ---------- */
+/* ---- behaviour: sense / hunt / arrive / erase / refresh / 80-20 / interrupt - */
 static void t_mite_behaviour(void) {
-  printf("behaviour — sense, arrive/erase, refresh, and the 80/20 seek split:\n");
+  printf("behaviour — sense->hunt, arrive/erase, refresh, the 80/20 hunt/home split:\n");
 
-  /* sense a tank within range -> record its cell, stamp now, seek */
+  /* sense a tank within range -> record its cell, stamp now, hunt */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 10, 7);                            /* tank 0 near the lone mite */
   mite_reset(&W, 0, 11, 7);
   W.frame = 500;
-  mites_build_index(&W); mites_step(&W);
+  mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == (uint16_t)wcell(10, 7), "sensing a tank records its cell");
   check(get_rec_time(&W, 0) == 500, "the sighting is stamped this frame");
-  check(W.mite_mode[0] == MM_SEEK, "a self-sensed tank is always sought");
+  check(W.mite_mode[0] == MM_HUNT && W.mite_dest[0] == (uint16_t)wcell(10, 7), "a self-sensed tank is always hunted");
 
   /* reach the recorded cell with NO tank -> erase + wander */
   sim_init(&W); gossip_setup(&W, 1);
   mite_reset(&W, 0, 10, 7);
-  set_rec(&W, 0, (uint16_t)wcell(10, 7), 50); W.mite_mode[0] = MM_SEEK;
+  set_rec(&W, 0, (uint16_t)wcell(10, 7), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(10, 7);
   W.frame = 600;
-  mites_build_index(&W); mites_step(&W);
+  mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 600, "reaching the recorded cell with no tank erases the record (stamped now)");
   check(W.mite_mode[0] == MM_WANDER, "after erasing, the mite reverts to wander");
 
@@ -428,39 +430,49 @@ static void t_mite_behaviour(void) {
   W.mite_sense = 0;
   place_tank(&W, 0, 10, 8);
   mite_reset(&W, 0, 10, 7);
-  set_rec(&W, 0, (uint16_t)wcell(10, 8), 50); W.mite_mode[0] = MM_SEEK;
+  set_rec(&W, 0, (uint16_t)wcell(10, 8), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(10, 8);
   W.frame = 700;
-  mites_build_index(&W); mites_step(&W);
+  mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == (uint16_t)wcell(10, 8) && get_rec_time(&W, 0) == 700, "reaching the recorded cell with a tank there refreshes it (stamped now)");
 
-  /* the 80/20 die: deterministic boundaries (pseek 0 / 100) on adoption */
+  /* the role die: deterministic boundaries (P_HUNT 0 -> home, 100 -> hunt) */
   for (int boundary = 0; boundary <= 1; boundary++) {
-    int pseek = boundary ? 100 : 0;
+    int phunt = boundary ? 100 : 0;
     const int L = 10;
-    sim_init(&W); gossip_setup(&W, L); W.mite_pseek = (uint8_t)pseek;
+    sim_init(&W); gossip_setup(&W, L); W.mite_phunt = (uint8_t)phunt;
     for (int i = 0; i < L; i++) mite_reset(&W, (uint32_t)i, 1, 1 + i);
     set_rec(&W, (uint32_t)(L - 1), (uint16_t)wcell(30, 30), 100);
-    for (int s = 0; s < L + 1; s++) { mites_build_index(&W); mites_step(&W); }
-    int ok = 1; uint8_t want = boundary ? MM_SEEK : MM_WANDER;
+    for (int s = 0; s < L + 1; s++) { mites_build_index(&W); mites_records(&W); }
+    int ok = 1; uint8_t want = boundary ? MM_HUNT : MM_HOME;
     for (int i = 0; i < L - 1; i++) if (W.mite_mode[i] != want) ok = 0;   /* 0..L-2 are adopters */
-    check(ok, boundary ? "P_SEEK=100: every adoption chooses seek" : "P_SEEK=0: every adoption chooses wander");
+    check(ok, boundary ? "P_HUNT=100: every adoption chooses to hunt" : "P_HUNT=0: every adoption goes home");
   }
 
-  /* the 80/20 die: statistical (~80% seek on adoption) */
+  /* the role die: statistical (~80% hunt on adoption) */
   sim_init(&W); gossip_setup(&W, 2);
   mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
-  W.mite_pseek = 80;
+  W.mite_phunt = 80;
   mites_build_index(&W);                               /* positions frozen: build once */
-  int seeks = 0, trials = 12000;
+  int hunts = 0, trials = 12000;
   for (int i = 0; i < trials; i++) {
     set_rec(&W, 0, (uint16_t)wcell(30, 30), 1000000u + (uint32_t)i);   /* A always newest */
     W.mite_rec_cell[W.rec_buf][1] = REC_EMPTY; W.mite_rec_time[W.rec_buf][1] = 0; /* B adopts each step */
-    mites_step(&W);
-    if (W.mite_mode[1] == MM_SEEK) seeks++;
+    mites_records(&W);
+    if (W.mite_mode[1] == MM_HUNT) hunts++;
   }
-  int pct = seeks * 100 / trials;
-  printf("  (seek share over %d forced adoptions: %d%%)\n", trials, pct);
-  check(pct >= 75 && pct <= 85, "the 80/20 seek/wander split matches the RNG stream");
+  int pct = hunts * 100 / trials;
+  printf("  (hunt share over %d forced adoptions: %d%%)\n", trials, pct);
+  check(pct >= 75 && pct <= 85, "the 80/20 hunt/home split matches the RNG stream");
+
+  /* a newer record interrupts a HOMING mite and re-rolls it */
+  sim_init(&W); gossip_setup(&W, 2); W.mite_phunt = 100;   /* re-roll deterministically -> hunt */
+  mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
+  set_rec(&W, 0, (uint16_t)wcell(40, 40), 200);            /* peer 0 has the newer record */
+  set_rec(&W, 1, (uint16_t)wcell(20, 20), 100);            /* mite 1 is homing on an older one */
+  W.mite_mode[1] = MM_HOME; W.mite_dest[1] = W.nest_cell[nest_of(1)];
+  mites_build_index(&W); mites_records(&W);
+  check(W.mite_mode[1] == MM_HUNT && get_rec_cell(&W, 1) == (uint16_t)wcell(40, 40),
+        "a newer record interrupts a homing mite and re-rolls (here -> hunt the new cell)");
 }
 
 /* ---- wall safety at MITE_R ----------------------------------------------- */
@@ -492,6 +504,88 @@ static void t_mite_determinism(void) {
   check(mite_hash(&W) == mite_hash(&W2), "re-seeding to the same seed is reproducible across ticks");
 }
 
+/* ---- nests & shared route fields ----------------------------------------- */
+static uint32_t wc_screen(uint32_t c) { return ((uint32_t)wc_y(c) / GRID_H) * SCREENS_X + ((uint32_t)wc_x(c) / GRID_W); }
+static uint32_t wc_local (uint32_t c) { return ((uint32_t)wc_y(c) % GRID_H) * GRID_W + ((uint32_t)wc_x(c) % GRID_W); }
+
+static void t_mite_nests_fields(void) {
+  printf("nests & shared route fields:\n");
+
+  /* nest_of partitions the swarm into NEST_COUNT equal groups */
+  sim_init(&W);
+  int cnt[NEST_COUNT]; for (int n = 0; n < NEST_COUNT; n++) cnt[n] = 0;
+  int part_ok = 1;
+  for (uint32_t m = 0; m < N_MITES; m++) { if (nest_of(m) != m % NEST_COUNT) part_ok = 0; cnt[nest_of(m)]++; }
+  int even = 1; for (int n = 0; n < NEST_COUNT; n++) if (cnt[n] != (int)(N_MITES / NEST_COUNT)) even = 0;
+  check(part_ok && even, "nest_of(i) = i % 4 partitions the swarm into four equal nests");
+
+  /* a homing mite reaches its nest cell (mite 0's nest is (1,7); start on the open
+   * screen-0 corridor left of the central block) */
+  sim_init(&W); gossip_setup(&W, 1);
+  mite_reset(&W, 0, 5, 7);
+  set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);             /* a record it carries home */
+  W.mite_mode[0] = MM_HOME; W.mite_dest[0] = W.nest_cell[nest_of(0)];
+  uint16_t home = W.nest_cell[nest_of(0)]; int reached_home = 0;
+  for (int i = 0; i < 1200 && !reached_home; i++) { sim_tick(&W); if (W.mite_cell[0] == home) reached_home = 1; }
+  check(reached_home, "a homing mite paths to its nest cell");
+
+  /* a hunting mite reaches its recorded cell (a tank sits there, so it converges) */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 1, 2, 7);                                 /* the sighting target (open corridor) */
+  mite_reset(&W, 0, 5, 7);
+  set_rec(&W, 0, (uint16_t)wcell(2, 7), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(2, 7);
+  int reached_goal = 0;
+  for (int i = 0; i < 1200 && !reached_goal; i++) { sim_tick(&W); if (cell_chebyshev(W.mite_cell[0], wcell(2, 7)) <= 1) reached_goal = 1; }
+  check(reached_goal, "a hunting mite paths to within one cell of its recorded cell");
+
+  /* a mite's shared-field route equals the tank pathing ground truth for the same
+   * destination (the field IS the tank route, keyed by destination not by tank) */
+  sim_init(&W);
+  uint16_t D = (uint16_t)wcell(41, 37);                    /* an open ring cell of screen (2,2) */
+  sim_set_dest(&W, 1, 41, 37);                             /* tank 1's own route to D */
+  static uint16_t fld[N_EDGE_MAX];
+  pg_fold(&W, fld, wc_screen(D), wc_local(D));
+  int cmp = 0, mism = 0;
+  for (int wcx = 1; wcx <= 78; wcx += 3) for (int wcy = 1; wcy <= 58; wcy += 3) {
+    if (cell_is_wall(W.grid, wcx, wcy)) continue;
+    uint32_t c = wcell(wcx, wcy), sc = wc_screen(c), lc = wc_local(c);
+    uint8_t td = route_next_dir(&W, 1, sc, lc);
+    uint8_t fd = route_next_dir_pg(&W, fld, wc_screen(D), wc_local(D), sc, lc);
+    cmp++; if (td != fd) mism++;
+  }
+  check(cmp > 0 && mism == 0, "the shared field's route equals the tank pathing ground truth");
+
+  /* the distinct-destination peak is measured and stays within N_FIELDS */
+  sim_init(&W);
+  int corners[4][2] = {{1,7},{78,7},{1,52},{78,52}};
+  for (int t = 0; t < N_TANKS; t++) sim_set_dest(&W, t, corners[(t+1)%4][0], corners[(t+1)%4][1]);
+  for (int i = 0; i < 6000; i++) {
+    for (int t = 0; t < N_TANKS; t++) if (W.pstatus[t] == PS_ARRIVED || W.pstatus[t] == PS_NOPATH)
+      sim_set_dest(&W, t, corners[(i/97+t)%4][0], corners[(i/97+t)%4][1]);
+    sim_tick(&W);
+  }
+  printf("  (measured distinct-destination peak: %u of N_FIELDS=%d)\n", W.field_peak, N_FIELDS);
+  check(W.field_peak > NEST_COUNT && W.field_peak < N_FIELDS, "the measured peak is binding and within N_FIELDS (sized from it)");
+
+  /* forced overflow: more distinct destinations than N_FIELDS -> greedy fallback,
+   * without breaking the cap or determinism */
+  sim_init(&W); sim_init(&W2);
+  int M = 200, overflowed = 0, breach = 0;
+  for (int i = 0; i < 300; i++) {
+    for (uint32_t m = 0; m < (uint32_t)M; m++) {
+      uint16_t d = (uint16_t)((m * 17u) % N_WORLD_CELLS); uint32_t t = 2000000u + (uint32_t)i;
+      W.mite_rec_cell[W.rec_buf][m]  = d; W.mite_rec_time[W.rec_buf][m]  = t; W.mite_mode[m]  = MM_HUNT;
+      W2.mite_rec_cell[W2.rec_buf][m] = d; W2.mite_rec_time[W2.rec_buf][m] = t; W2.mite_mode[m] = MM_HUNT;
+    }
+    sim_tick(&W); sim_tick(&W2);
+    if (W.field_active > (uint32_t)N_FIELDS) overflowed = 1;
+    for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (W.mite_cnt[c] > MITE_CAP) breach = 1;
+  }
+  check(overflowed, "forced overflow: distinct destinations exceed N_FIELDS");
+  check(!breach, "the cap still holds under field overflow (greedy fallback)");
+  check(mite_hash(&W) == mite_hash(&W2), "the swarm stays deterministic under overflow");
+}
+
 int main(void) {
   t_level1();
   t_byte_fit();
@@ -505,6 +599,7 @@ int main(void) {
   t_mite_cap();
   t_mite_gossip();
   t_mite_behaviour();
+  t_mite_nests_fields();
   t_mite_wall();
   t_mite_determinism();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

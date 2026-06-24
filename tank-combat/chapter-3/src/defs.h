@@ -44,9 +44,11 @@
 /* ---- mites: a thousand small units, an enemy faction (chapter 3) ----------
  * A mite is a quarter-cell driven body on the SAME grid as the tanks: it shares
  * agent_turn/agent_move, colliding with walls at its own smaller radius. There
- * are N_MITES of them in a fixed pool (flat SoA, no allocation). Where a tank is
- * routed by the path tables, a mite is a dumb cheap agent: it wanders, copies a
- * timestamped last-known-tank-position record on contact, and swarms greedily. */
+ * are N_MITES of them in a fixed pool (flat SoA, no allocation). A mite does not
+ * own a route: it wanders until the gossip gives it a destination, then NAVIGATES
+ * with the tank path tables through a SHARED route field (edge_paths.h). Across
+ * 1000 mites the distinct destinations are few (the nests + a handful of recent
+ * sightings), so a handful of shared fields serve the whole swarm. */
 #define N_MITES     1000        /* fixed pool, all alive for the whole chapter */
 #define MITE_R      (SUB / 8)   /* collision half-extent = 32 subcells; diameter ~= a quarter cell */
 
@@ -56,9 +58,25 @@
  * structure, not just a threshold. */
 #define MITE_CAP    4
 
-/* a mite's movement mode (its record + mode derive the input byte) */
-#define MM_WANDER   0           /* drunk walk over the open cell graph */
-#define MM_SEEK     1           /* greedily reduce distance to the recorded cell */
+/* Every mite belongs to one of NEST_COUNT home cells, assigned by index. A nest
+ * is a destination a mite can path home to (the 20% that carry a sighting home). */
+#define NEST_COUNT  4
+static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
+
+/* The shared route-field table: a fixed pool of remaining-distance fields keyed by
+ * destination cell (the NEST_COUNT resident nests + cached tank-sighting goals).
+ * Sized from a MEASURED peak distinct-destination count, not a guess: across
+ * representative scenarios (idle / roaming / fleeing tanks, several simultaneous
+ * sightings) the high-water mark is ~22 (see test.c's peak test), so 64 gives ~3x
+ * headroom. If the live count ever exceeds N_FIELDS those mites fall back to greedy
+ * steering that tick (overflow is a safety net, not a crash). 64 fields * (a
+ * pg[N_EDGE_MAX] u16 vector) ~= 16 KB. */
+#define N_FIELDS    64
+
+/* a mite's movement mode (its record + mode pick the destination, then the field) */
+#define MM_WANDER   0           /* no destination: drunk walk over the open cell graph */
+#define MM_HUNT     1           /* path to the recorded tank cell */
+#define MM_HOME     2           /* path to this mite's nest */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u

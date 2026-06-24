@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (69 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (78 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -49,29 +49,47 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Behaviour
 
-- **Sense → record + seek.** A tank within `mite_sense` cells sets the record to the
-  tank's cell, stamped this frame, and the mite seeks it. A self-sensed tank is always
-  sought. *(tested.)*
-- **Adopt → 80/20.** On adopting a newer peer record, the mite seeks it with probability
-  `mite_pseek` (= 80%), else keeps wandering while still relaying it. *(tested: the
-  boundaries `P_SEEK = 0` and `100` are exact, and the default split matches the RNG
-  stream statistically.)*
-- **Arrive & check.** A seeking mite that reaches within one cell of its recorded cell
+- **Sense → record + hunt.** A tank within `mite_sense` cells sets the record to the
+  tank's cell, stamped this frame, and the mite hunts it. A self-sensed tank is always
+  hunted. *(tested.)*
+- **Adopt → 80/20 hunt/home.** On adopting a newer peer record, the mite rolls the role
+  die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
+  **paths home** to its nest; either way it keeps and relays the record. The roll fires
+  **even while already hunting or homing** — a newer record interrupts and re-rolls.
+  *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
+  RNG stream statistically, and a newer record interrupts a homing mite.)*
+- **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
   refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
-  now) and reverts to wander if not — and the erase, being newest, propagates "it's
-  gone." *(tested: both arrive-with-tank refresh and arrive-without-tank erase.)*
+  now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
+  *(tested: both refresh and erase.)*
+- **Arrive (home).** A homing mite that reaches its nest idles there (a small local
+  wander) until a newer record interrupts it.
 - **An empty record means wander.** A mite with no recorded cell wanders.
+
+## Nests & shared route fields
+
+- **Every mite belongs to one of four nests**, `nest_of(i) = i % 4`, partitioning the
+  swarm into four equal groups. *(tested.)*
+- **A hunting/homing mite navigates the path tables, not a greedy heuristic.** A homing
+  mite reaches its nest cell; a hunting mite reaches within one cell of its recorded
+  cell. *(tested.)*
+- **The route is a shared field keyed by destination, equal to the tank ground truth.**
+  A mite's lookup into the field for a destination returns the same step the tank
+  pathing returns for that destination — the field *is* the tank route, keyed by
+  destination instead of by tank. *(tested.)*
+- **The field table is sized from a measured peak.** Across representative scenarios the
+  distinct active-destination count peaks at ~22, and `N_FIELDS = 64` holds it with
+  headroom; the live count and peak are shown on the page. If the count ever exceeds
+  `N_FIELDS`, the overflow mites steer greedily that tick — **no crash, no cap break**.
+  *(tested: the peak stays within `N_FIELDS`; a forced overflow holds the cap and stays
+  deterministic.)*
 
 ## Movement & collision
 
 - **Mites collide only with walls**, through the shared `agent_move` at radius
   `MITE_R`. A mite's footprint **never overlaps a wall** across a run. *(tested.)*
 - **Mites do not collide with tanks or with each other** — crowding is the cap (a
-  decision-level rule), not physics.
-- **Mites do not use the path tables.** They steer greedily (wander = random open
-  non-full neighbour; seek = the open non-full neighbour nearest the recorded cell),
-  turned into the same input byte the routing tanks produce and fed through the same
-  movement model.
+  decision-level rule), not physics. The cap gates the actual step in every mode.
 
 ## Determinism
 
@@ -84,9 +102,13 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 - **The cap is the structural maximum 4** (it sizes the occupant list). The `mite_cap`
   tunable may tighten it within `[1, MITE_CAP]`; it cannot exceed 4.
-- **Seeking is greedy, not routed.** A mite stuck behind a wall is resolved by the
-  wander/erase rules and the swarm's collective coverage, not by pathfinding — dumb
-  cheap agents, by design.
+- **The route table is bounded by `N_FIELDS`.** Beyond the measured peak it is a
+  deliberate static size; an overflow degrades to greedy steering for that tick, it does
+  not grow the table.
+- **Mites route, tanks route — but the cost differs.** Each tank holds its own route;
+  the mites share a few fields keyed by destination. A mite stuck where no field route
+  exists (overflow, or a sealed goal) falls back to greedy and relies on the
+  wander/erase rules and the swarm's collective coverage.
 - **The viewport is presentation only** (inherited): following, sliding, the picker,
   and which mites are drawn never change the simulation.
 

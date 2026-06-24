@@ -99,13 +99,10 @@ void l2_build(World* w) {
     }
 }
 
-void l2_compute_pg(World* w, uint32_t p) {
-  uint16_t* pg = w->pg + p * N_EDGE_MAX;
+/* ---- destination-keyed pathing (the shared route field) ------------------ */
+void pg_fold(const World* w, uint16_t* pg, uint32_t ds, uint32_t dc) {
   uint32_t P = w->ep_count;
   for (uint32_t y = 0; y < N_EDGE_MAX; y++) pg[y] = (uint16_t)D2_INF;
-  if (!w->phas[p]) return;
-
-  uint32_t ds = w->pdest_screen[p], dc = w->pdest_cell[p];
   const uint8_t* L1d = w->l1dist + ds * TRI;
   uint32_t cnt = w->screen_ep_count[ds];
   for (uint32_t y = 0; y < P; y++) {
@@ -123,18 +120,14 @@ void l2_compute_pg(World* w, uint32_t p) {
   }
 }
 
-uint8_t route_next_dir(const World* w, uint32_t p, uint32_t screen, uint32_t cell) {
-  if (!w->phas[p]) return DIR_NONE;
-  uint32_t ds = w->pdest_screen[p], dc = w->pdest_cell[p];
+uint8_t route_next_dir_pg(const World* w, const uint16_t* pg,
+                          uint32_t ds, uint32_t dc, uint32_t screen, uint32_t cell) {
   const uint8_t* L1s = w->l1dist + screen * TRI;
-
   if (screen == ds) {
     if (cell == dc) return DIR_NONE;                     /* arrived */
     if (l1_reachable(L1s, cell, dc)) return l1_next_dir(L1s, cell, dc);
     /* same screen but walled off from the goal: fall through and leave */
   }
-
-  const uint16_t* pg = w->pg + p * N_EDGE_MAX;
   uint32_t best = INF32, bestX = INF32;
   uint32_t cnt = w->screen_ep_count[screen];
   for (uint32_t a = 0; a < cnt; a++) {                   /* cheapest exit: L1 to it + cross + remaining */
@@ -149,10 +142,43 @@ uint8_t route_next_dir(const World* w, uint32_t p, uint32_t screen, uint32_t cel
     if (cand < best) { best = cand; bestX = X; }
   }
   if (bestX == INF32) return DIR_NONE;                   /* no route */
-
   uint32_t xc = w->ep_cell[bestX];
   if (cell == xc) return w->ep_cross[bestX];             /* at the exit: step across the border */
   return l1_next_dir(L1s, cell, xc);
+}
+
+uint32_t route_remaining_pg(const World* w, const uint16_t* pg,
+                            uint32_t ds, uint32_t dc, uint32_t screen, uint32_t cell) {
+  const uint8_t* L1s = w->l1dist + screen * TRI;
+  if (screen == ds) {
+    if (cell == dc) return 0;
+    if (l1_reachable(L1s, cell, dc)) return l1_get(L1s, cell, dc);
+  }
+  uint32_t best = INF32, cnt = w->screen_ep_count[screen];
+  for (uint32_t a = 0; a < cnt; a++) {
+    uint32_t X = w->screen_ep[screen * EP_PER_SCREEN_MAX + a];
+    uint32_t xc = w->ep_cell[X];
+    if (!l1_reachable(L1s, cell, xc)) continue;
+    uint8_t pj = w->ep_partner[X];
+    if (pj == 0xFF) continue;
+    uint32_t g = pg[pj];
+    if (g == (uint16_t)D2_INF) continue;
+    uint32_t cand = (uint32_t)l1_get(L1s, cell, xc) + 1u + g;
+    if (cand < best) best = cand;
+  }
+  return best;                                           /* INF32 if no route */
+}
+
+/* tank wrappers: fold/read the tank's own destination through the shared core */
+void l2_compute_pg(World* w, uint32_t p) {
+  uint16_t* pg = w->pg + p * N_EDGE_MAX;
+  if (!w->phas[p]) { for (uint32_t y = 0; y < N_EDGE_MAX; y++) pg[y] = (uint16_t)D2_INF; return; }
+  pg_fold(w, pg, w->pdest_screen[p], w->pdest_cell[p]);
+}
+
+uint8_t route_next_dir(const World* w, uint32_t p, uint32_t screen, uint32_t cell) {
+  if (!w->phas[p]) return DIR_NONE;
+  return route_next_dir_pg(w, w->pg + p * N_EDGE_MAX, w->pdest_screen[p], w->pdest_cell[p], screen, cell);
 }
 
 uint32_t path_trace(const World* w, uint32_t p, uint16_t* out, uint32_t max) {

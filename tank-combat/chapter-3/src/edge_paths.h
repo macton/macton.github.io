@@ -44,6 +44,28 @@ void l2_build(struct World* w);
  * destination. Called when the destination (or grid) changes, not per tick. */
 void l2_compute_pg(struct World* w, uint32_t p);
 
+/* ---- destination-keyed pathing (shared by the tanks and the mite fields) ----
+ * The same Level-1/2 composition, parameterised by an arbitrary destination
+ * (screen `ds`, local cell `dc`) and a provided remaining-distance vector `pg`.
+ * The tank entry points above are thin wrappers that fold/read the tank's own
+ * destination; the mites fold one shared `pg` per distinct destination cell and
+ * many mites read it (a thousand movers, a handful of routes). */
+
+/* Fold a remaining-distance vector for destination (ds,dc) into pg[N_EDGE_MAX].
+ * pg[y] = shortest remaining distance from edge point y to the destination. */
+void pg_fold(const struct World* w, uint16_t* pg, uint32_t ds, uint32_t dc);
+
+/* Next cardinal step from local `cell` of `screen` toward destination (ds,dc),
+ * reading `pg`; DIR_NONE if arrived or no route. */
+uint8_t route_next_dir_pg(const struct World* w, const uint16_t* pg,
+                          uint32_t ds, uint32_t dc, uint32_t screen, uint32_t cell);
+
+/* Remaining distance from local `cell` of `screen` to destination (ds,dc) via
+ * `pg`; 0 at the destination, 0xFFFFFFFF if unreachable. Ranks neighbour cells
+ * when the crowding cap blocks the preferred step. */
+uint32_t route_remaining_pg(const struct World* w, const uint16_t* pg,
+                            uint32_t ds, uint32_t dc, uint32_t screen, uint32_t cell);
+
 /* The next cardinal step for pathed tank p standing at local `cell` of `screen`
  * toward its destination: DIR_N/E/S/W, or DIR_NONE if arrived or no route.
  * Reads only the precomputed tables (l1dist, dist2, pg) — no search. */

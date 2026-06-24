@@ -60,13 +60,14 @@
           <span class="ch-no">Chapter 3</span>
           <div class="ch-title">The Swarm</div>
           <p class="ch-desc">A thousand mites — an enemy faction — that wander,
-          gossip the last place they saw a tank, and swarm toward it. The lesson
-          is scale: a fixed pool with no allocation, a uniform-grid index rebuilt
-          every tick as the acceleration structure, a crowding cap enforced by a
-          deterministic reservation, a single integer PRNG, and shared knowledge
-          that is just one cell and one timestamp copied on contact. The pool, the
-          per-cell occupancy, and the diffusing belief field are all live on the
-          page.</p>
+          gossip the last place they saw a tank, then 80% hunt it while 20% carry
+          it home to a nest. The lesson is scale: a fixed pool with no allocation,
+          a uniform-grid index rebuilt every tick, a crowding cap enforced by a
+          deterministic reservation, a single integer PRNG, shared knowledge that
+          is one cell and one timestamp copied on contact, and a handful of shared
+          route fields standing in for a thousand routes. The per-cell occupancy,
+          the diffusing belief field, the four nests, and the live route count are
+          all on the page.</p>
         </a>
       </li>
     </ol>

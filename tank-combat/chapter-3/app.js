@@ -38,7 +38,8 @@ let touchBits = 0;
 
 const STATE = ["unselected", "auto-path", "manual"];
 const STATUS = ["idle", "routing", "arrived", "no path"];
-const MODE = ["wander", "seek"];
+const MODE = ["wander", "hunt", "home"];
+const NESTC = [[232,196,72],[120,196,232],[150,210,130],[206,140,226]];  // nest colours (match render.c)
 const sdir = (a, b, n) => (a === b ? 0 : ((b - a + n) % n === 1 ? 1 : -1));  // toroidal one-step
 
 async function main() {
@@ -58,7 +59,7 @@ async function main() {
     SX: wasm.screens_x(), SY: wasm.screens_y(), NS: wasm.n_screens(), BW: wasm.big_w(), BH: wasm.big_h(),
     SUB: wasm.subcell(), STRIDE: wasm.inst_stride(), MAX_INST: wasm.inst_max(),
     NM: wasm.n_mites(), MR: wasm.mite_r(), MCAP: wasm.mite_cap_max(), NWC: wasm.n_world_cells(),
-    MEMPTY: wasm.mite_empty(),
+    MEMPTY: wasm.mite_empty(), NEST: wasm.nest_count(), NF: wasm.n_fields(),
   };
   const mem = () => wasm.memory.buffer;
   const view = {
@@ -74,6 +75,8 @@ async function main() {
     mxy:   () => new Int16Array(mem(), wasm.mite_xy_ptr(), C.NM * 2),
     mang:  () => new Uint16Array(mem(), wasm.mite_angle_ptr(), C.NM),
     mmode: () => new Uint8Array(mem(), wasm.mite_mode_ptr(), C.NM),
+    mdest: () => new Uint16Array(mem(), wasm.mite_dest_ptr(), C.NM),
+    nest:  () => new Uint16Array(mem(), wasm.nest_cell_ptr(), C.NEST),
     mcnt:  () => new Uint8Array(mem(), wasm.mite_cnt_ptr(), C.NWC),
     mrecCell: () => new Uint16Array(mem(), wasm.mite_rec_cell_ptr(), C.NM),  // CURRENT buffer (post-tick)
     mrecTime: () => new Uint32Array(mem(), wasm.mite_rec_time_ptr(), C.NM),
@@ -224,13 +227,13 @@ function buildTouchPad(map) {
 }
 
 // a minimap of the 4x4 world: each screen is a tiny canvas showing the walls, the
-// tanks, and the whole swarm as downsampled dots (seeking mites tinted warm); click
-// a screen to view it. Shows the population at the world scale while the viewport
-// stays on one screen.
+// nests, the tanks, and the whole swarm as downsampled dots (hunting = red, homing
+// = the nest's colour, wandering = teal); click a screen to view it. Shows the
+// population at the world scale while the viewport stays on one screen.
 function makeMiniMap(container, onPick, R) {
   const { wasm, view, C } = R;
   const BODY = [[242,158,41],[77,179,230],[120,205,120],[196,140,235]];
-  const BG = [22,24,30], WALL = [70,75,90], MITE = [96,150,138], MITE_SEEK = [224,110,80];
+  const BG = [22,24,30], WALL = [70,75,90], MITE = [96,150,138], MITE_HUNT = [224,110,80], NESTB = [255,245,210];
   const canvases = [], ctxs = [], imgs = [];
   for (let i = 0; i < C.NS; i++) {
     const cv = document.createElement("canvas"); cv.width = C.GW; cv.height = C.GH; cv.className = "mmcell";
@@ -240,12 +243,14 @@ function makeMiniMap(container, onPick, R) {
   const put = (img, lcx, lcy, c) => { const o = (lcy * C.GW + lcx) * 4, d = img.data; d[o] = c[0]; d[o+1] = c[1]; d[o+2] = c[2]; d[o+3] = 255; };
   const scr = (wcx, wcy) => ((wcy / C.GH) | 0) * C.SX + ((wcx / C.GW) | 0);
   return { update(camIdx) {
-    const grid = view.grid(), xy = view.xy(), mxy = view.mxy(), mmode = view.mmode();
+    const grid = view.grid(), xy = view.xy(), mxy = view.mxy(), mmode = view.mmode(), nest = view.nest();
     for (let s = 0; s < C.NS; s++) { const img = imgs[s];
       for (let cy = 0; cy < C.GH; cy++) { const w = grid[s * C.GH + cy];
         for (let cx = 0; cx < C.GW; cx++) put(img, cx, cy, ((w >> cx) & 1) ? WALL : BG); } }
     for (let m = 0; m < C.NM; m++) { const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8;
-      put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, mmode[m] === 1 ? MITE_SEEK : MITE); }
+      const md = mmode[m], c = md === 1 ? MITE_HUNT : md === 2 ? NESTC[m % C.NEST] : MITE;
+      put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, c); }
+    for (let n = 0; n < C.NEST; n++) { const wcx = nest[n] % C.BW, wcy = (nest[n] / C.BW) | 0; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, NESTB); }
     for (let t = 0; t < C.NT; t++) { const wcx = xy[2*t] >> 8, wcy = xy[2*t+1] >> 8; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, BODY[t]); }
     for (let s = 0; s < C.NS; s++) { ctxs[s].putImageData(imgs[s], 0, 0); canvases[s].classList.toggle("cam", s === camIdx); }
   } };
@@ -268,12 +273,13 @@ function mountWidgets(wasm, view, C) {
   const sc = at("w-stats");
   if (sc) { sc.classList.add("stats");
     updaters.push(({ fps, dt, instCount, cam }) => {
-      const mode = view.mmode(), rc = view.mrecCell();
-      let seek = 0, recs = 0; for (let m = 0; m < C.NM; m++) { if (mode[m] === 1) seek++; if (rc[m] !== C.MEMPTY) recs++; }
+      const mode = view.mmode();
+      let hunt = 0, home = 0; for (let m = 0; m < C.NM; m++) { if (mode[m] === 1) hunt++; else if (mode[m] === 2) home++; }
       sc.innerHTML =
         `frame <b>${wasm.frame()}</b> · ${(dt * 1000).toFixed(1)} ms · ${fps.toFixed(0)} fps · viewport <b>${cam.sx},${cam.sy}</b><br>` +
-        `world <b>${C.BW}×${C.BH}</b> · mites <b>${C.NM}</b> · seeking <b>${seek}</b> · with record <b>${recs}</b><br>` +
-        `cap <b>${wasm.mite_cap()}</b>/cell · drawn instances <b>${instCount}</b> · mem <b>${(wasm.memory.buffer.byteLength / 1048576).toFixed(1)}</b> MiB`;
+        `mites <b>${C.NM}</b> · hunting <b>${hunt}</b> · homing <b>${home}</b> · wandering <b>${C.NM - hunt - home}</b><br>` +
+        `shared routes <b>${wasm.field_active()}</b>/${C.NF} active · peak <b>${wasm.field_peak()}</b> · cap <b>${wasm.mite_cap()}</b>/cell<br>` +
+        `drawn instances <b>${instCount}</b> · mem <b>${(wasm.memory.buffer.byteLength / 1048576).toFixed(1)}</b> MiB`;
     });
   }
 
@@ -383,21 +389,32 @@ function mountWidgets(wasm, view, C) {
     const seed  = numField("seed (re-scatters swarm)", 0, 65535, 1, wasm.mite_seed());
     const sense = numField("sensing range (cells)", 0, 6, 1, wasm.mite_sense());
     const cap   = numField(`crowding cap (1..${C.MCAP})`, 1, C.MCAP, 1, wasm.mite_cap());
-    const pseek = numField("P(seek) on adopt (%)", 0, 100, 5, wasm.mite_pseek());
+    const phunt = numField("P(hunt) on adopt (%)", 0, 100, 5, wasm.mite_phunt());
     const speed = numField("mite speed (sub/tick)", 0, 64, 1, wasm.mite_speed());
     const turn  = numField("mite turn (ang/tick)", 0, 8000, 64, wasm.mite_turn());
     const size  = numField("mite radius (subcells)", C.MR, C.MR, 1, C.MR); size.input.disabled = true;
     seed.input.onchange  = () => wasm.set_seed(parseInt(seed.input.value) | 0);
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
     cap.input.onchange   = () => wasm.set_mite_cap(parseInt(cap.input.value) | 0);
-    pseek.input.onchange = () => wasm.set_mite_pseek(parseInt(pseek.input.value) | 0);
+    phunt.input.onchange = () => wasm.set_mite_phunt(parseInt(phunt.input.value) | 0);
     speed.input.onchange = () => wasm.set_mite_speed(parseInt(speed.input.value) | 0);
     turn.input.onchange  = () => wasm.set_mite_turn(parseInt(turn.input.value) | 0);
-    tc.append(seed.wrap, sense.wrap, cap.wrap, pseek.wrap, speed.wrap, turn.wrap, size.wrap);
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, size.wrap);
+
+    // the four nest positions (re-fold a nest's field on change)
+    const nests = [];
+    for (let n = 0; n < C.NEST; n++) {
+      const x = numField(`nest ${n} x`, 0, C.BW - 1, 1, 0), y = numField(`nest ${n} y`, 0, C.BH - 1, 1, 0);
+      const set = () => wasm.set_nest(n, parseInt(x.input.value) | 0, parseInt(y.input.value) | 0);
+      x.input.onchange = set; y.input.onchange = set;
+      tc.append(x.wrap, y.wrap); nests.push({ x, y });
+    }
     const sync = (f, get) => { if (focused() !== f.input) f.input.value = get(); };
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
-      sync(cap, () => wasm.mite_cap()); sync(pseek, () => wasm.mite_pseek());
-      sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn()); });
+      sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
+      sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
+      const nc = view.nest();
+      for (let n = 0; n < C.NEST; n++) { sync(nests[n].x, () => nc[n] % C.BW); sync(nests[n].y, () => (nc[n] / C.BW) | 0); } });
   }
   return api;
 }

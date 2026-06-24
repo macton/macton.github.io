@@ -54,13 +54,16 @@ EXPORT(set_slide) void set_slide(uint32_t to_sx, uint32_t to_sy, int32_t dx, int
 }
 EXPORT(clear_slide) void clear_slide(void) { g_slide_active = 0; rebuild(); }
 
-/* ---- the swarm: re-seed mutator, live pointers, scalars, tunables --------- */
+/* ---- the swarm: re-seed / nest mutators, live pointers, scalars, tunables -- */
 EXPORT(set_seed) void set_seed(uint32_t seed) { sim_set_seed(&g_world, seed); rebuild(); }
+EXPORT(set_nest) void set_nest(uint32_t n, uint32_t wcx, uint32_t wcy) { sim_set_nest(&g_world, n, wcx, wcy); rebuild(); }
 
 EXPORT(mite_xy_ptr)   uint32_t* mite_xy_ptr(void)   { return g_world.mite_xy; }
 EXPORT(mite_angle_ptr) uint16_t* mite_angle_ptr(void) { return g_world.mite_ang; }
 EXPORT(mite_mode_ptr) uint8_t*  mite_mode_ptr(void) { return g_world.mite_mode; }
+EXPORT(mite_dest_ptr) uint16_t* mite_dest_ptr(void) { return g_world.mite_dest; }   /* per-mite destination cell */
 EXPORT(mite_cnt_ptr)  uint8_t*  mite_cnt_ptr(void)  { return g_world.mite_cnt; }   /* per-cell occupancy (heatmap) */
+EXPORT(nest_cell_ptr) uint16_t* nest_cell_ptr(void) { return g_world.nest_cell; }  /* the NEST_COUNT home cells */
 /* the record arrays are double-buffered; expose the CURRENT (post-tick) buffer so
  * the belief-field widget reads each mite's live last-known cell + timestamp. */
 EXPORT(mite_rec_cell_ptr) uint16_t* mite_rec_cell_ptr(void) { return g_world.mite_rec_cell[g_world.rec_buf]; }
@@ -71,6 +74,10 @@ EXPORT(mite_r)        uint32_t mite_r(void)        { return MITE_R; }
 EXPORT(mite_cap_max)  uint32_t mite_cap_max(void)  { return MITE_CAP; }
 EXPORT(n_world_cells) uint32_t n_world_cells(void) { return N_WORLD_CELLS; }
 EXPORT(mite_empty)    uint32_t mite_empty(void)    { return REC_EMPTY; }
+EXPORT(nest_count)    uint32_t nest_count(void)    { return NEST_COUNT; }
+EXPORT(n_fields)      uint32_t n_fields(void)      { return N_FIELDS; }
+EXPORT(field_active)  uint32_t field_active(void)  { return g_world.field_active; }  /* distinct active destinations */
+EXPORT(field_peak)    uint32_t field_peak(void)    { return g_world.field_peak; }    /* high-water mark */
 
 EXPORT(mite_speed)     uint32_t mite_speed(void)       { return g_world.mite_speed; }
 EXPORT(set_mite_speed) void     set_mite_speed(uint32_t v) { g_world.mite_speed = (uint16_t)v; }
@@ -80,8 +87,8 @@ EXPORT(mite_sense)     uint32_t mite_sense(void)       { return g_world.mite_sen
 EXPORT(set_mite_sense) void     set_mite_sense(uint32_t v) { g_world.mite_sense = (uint8_t)(v > BIG_W ? BIG_W : v); }
 EXPORT(mite_cap)       uint32_t mite_cap(void)         { return g_world.mite_cap; }
 EXPORT(set_mite_cap)   void     set_mite_cap(uint32_t v)   { g_world.mite_cap = (uint8_t)(v < 1 ? 1 : (v > MITE_CAP ? MITE_CAP : v)); }
-EXPORT(mite_pseek)     uint32_t mite_pseek(void)       { return g_world.mite_pseek; }
-EXPORT(set_mite_pseek) void     set_mite_pseek(uint32_t v) { g_world.mite_pseek = (uint8_t)(v > 100 ? 100 : v); }
+EXPORT(mite_phunt)     uint32_t mite_phunt(void)       { return g_world.mite_phunt; }
+EXPORT(set_mite_phunt) void     set_mite_phunt(uint32_t v) { g_world.mite_phunt = (uint8_t)(v > 100 ? 100 : v); }
 EXPORT(mite_seed)      uint32_t mite_seed(void)        { return g_world.mite_seed; }
 
 /* pointers — only the World fields the page reads (the chapter-2 path tables stay
