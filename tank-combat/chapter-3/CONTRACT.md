@@ -47,6 +47,12 @@ the inherited tests still pass and the baked escape table is byte-identical.
   a mite jammed against a tank re-senses it next tick and resumes — the front holds while
   dead-ends clear. *(tested: a boxed-in hunter keeps hunting until the patience runs out,
   then reverts to wander.)*
+- **Outward wander bias.** A wandering mite steps *away from the nearest nest* `wander_bias`%
+  of the time (live tunable, default 60) rather than uniformly at random, so freed/revived
+  mites drift off the nest instead of re-clumping. The away step is chosen by direction (dot
+  with the nest→mite vector), not max distance (which ties and would bias north). A gentle
+  polish on the jam detector, not a replacement. *(tested: a biased wanderer steps strictly
+  further from its nest, in the away direction.)*
 
 ## The shared record (last-write-wins)
 

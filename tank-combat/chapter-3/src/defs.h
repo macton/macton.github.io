@@ -109,6 +109,11 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define MITE_STUCK_MAX 16
 #endif
 
+/* A wandering mite usually steps at random, but `wander_bias` percent of the time (a World
+ * tunable, edited on the page) it instead takes the step pointing away from the NEAREST nest
+ * — a gentle outward drift, so mites that just revived or gave up a jam sift off the nest
+ * rather than re-clumping on it. (The value lives in World, not here, so it is tunable live.) */
+
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
  * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction

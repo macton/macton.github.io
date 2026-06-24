@@ -401,6 +401,7 @@ function mountWidgets(wasm, view, C) {
     const sense = numField("sensing range (cells)", 0, 6, 1, wasm.mite_sense());
     const cap   = numField(`crowding cap (1..${C.MCAP})`, 1, C.MCAP, 1, wasm.mite_cap());
     const phunt = numField("P(hunt) on adopt (%)", 0, 100, 5, wasm.mite_phunt());
+    const wbias = numField("wander outward bias (%)", 0, 100, 5, wasm.wander_bias());
     const speed = numField("mite speed (sub/tick)", 0, 64, 1, wasm.mite_speed());
     const turn  = numField("mite turn (ang/tick)", 0, 8000, 64, wasm.mite_turn());
     // combat: the page edits human units (shots/sec, seconds); the sim stores ticks
@@ -417,13 +418,14 @@ function mountWidgets(wasm, view, C) {
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
     cap.input.onchange   = () => wasm.set_mite_cap(parseInt(cap.input.value) | 0);
     phunt.input.onchange = () => wasm.set_mite_phunt(parseInt(phunt.input.value) | 0);
+    wbias.input.onchange = () => wasm.set_wander_bias(parseInt(wbias.input.value) | 0);
     speed.input.onchange = () => wasm.set_mite_speed(parseInt(speed.input.value) | 0);
     turn.input.onchange  = () => wasm.set_mite_turn(parseInt(turn.input.value) | 0);
     fire.input.onchange    = () => { const r = parseFloat(fire.input.value) || 0; wasm.set_fire_period(r > 0 ? Math.max(1, Math.round(60 / r)) : 0); };
     respawn.input.onchange = () => { const s = parseFloat(respawn.input.value) || 0; wasm.set_mite_respawn(Math.max(1, Math.round(s * 60))); };
     nttl.input.onchange    = () => { const s = parseFloat(nttl.input.value) || 0; wasm.set_nest_ttl(Math.max(0, Math.round(s * 60))); };
     trate.input.onchange   = () => wasm.set_turret_rate(parseInt(trate.input.value) | 0);
-    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, nttl.wrap, trate.wrap, size.wrap);
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, wbias.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, nttl.wrap, trate.wrap, size.wrap);
 
     // the four nest positions (re-fold a nest's field on change)
     const nests = [];
@@ -435,7 +437,7 @@ function mountWidgets(wasm, view, C) {
     }
     const sync = (f, get) => { if (focused() !== f.input) f.input.value = get(); };
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
-      sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
+      sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt()); sync(wbias, () => wasm.wander_bias());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
       sync(fire, rateOf); sync(respawn, respOf); sync(nttl, ttlOf); sync(trate, () => wasm.turret_rate());
       const nc = view.nest();

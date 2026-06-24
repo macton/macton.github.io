@@ -525,6 +525,19 @@ static void t_mite_behaviour(void) {
   }
   check(before == 1, "a jammed hunter keeps hunting until the patience runs out");
   check(gaveup, "a hunter jammed for MITE_STUCK_MAX ticks gives up and wanders (knots dissolve)");
+
+  /* wander outward bias: a wanderer biased away from the nest steps AWAY from it, not into the
+   * north tie-break trap (max-distance ties between 3 neighbours used to always pick north) */
+  sim_init(&W); gossip_setup(&W, 1); W.wander_bias = 100;
+  { uint16_t nest = W.nest_cell[0]; int nx = wc_x(nest), ny = wc_y(nest);
+    uint16_t here = (uint16_t)wcell(nx + 3, ny);            /* three cells EAST of nest 0 (open ring row) */
+    mite_reset(&W, 0, nx + 3, ny);
+    W.mite_mode[0] = MM_WANDER; W.mite_dest[0] = REC_EMPTY; W.mite_tgt[0] = here;
+    mites_build_index(&W); mites_step(&W);
+    check(cell_chebyshev(W.mite_tgt[0], nest) > cell_chebyshev(here, nest),
+          "a wander-biased mite steps further from its nest (outward), not toward it");
+    check(W.mite_tgt[0] == (uint16_t)wcell(nx + 4, ny),
+          "the outward step is the away direction (east here), not the north tie-break"); }
 }
 
 /* ---- wall safety at MITE_R ----------------------------------------------- */

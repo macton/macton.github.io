@@ -296,8 +296,24 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   uint8_t mode = w->mite_mode[m];
   uint16_t dest = w->mite_dest[m];
   int bi = 0;
-  if (mode == MM_WANDER || dest == REC_EMPTY || dest == mc) {
-    bi = (int)(xs32(&w->rng) % (uint32_t)nv);                        /* wander / local idle at the dest */
+  if (mode == MM_WANDER) {
+    uint32_t r = xs32(&w->rng);
+    if (nv > 1 && (r % 100u) < (uint32_t)w->wander_bias) {
+      /* slight outward bias: step in the direction that points away from the NEAREST nest, so
+       * a mite that just revived or gave up a jam drifts off the nest instead of re-clumping.
+       * Use the outward VECTOR (nest -> me) and pick the cardinal best aligned with it — max
+       * toroidal distance ties (N/E/S all equal one cell out) and would just bias north. */
+      uint16_t nb = w->nest_cell[0]; int nd = cell_manhattan(mc, nb);
+      for (uint32_t k = 1; k < NEST_COUNT; k++) { int d = cell_manhattan(mc, w->nest_cell[k]); if (d < nd) { nd = d; nb = w->nest_cell[k]; } }
+      int ox = wc_x(mc) - wc_x(nb); if (ox > BIG_W / 2) ox -= BIG_W; if (ox < -BIG_W / 2) ox += BIG_W;
+      int oy = wc_y(mc) - wc_y(nb); if (oy > BIG_H / 2) oy -= BIG_H; if (oy < -BIG_H / 2) oy += BIG_H;
+      int best = -0x7fffffff; bi = 0;
+      for (int i = 0; i < nv; i++) { int sc = CARD_DCX[vd[i]] * ox + CARD_DCY[vd[i]] * oy; if (sc > best) { best = sc; bi = i; } }
+    } else {
+      bi = (int)((r >> 8) % (uint32_t)nv);                          /* otherwise a uniform random step */
+    }
+  } else if (dest == REC_EMPTY || dest == mc) {
+    bi = (int)(xs32(&w->rng) % (uint32_t)nv);                        /* hunter/homer idling at/without a dest */
   } else {
     int slot = find_field(w, dest);
     if (slot >= 0) {                                                 /* navigate the shared route field */

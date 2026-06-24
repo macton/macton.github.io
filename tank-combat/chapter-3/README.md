@@ -93,6 +93,17 @@ Without it the swarm collapses into permanent green blobs around the nests (meas
 hunters frozen at the nests and climbing; with it, that knot churns out and the wanderer
 population recovers from ~14 to ~180).
 
+**Outward wander bias.** To keep the churned-out wanderers from immediately re-clumping on
+the nest, a wandering mite takes the step *away from the nearest nest* `wander_bias`% of the
+time (a live tunable, default 60) instead of a uniform random step — a gentle outward drift.
+Two subtleties learned by simulation: (1) use the outward *direction* (a dot product with
+the nest→mite vector), **not** "max toroidal distance", which ties three-ways one cell out
+and silently biased everything *north*; (2) the bias has to be more than a token —
+below ~50% a freed mite takes one step out, re-adopts a hunt from the dense neighbours, and
+drifts *back*; it needs ~60% to reach escape velocity. Even so it is a polish on top of the
+jam detector (which does the heavy lifting): the nest cluster is mostly transiting hunters,
+which the bias doesn't touch.
+
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
 One **record** per mite, a **last-write-wins register** packed into a `uint16` cell +

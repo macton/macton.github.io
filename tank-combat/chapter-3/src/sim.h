@@ -150,6 +150,7 @@ struct World {
   uint8_t  mite_sense;           /* tank-sensing range, in cells (Chebyshev) */
   uint8_t  mite_cap;             /* crowding cap in effect, 1..MITE_CAP */
   uint8_t  mite_phunt;           /* P(hunt) on adopting a newer peer record, percent (0..100); else go home */
+  uint8_t  wander_bias;          /* P(step away from nearest nest) while wandering, percent (0..100); 0 = pure random */
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
   uint16_t fire_period;          /* tank shot interval in ticks (0 = firing off); 30 = 2/sec at 60 ticks/sec */
   uint16_t mite_respawn;         /* ticks a killed mite stays dead before reviving at its nest (300 = 5 s) */
