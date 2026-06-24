@@ -64,20 +64,22 @@ static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
   uint32_t buf = w->rec_buf;
   for (int oy = -rad; oy <= rad; oy++) for (int ox = -rad; ox <= rad; ox++) {
     uint32_t c = (uint32_t)wc_pack(wrap_wcx(dcx + ox), wrap_wcy(dcy + oy));
-    uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
-    for (uint8_t j = 0; j < k; j++) {
-      uint32_t p = w->mite_list[c * MITE_CAP + j];
-      if (p == m || w->mite_resp[p]) continue;            /* skip self + the already-dead */
+    for (uint8_t s = 0; s < MITE_CAP; s++) {
+      uint32_t p = w->mite_list[c * MITE_CAP + s];
+      if (p == REC_EMPTY || p == m || w->mite_resp[p]) continue;   /* empty / self / already-dead */
       w->mite_rec_cell[buf][p] = tcell; w->mite_rec_time[buf][p] = frame;
       w->mite_mode[p] = MM_HUNT; w->mite_dest[p] = tcell;
     }
   }
 }
 
-/* Fire the laser: a ray from the tank cell along the turret heading, marched cell by
- * cell (the LOS Bresenham, extended), destroying every live mite in each cell it crosses
- * until it meets a wall. Returns the last open cell (the beam's end, for drawing). */
-static uint16_t laser_sweep(World* w, int tcx, int tcy, int co, int si, uint16_t tcell, uint32_t frame) {
+/* Fire the laser: a thin ray from the tank along the turret heading. March it cell by
+ * cell (the LOS Bresenham, extended) until a wall; in each cell it crosses, destroy the
+ * live mites whose ACTUAL position lies within BEAM_HW of the beam line (perpendicular
+ * distance). Because mites now sit in sub-segments a quarter-cell off centre, a thin beam
+ * misses the ones off the line — they dodge. Returns the last open cell (the beam end). */
+static uint16_t laser_sweep(World* w, int tx, int ty, int tcx, int tcy, int co, int si,
+                            uint16_t tcell, uint32_t frame) {
   int bx = tcx + ((co * LASER_MAX) >> TRIG_SHIFT);        /* a far point along the beam */
   int by = tcy + ((si * LASER_MAX) >> TRIG_SHIFT);
   int dx = bx - tcx, dy = by - tcy;
@@ -92,11 +94,16 @@ static uint16_t laser_sweep(World* w, int tcx, int tcy, int co, int si, uint16_t
     if (cell_is_wall(w->grid, wx, wy)) break;              /* the beam stops at the wall */
     endc = (uint16_t)wc_pack(wx, wy);
     uint32_t c = (uint32_t)endc;
-    uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
-    for (uint8_t j = 0; j < k; j++) {
-      uint32_t p = w->mite_list[c * MITE_CAP + j];
-      if (w->mite_resp[p]) continue;                       /* already destroyed (this or another beam) */
-      kill_mite(w, p, tcell, frame);
+    if (w->mite_cnt[c]) {
+      for (uint8_t s = 0; s < MITE_CAP; s++) {
+        uint32_t p = w->mite_list[c * MITE_CAP + s];
+        if (p == REC_EMPTY || w->mite_resp[p]) continue;   /* empty / already destroyed */
+        int vx = xy_lo(w->mite_xy[p]) - tx; if (vx >  ARENA_W_SUB / 2) vx -= ARENA_W_SUB; if (vx < -ARENA_W_SUB / 2) vx += ARENA_W_SUB;
+        int vy = xy_hi(w->mite_xy[p]) - ty; if (vy >  ARENA_H_SUB / 2) vy -= ARENA_H_SUB; if (vy < -ARENA_H_SUB / 2) vy += ARENA_H_SUB;
+        int along = (vx * co + vy * si) >> TRIG_SHIFT;      /* distance along the beam */
+        int perp  = (vx * si - vy * co) >> TRIG_SHIFT; if (perp < 0) perp = -perp;
+        if (along >= -SUB && perp <= BEAM_HW) kill_mite(w, p, tcell, frame);
+      }
     }
     if (x == bx && y == by) break;
   }
@@ -124,12 +131,12 @@ void tanks_fire(World* w) {
     for (int oy = -TARGET_MAX_R; oy <= TARGET_MAX_R; oy++)
       for (int ox = -TARGET_MAX_R; ox <= TARGET_MAX_R; ox++) {
         uint32_t c = (uint32_t)wc_pack(wrap_wcx(tcx + ox), wrap_wcy(tcy + oy));
-        uint8_t k = w->mite_cnt[c]; if (k == 0) continue; if (k > MITE_CAP) k = MITE_CAP;
+        if (w->mite_cnt[c] == 0) continue;                         /* no mites in this cell */
         if (!los(w->grid, tcx, tcy, tcx + ox, tcy + oy)) continue;  /* whole cell out of sight */
         int ad = (int16_t)(aim_angle(ox * SUB, oy * SUB) - turret); if (ad < 0) ad = -ad;
-        uint32_t m = w->mite_list[c * MITE_CAP];                    /* lowest index in the cell */
-        for (uint8_t j = 1; j < k; j++) { uint32_t mm = w->mite_list[c * MITE_CAP + j]; if (mm < m) m = mm; }
-        if (ad < best_ang || (ad == best_ang && m < target)) { best_ang = ad; target = m; }
+        uint32_t m = TGT_NONE;                                      /* lowest index over the segment slots */
+        for (uint8_t s = 0; s < MITE_CAP; s++) { uint32_t mm = w->mite_list[c * MITE_CAP + s]; if (mm < m) m = mm; }
+        if (m != TGT_NONE && (ad < best_ang || (ad == best_ang && m < target))) { best_ang = ad; target = m; }
       }
     w->tank_target[t] = (uint16_t)target;
 
@@ -158,50 +165,52 @@ void tanks_fire(World* w) {
     if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0) {
       uint32_t bd = w->tank_turret[t] >> ANGLE_SHIFT;            /* beam = barrel heading */
       uint16_t tcell = (uint16_t)wc_pack(tcx, tcy);
-      w->tank_shot_cell[t] = laser_sweep(w, tcx, tcy, dir_cos(bd), dir_sin(bd), tcell, frame);
+      w->tank_shot_cell[t] = laser_sweep(w, tx, ty, tcx, tcy, dir_cos(bd), dir_sin(bd), tcell, frame);
+      if (!w->mite_resp[target]) kill_mite(w, target, tcell, frame);  /* the aimed mite always dies */
       w->tank_cooldown[t]  = (uint16_t)period;
       w->tank_tracer[t]    = LASER_TICKS;                        /* draw the beam ~0.1 s */
     }
   }
 }
 
-/* Runs right after mites_build_index (sim_tick step 1b): the index holds only the
- * live mites, so mite_cnt[nest] is this tick's true occupancy. A revive that finds a
- * free slot is added straight into the index (count + list), so the crowding cap is
- * enforced at the moment of revival and the rest of the tick — gossip, the cap
- * reservation in mites_step, and targeting — treats the mite as an ordinary live one.
- *
- * "Free slot" must match what mites_step will count: current centres (mite_cnt) PLUS
- * mites already in transit toward the nest (they reserved a slot last tick). Counting
- * only mite_cnt would let a revive and an arriving mite both claim the last slot, so
- * we pre-tally the inbound reservations per nest — exactly mites_step's tally seed. */
+/* Runs right after mites_build_index (sim_tick step 1b): the index holds the live mites,
+ * one slot per (nest cell, sub-segment). A mite revives only if its OWN sub-segment at its
+ * nest is free — counting current occupants AND mites already in transit toward the nest
+ * (a slot they reserved last tick) — and the cell holds fewer than `mite_cap` segments. It
+ * is then slotted straight into the index, so the cap holds and the rest of the tick treats
+ * it as an ordinary live mite. Otherwise it waits one more tick. */
 void mites_respawn(World* w) {
   int cap = w->mite_cap;
-  int reserved[NEST_COUNT]; for (int n = 0; n < NEST_COUNT; n++) reserved[n] = 0;
+  /* per-nest occupied-sub-segment bitmask: current occupants (from the index) + inbound */
+  uint8_t occ[NEST_COUNT];
+  for (int n = 0; n < NEST_COUNT; n++) {
+    uint32_t nc = (uint32_t)w->nest_cell[n]; uint8_t b = 0;
+    for (int s = 0; s < MITE_CAP; s++) if (w->mite_list[nc * MITE_CAP + s] != REC_EMPTY) b |= (uint8_t)(1u << s);
+    occ[n] = b;
+  }
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m] || w->mite_tgt[m] == w->mite_cell[m]) continue;  /* dead or at rest */
-    for (int n = 0; n < NEST_COUNT; n++) if (w->mite_tgt[m] == w->nest_cell[n]) reserved[n]++;
+    for (int n = 0; n < NEST_COUNT; n++) if (w->mite_tgt[m] == w->nest_cell[n]) occ[n] |= (uint8_t)(1u << seg_of(m));
   }
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m] == 0) continue;                  /* alive */
     if (--w->mite_resp[m] > 0) continue;                 /* still dead */
     uint32_t n = nest_of(m); uint16_t nest = w->nest_cell[n];
-    /* revive only if current centres + inbound reservations leave room, so the cap
-     * holds even as those inbound mites arrive; else wait one more tick */
-    if ((int)w->mite_cnt[nest] + reserved[n] < cap) {
+    uint8_t bit = (uint8_t)(1u << seg_of(m));
+    /* revive only if its sub-segment is free and the cell isn't already `cap`-full */
+    if (!(occ[n] & bit) && popcount4(occ[n]) < cap) {
       int wcx = wc_x(nest), wcy = wc_y(nest);
-      w->mite_xy[m] = xy_pack(wcx * SUB + SUB / 2, wcy * SUB + SUB / 2);
+      w->mite_xy[m] = xy_pack(wcx * SUB + SUB / 2 + seg_ox(m), wcy * SUB + SUB / 2 + seg_oy(m));
       w->mite_ang[m] = 0; w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
       w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY;
       w->mite_cell[m] = nest; w->mite_tgt[m] = nest;
       w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
       w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
       w->mite_resp[m] = 0;
-      /* add it to the freshly-built per-cell index (there is a free slot: cnt < cap) */
-      w->mite_list[(uint32_t)nest * MITE_CAP + w->mite_cnt[nest]] = (uint16_t)m;
-      w->mite_cnt[nest]++;
+      w->mite_list[(uint32_t)nest * MITE_CAP + seg_of(m)] = (uint16_t)m;   /* into its sub-segment slot */
+      w->mite_cnt[nest]++; occ[n] |= bit;
     } else {
-      w->mite_resp[m] = 1;                                /* nest full: retry next tick */
+      w->mite_resp[m] = 1;                                /* nest sub-segment busy: retry next tick */
     }
   }
 }

@@ -59,23 +59,25 @@ input byte that flows through the same `agent_turn`/`agent_move`.
 
 ### The per-cell index — the grid you already have is the acceleration structure
 
-We bin once per tick into a per-cell **count** (`mite_cnt[N_WORLD_CELLS]`, one byte)
-and a short **list** of the (≤`MITE_CAP`) occupants (`mite_list[...]`, `uint16`), so
-"which mites are within one cell of me" is reading the ≤4 occupants of a 3×3
-neighbourhood — `O(N)`. It is rebuilt **every tick** from current positions: the
-**opposite end of the frequency-of-change spectrum** from the path tables, which
-rebuild only on a (rare) wall edit. The page shows both ends side by side.
+We bin once per tick into a per-cell **count** (`mite_cnt[N_WORLD_CELLS]`, one byte =
+number of occupied sub-segments) and a **sub-segment-slotted list** (`mite_list[cell*4 +
+seg]` = the mite in that sub-segment, or `REC_EMPTY`), so "which mites are within one
+cell of me" is reading the ≤4 occupants of a 3×3 neighbourhood — `O(N)`. It is rebuilt
+**every tick** from current positions: the **opposite end of the frequency-of-change
+spectrum** from the path tables, which rebuild only on a (rare) wall edit.
 
-### The crowding cap — a rule, not a collision
+### The crowding cap — a sub-segment rule, not a collision
 
-**At most `MITE_CAP` (= 4) mite centres per cell, every tick**, a *decision-level*
-rule (not physics). The cap gates the actual step in **every** mode: a mite takes its
-preferred next cell only if it is open and not full; else the best open, non-full
-neighbour toward its destination (ranked by the field's distance); else it holds. It
-is enforced **deterministically** by processing mites in index order against a
-running tally (current occupants + committed inbound). The invariant
-`next occ[C] ≤ occ[C] + inbound[C] = tally[C] ≤ cap` holds inductively (spawn ≤4/cell,
-gate only the entering edge). Pinned by tests, including a forced-convergence stress.
+Each cell is quartered into **`MITE_CAP` (= 4) sub-segments** (a 2×2 grid). A mite is
+assigned to one by index — `seg_of(m) = m & 3` — and **parks at that sub-segment's
+centre** (a quarter-cell off the cell centre), so the swarm spreads out inside cells
+instead of stacking on the centre (and is a little harder to mow down in a single line).
+The cap is **at most one mite per (cell, sub-segment)**: a mite enters a cell only if its
+own sub-segment there is free (and the cell holds fewer than `mite_cap` segments total) —
+a *decision-level* rule, not physics. It is enforced **deterministically** by processing
+mites in index order against a per-cell **bitmask** of reserved sub-segments (current
+occupants + committed inbound, each a `1 << seg`). Pinned by tests, including a
+forced-convergence stress and the one-mite-per-sub-segment invariant.
 
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
@@ -272,10 +274,11 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **112 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **114 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
-shape changed, not behaviour); the **pool & index**; the **crowding cap** (every tick,
-naturally, under forced convergence, **and with firing on** — kills + nest respawns);
+shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
+sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
+convergence, **and with firing on** — kills + nest respawns; ≤1 mite per sub-segment);
 the **gossip** (one-hop-per-tick propagation = order-independent, newer overwrites
 older, older never overwrites newer, a newer *empty* propagates); the **behaviour**
 (sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
@@ -284,11 +287,12 @@ mite that reaches its nest **reverts to wander** with its record cleared — so 
 don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
-**distinct-destination peak is measured and stays within `N_FIELDS`** — ~28 with combat
+**distinct-destination peak is measured and stays within `N_FIELDS`** — ~32 with combat
 on; a forced overflow falls back to greedy without breaking the cap or determinism);
 **combat** (the turret acquires a mite in line of sight and the **laser destroys** it,
-spawning a **burst**; it leaves the index; the **laser is a line** — every mite along the
-beam dies; the **beam stops at a wall** — a collinear mite beyond it survives; a wall
+spawning a **burst**; it leaves the index; the **laser is a thin line** — mites on it die,
+mites off it (spread into other sub-segments) **dodge**; the **beam stops at a wall** — a
+collinear mite beyond it survives; a wall
 blocks line of sight; the turret **swings at a turn rate** and does not snap; targeting
 picks the mite **closest to the turret's direction**, not the spatially nearest; the
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
@@ -300,7 +304,7 @@ with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (112 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (114 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

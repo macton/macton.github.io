@@ -229,15 +229,19 @@
       </div>
     </div>
 
-    <h2>The crowding cap: a rule, not a collision</h2>
-    <p>Mites do not physically collide with each other. Instead a <strong>decision-level
-    rule</strong> keeps them spread: <strong>at most 4 mite centres per cell, every tick.</strong>
-    When a mite would step into a full cell it picks a different open neighbour with room, or
-    holds. The cap is enforced <em>deterministically</em> by processing mites in index order
-    against a running tally — current occupants plus the moves already committed this tick — so
-    the <em>n</em>-th mite sees the earlier ones' reservations. The invariant holds inductively:
-    spawning respects it, and each tick gates only the cell a mite <em>enters</em> (chapter 1's
-    “test only the leading edge” again). The occupancy panel above tops out at 4, always.</p>
+    <h2>The crowding cap: a sub-segment rule, not a collision</h2>
+    <p>Mites do not physically collide with each other. Instead each cell is quartered into a
+    <strong>2×2 grid of sub-segments</strong>, and a mite is assigned to one by index
+    (<code>index &amp; 3</code>) and <strong>parks at that sub-segment's centre</strong> — a
+    quarter-cell off the cell centre. The rule is <strong>at most one mite per (cell,
+    sub-segment)</strong>: a mite steps into a cell only if its own sub-segment there is free
+    (so still at most 4 per cell), else it picks another open neighbour, or holds. This spreads
+    the swarm out <em>inside</em> cells instead of stacking it on the centre — and makes it a bit
+    harder to mow a whole line down with one beam. It is enforced <em>deterministically</em> by
+    processing mites in index order against a per-cell <strong>bitmask</strong> of reserved
+    sub-segments — current occupants plus the moves already committed this tick — so the
+    <em>n</em>-th mite sees the earlier ones' reservations (chapter 1's “test only the leading
+    edge” again). The occupancy panel above tops out at 4, always.</p>
 
     <h2>The shared knowledge: one cell + one timestamp</h2>
     <p>Here is the heart of the chapter. <em>What is the minimal data the swarm's behaviour
@@ -298,9 +302,11 @@
     per-cell mite index over its search box, takes one <strong>line-of-sight</strong> test per cell
     (an integer Bresenham walk over the wall grid), and tracks the smallest bearing change. The turret
     swings onto that target and, once exactly on it (and the cooldown elapsed), fires at a fixed rate
-    (default <strong>2 shots/sec</strong>). The shot is a <strong>laser</strong>: the same Bresenham
-    walk, now run <em>outward from the tank</em> until it meets a wall, <strong>destroying every mite in
-    the cells it crosses</strong> — one beam, a whole line, again just reading the per-cell index. The
+    (default <strong>2 shots/sec</strong>). The shot is a <strong>thin laser</strong>: the same Bresenham
+    walk, now run <em>outward from the tank</em> until it meets a wall, destroying mites whose position
+    lies within a narrow band of the beam line — again just reading the per-cell index. Because mites
+    sit in sub-segments off the cell centre, the ones <strong>on</strong> the line die and the ones
+    <strong>off</strong> it <strong>dodge</strong> (the aimed target always dies). The
     beam is drawn for ~0.1 s — and while it is live the <strong>turret is locked</strong> to its firing
     direction (a shot commits the aim) — and each destroyed mite leaves a small expanding <strong>burst</strong>.
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default

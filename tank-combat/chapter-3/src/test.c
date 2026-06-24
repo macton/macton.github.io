@@ -13,6 +13,7 @@
 #include "edge_paths.h"
 #include "agent_move.h"
 #include "mites.h"
+#include "tanks_fire.h"
 #include <stdio.h>
 
 static World W, W2;             /* static: the World is large, too big for the stack */
@@ -340,13 +341,12 @@ static void t_mite_pool_index(void) {
   int list_ok = 1, open_ok = 1, reach_ok = 1;
   for (uint32_t m = 0; m < N_MITES; m++) {
     uint32_t c = W.mite_cell[m];
-    int found = 0; uint8_t k = W.mite_cnt[c] <= MITE_CAP ? W.mite_cnt[c] : MITE_CAP;
-    for (uint8_t j = 0; j < k; j++) if (W.mite_list[c * MITE_CAP + j] == m) found++;
-    if (found != 1) list_ok = 0;
+    /* the index is sub-segment-slotted: mite m occupies exactly its own seg slot */
+    if (W.mite_list[c * MITE_CAP + seg_of(m)] != m) list_ok = 0;
     if (cell_is_wall(W.grid, wc_x(c), wc_y(c))) open_ok = 0;
     if (big_bfs(&W, wcell(1, 7), c) < 0) reach_ok = 0;
   }
-  check(list_ok, "each mite appears exactly once in its cell's list");
+  check(list_ok, "each mite occupies its own (cell, sub-segment) slot");
   check(open_ok, "every mite spawned on an open cell");
   check(reach_ok, "every mite spawned on a cell reachable from the open ring");
 }
@@ -355,16 +355,21 @@ static void t_mite_pool_index(void) {
 static void t_mite_cap(void) {
   printf("crowding cap — at most MITE_CAP centres per cell, every tick:\n");
   sim_init(&W);
-  int breach = 0, reached = 0;
+  int breach = 0, reached = 0, seg_collide = 0;
   for (int i = 0; i < 4000; i++) {
     sim_tick(&W);
     for (uint32_t c = 0; c < N_WORLD_CELLS; c++) {
       if (W.mite_cnt[c] > MITE_CAP) breach = 1;
       if (W.mite_cnt[c] == MITE_CAP) reached = 1;
     }
+    /* the new invariant: at most one mite per (cell, sub-segment) — i.e. every live mite
+     * sits in its own seg slot (a collision would leave one mite unslotted). */
+    if ((i & 63) == 0) for (uint32_t m = 0; m < N_MITES; m++)
+      if (!W.mite_resp[m] && W.mite_list[(uint32_t)W.mite_cell[m] * MITE_CAP + seg_of(m)] != m) seg_collide = 1;
   }
   check(!breach, "no cell ever exceeds the cap across 4000 natural ticks");
   check(reached, "cells do reach the cap (the bound is binding, not vacuous)");
+  check(!seg_collide, "at most one mite per (cell, sub-segment) — every mite keeps its own slot");
 
   /* stress: force the whole swarm to hunt ONE cell every tick */
   sim_init(&W);
@@ -630,22 +635,27 @@ static void t_tanks_fire(void) {
   sim_tick(&W);   /* the next index rebuild drops the corpse */
   check(W.mite_cnt[wcell(5, 7)] == 0, "a dead mite leaves the per-cell index (not drawn, not targetable)");
 
-  /* the laser is a LINE: it destroys every mite along the beam, not just the target */
+  /* the laser is a thin LINE: mites on the beam die, mites off it (spread into other
+   * sub-segments) survive. Drive build_index + tanks_fire directly with hand-placed
+   * positions so the test isn't perturbed by movement/snap this tick. */
   sim_init(&W); gossip_setup(&W, 3);
-  place_tank(&W, 0, 1, 7);                                /* turret east, open corridor on row 7 */
-  mite_reset(&W, 0, 3, 7); mite_reset(&W, 1, 5, 7); mite_reset(&W, 2, 7, 7);
+  place_tank(&W, 0, 1, 7);                                /* turret east, beam along row-7 centre */
+  mite_reset(&W, 0, 4, 7); mite_reset(&W, 1, 6, 7); mite_reset(&W, 2, 5, 7);
+  W.mite_xy[0] = xy_pack(4 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line (perp 0) */
+  W.mite_xy[1] = xy_pack(6 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line */
+  W.mite_xy[2] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2 + 96);   /* off the line (perp 96 > BEAM_HW) */
   W.fire_period = 30; W.mite_respawn = 300;
-  sim_tick(&W);
-  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0 && W.mite_resp[2] > 0,
-        "the laser destroys every mite along the beam line");
+  mites_build_index(&W); tanks_fire(&W);
+  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0, "the laser destroys mites on its line");
+  check(W.mite_resp[2] == 0, "a mite off the beam line survives — the thin beam misses it (the spread dodges)");
 
   /* the beam stops at a wall: a collinear mite beyond the wall survives */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 1, 7);
-  mite_reset(&W, 0, 5, 7);                                /* before the central block (col 8) */
-  mite_reset(&W, 1, 13, 7);                               /* beyond it (cols 8..11 are walls) */
+  mite_reset(&W, 0, 5, 7);  W.mite_xy[0] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2);   /* before the block (col 8) */
+  mite_reset(&W, 1, 13, 7); W.mite_xy[1] = xy_pack(13 * SUB + SUB / 2, 7 * SUB + SUB / 2);  /* beyond it (cols 8..11 walls) */
   W.fire_period = 30; W.mite_respawn = 300;
-  sim_tick(&W);
+  mites_build_index(&W); tanks_fire(&W);
   check(W.mite_resp[0] > 0, "the laser destroys the mite before the wall");
   check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the beam stops at the wall)");
 

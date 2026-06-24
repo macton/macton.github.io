@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (112 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (114 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -14,25 +14,30 @@ the inherited tests still pass and the baked escape table is byte-identical.
   whole chapter — flat structure-of-arrays, statically sized, **no dynamic
   allocation**. *(tested: the index counts sum to `N_MITES`.)*
 - **Spawn is deterministic and legal.** From the seed, mites scatter across **open,
-  reachable** cells only, **≤ `MITE_CAP` (= 4) per cell**. *(tested: every mite is on
-  an open cell reachable from the open ring; no spawn cell exceeds the cap.)*
+  reachable** cells only, **≤ 1 per (cell, sub-segment)** (so ≤ 4 per cell), each parked
+  at its sub-segment's centre. *(tested: every mite is on an open cell reachable from the
+  open ring; each occupies its own slot.)*
 
 ## The per-cell index
 
-- **Rebuilt every tick from current positions.** `mite_cnt[cell]` is the true
-  occupancy and `mite_list[cell]` holds its first `MITE_CAP` occupants; every mite
-  appears in exactly its own cell's list. *(tested.)* It is the swarm's `O(N)`
+- **Rebuilt every tick from current positions.** A cell is quartered into `MITE_CAP` (= 4)
+  **sub-segments** (2×2); `mite_list[cell*4 + seg]` is the mite in that sub-segment (or
+  `REC_EMPTY`), and `mite_cnt[cell]` is the number of occupied sub-segments. Each mite
+  occupies its own slot, `seg_of(m) = m & 3`. *(tested.)* It is the swarm's `O(N)`
   acceleration structure — "which mites are within one cell of me" is reading a 3×3
   neighbourhood, not a 1000×1000 scan.
 
 ## The crowding cap
 
-- **At most `MITE_CAP` (= 4) mite centres per cell, after every tick.** Enforced by a
-  deterministic in-order reservation (current occupants + committed inbound), not by
-  physics. A blocked mite re-routes to a free neighbour or holds (emits no drive) and
-  re-evaluates next tick. *(tested: the cap holds across thousands of natural ticks
-  **and** under forced convergence of the whole swarm on one cell; and it is binding —
-  cells do reach 4.)*
+- **At most one mite per (cell, sub-segment)** — so ≤ `mite_cap` (≤ 4) mites per cell —
+  after every tick. A mite is assigned a sub-segment by index (`m & 3`), moves into it
+  (parking a quarter-cell off the cell centre, which spreads the swarm out), and enters a
+  cell only if its own sub-segment there is free. Enforced by a deterministic in-order
+  reservation — a per-cell **bitmask** of reserved sub-segments (current occupants +
+  committed inbound) — not by physics. A blocked mite re-routes to a neighbour with a free
+  sub-segment, or holds, and re-evaluates next tick. *(tested: the cap and the
+  one-per-sub-segment invariant hold across thousands of natural ticks **and** under
+  forced convergence of the whole swarm on one cell; and it is binding — cells reach 4.)*
 
 ## The shared record (last-write-wins)
 
@@ -112,16 +117,19 @@ the inherited tests still pass and the baked escape table is byte-identical.
   swung **exactly** onto the target bearing (so the beam runs precisely along the barrel —
   a line shot is never a cone, so the turn rate gates firing) and the cooldown is elapsed,
   every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only). The shot
-  is a **laser**: a ray marched from the tank along the barrel that **destroys every mite
-  in the cells it crosses until it meets a wall** (length capped at `LASER_MAX`); the beam
+  is a **laser**: a thin ray marched from the tank along the barrel until it meets a wall
+  (length capped at `LASER_MAX`), destroying mites whose position lies within `BEAM_HW` of
+  the beam line. Because mites sit in sub-segments a quarter-cell off centre, mites **on**
+  the line die and mites **off** it dodge — the aimed target is always destroyed. The beam
   is drawn for `LASER_TICKS` (~0.1 s), during which the **turret is locked** to its firing
   direction (it cannot turn toward another target until the beam fades) — a shot commits
   the aim. Each destroyed mite is marked dead and leaves the per-cell index next rebuild —
   a corpse is not drawn (on the map either), gossiped, or targeted — and spawns a cosmetic
-  destruction burst. *(tested: the laser destroys the target + a burst; it destroys a whole
-  line of mites; it stops at a wall (a collinear mite beyond survives); the cooldown; the
-  corpse leaving the index; an off-axis target not shot until the turret swings on; the
-  turret holds while the beam is live and turns again once it fades.)*
+  destruction burst. *(tested: the laser destroys the target + a burst; it kills mites on
+  its line and **misses ones off it**; it stops at a wall (a collinear mite beyond
+  survives); the cooldown; the corpse leaving the index; an off-axis target not shot until
+  the turret swings on; the turret holds while the beam is live and turns again once it
+  fades.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip

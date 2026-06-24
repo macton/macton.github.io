@@ -82,19 +82,21 @@ void mites_spawn(World* w) {
   w->rng = seed_state(w->mite_seed);
   uint32_t nreach = collect_reachable(w->grid);
 
-  /* reuse mite_cnt as the running placement count; spawn respects MITE_CAP (the
-   * structural max), so no spawn cell starts with more than 4. */
-  for (uint32_t i = 0; i < N_WORLD_CELLS; i++) w->mite_cnt[i] = 0;
+  /* g_tally as a per-cell occupied-sub-segment bitmask: a mite scatters into a cell
+   * whose OWN sub-segment (seg_of) is still free, so at most one mite per (cell, seg)
+   * from the very first tick — and it spawns parked at that sub-segment's centre. */
+  for (uint32_t i = 0; i < N_WORLD_CELLS; i++) g_tally[i] = 0;
   for (uint32_t m = 0; m < N_MITES; m++) {
+    uint8_t bit = (uint8_t)(1u << seg_of(m));
     uint32_t start = nreach ? xs32(&w->rng) % nreach : 0, cell = g_reach[0];
     for (uint32_t k = 0; k < nreach; k++) {
       uint32_t c = g_reach[(start + k) % nreach];
-      if (w->mite_cnt[c] < MITE_CAP) { cell = c; break; }
+      if (!(g_tally[c] & bit)) { cell = c; break; }       /* this cell's sub-segment is free */
     }
-    w->mite_cnt[cell]++;
+    g_tally[cell] |= bit;
 
     int wcx = wc_x(cell), wcy = wc_y(cell);
-    w->mite_xy[m]  = xy_pack(wcx * SUB + SUB / 2, wcy * SUB + SUB / 2);
+    w->mite_xy[m]  = xy_pack(wcx * SUB + SUB / 2 + seg_ox(m), wcy * SUB + SUB / 2 + seg_oy(m));
     w->mite_ang[m] = (uint16_t)(CARD_DI[xs32(&w->rng) & 3] << ANGLE_SHIFT);
     w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
     w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_resp[m] = 0;
@@ -106,7 +108,11 @@ void mites_spawn(World* w) {
 }
 
 /* ---- the per-cell index --------------------------------------------------- */
+/* One slot per (cell, sub-segment): mite_list[c*MITE_CAP + seg] is the mite occupying
+ * that sub-segment, or REC_EMPTY. mite_cnt[c] is the number of occupied sub-segments.
+ * The cap keeps <= 1 mite per (cell, seg), so a mite always lands in its own slot. */
 void mites_build_index(World* w) {
+  for (uint32_t i = 0; i < N_WORLD_CELLS * MITE_CAP; i++) w->mite_list[i] = REC_EMPTY;
   for (uint32_t i = 0; i < N_WORLD_CELLS; i++) w->mite_cnt[i] = 0;
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;             /* dead (shot): not on the board */
@@ -114,9 +120,10 @@ void mites_build_index(World* w) {
     int wcy = wrap_wcy(xy_hi(w->mite_xy[m]) >> SUB_SHIFT);
     uint32_t c = (uint32_t)wc_pack(wcx, wcy);
     w->mite_cell[m] = (uint16_t)c;
-    uint8_t k = w->mite_cnt[c];
-    if (k < MITE_CAP) w->mite_list[c * MITE_CAP + k] = (uint16_t)m;
-    w->mite_cnt[c] = (uint8_t)(k + 1);   /* TRUE occupancy: an over-cap cell stays detectable */
+    uint32_t slot = c * MITE_CAP + (uint32_t)seg_of(m);
+    if (w->mite_list[slot] == REC_EMPTY) { w->mite_list[slot] = (uint16_t)m; w->mite_cnt[c]++; }
+    /* else: a same-segment collision (the cap normally prevents it) — the later mite is
+     * not slotted this tick; it re-resolves on the next step. */
   }
 }
 
@@ -168,10 +175,9 @@ void mites_records(World* w) {
       int cx = wc_x(mc), cy = wc_y(mc);
       for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
         uint32_t nc = (uint32_t)wc_pack(wrap_wcx(cx + dx), wrap_wcy(cy + dy));
-        uint8_t k = w->mite_cnt[nc]; if (k > MITE_CAP) k = MITE_CAP;
-        for (uint8_t j = 0; j < k; j++) {
-          uint32_t p = w->mite_list[nc * MITE_CAP + j];
-          if (p == m) continue;
+        for (uint8_t s = 0; s < MITE_CAP; s++) {
+          uint32_t p = w->mite_list[nc * MITE_CAP + s];
+          if (p == REC_EMPTY || p == m) continue;
           uint32_t pt = rt_in[p];
           if (pt <= my_t) continue;
           if (!found || pt > best_pt || (pt == best_pt && p < best_pp)) {
@@ -255,12 +261,14 @@ void mites_update_fields(World* w) {
  * (greedy fallback). If none qualify, hold. Reserves the chosen cell (tally++). */
 static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   int cx = wc_x(mc), cy = wc_y(mc);
+  uint8_t bit = (uint8_t)(1u << seg_of(m));
   uint8_t vd[4]; uint16_t vc[4]; int nv = 0;
   for (uint8_t d = 0; d < 4; d++) {
     int nx = wrap_wcx(cx + CARD_DCX[d]), ny = wrap_wcy(cy + CARD_DCY[d]);
     if (cell_is_wall(w->grid, nx, ny)) continue;
     uint32_t nc = (uint32_t)wc_pack(nx, ny);
-    if (g_tally[nc] >= cap) continue;
+    if (g_tally[nc] & bit) continue;                   /* my sub-segment is taken there */
+    if (popcount4(g_tally[nc]) >= cap) continue;       /* the cell already holds `cap` segments */
     vd[nv] = d; vc[nv] = (uint16_t)nc; nv++;
   }
   if (nv == 0) { w->mite_tgt[m] = (uint16_t)mc; return DIR_NONE; }   /* hold */
@@ -290,7 +298,7 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
     }
   }
   w->mite_tgt[m] = vc[bi];
-  g_tally[vc[bi]]++;
+  g_tally[vc[bi]] |= bit;
   return vd[bi];
 }
 
@@ -299,19 +307,23 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
  * only when the discrete heading is exactly axis-aligned, snapping at a turn. */
 static void set_mite_input(World* w, uint32_t m) {
   uint32_t mc = w->mite_cell[m], tgt = w->mite_tgt[m];
-  if (tgt == mc) { w->mite_in[m] = 0; return; }              /* hold: emit no drive */
+  int x = xy_lo(w->mite_xy[m]), y = xy_hi(w->mite_xy[m]);
+  /* this mite's anchor = its sub-segment's centre in its current cell (a quarter-cell
+   * off the cell centre). It travels between anchors (a grid shifted by the segment
+   * offset), so the whole swarm rides on four interleaved grids and spreads out. */
+  int ax = (x >> SUB_SHIFT) * SUB + SUB / 2 + seg_ox(m);
+  int ay = (y >> SUB_SHIFT) * SUB + SUB / 2 + seg_oy(m);
+  if (tgt == mc) { w->mite_xy[m] = xy_pack(ax, ay); w->mite_in[m] = 0; return; }  /* at rest: settle in-segment */
 
   uint8_t d = dir_to_adjacent(mc, tgt);
   uint32_t target_di = CARD_DI[d];
-  int x = xy_lo(w->mite_xy[m]), y = xy_hi(w->mite_xy[m]);
-  int cc_x = (x >> SUB_SHIFT) * SUB + SUB / 2, cc_y = (y >> SUB_SHIFT) * SUB + SUB / 2;
-  int ox = x - cc_x, oy = y - cc_y;
+  int ox = x - ax, oy = y - ay;
   uint32_t cur_di = (uint32_t)(w->mite_ang[m] >> ANGLE_SHIFT) & (N_DIRS - 1);
 
   if (target_di == cur_di) {
     w->mite_in[m] = IN_FWD;
   } else if (at_cell_centre(cur_di, ox, oy)) {
-    w->mite_xy[m] = xy_pack(cc_x, cc_y);
+    w->mite_xy[m] = xy_pack(ax, ay);
     uint32_t delta = (target_di - cur_di) & (N_DIRS - 1);
     w->mite_in[m] = (delta <= N_DIRS / 2) ? IN_RIGHT : IN_LEFT;
   } else {
@@ -323,14 +335,19 @@ static void set_mite_input(World* w, uint32_t m) {
 void mites_step(World* w) {
   int cap = w->mite_cap;
 
-  /* the cap tally: current occupants + already-committed inbound. Seed it with
-   * the index occupancy, then re-add every in-transit mite's standing reservation
-   * FIRST (a slot it already owns, conserved across the traverse), so at-rest
-   * mites this tick only fill what is genuinely free. This in-order reservation
-   * keeps <= cap centres per cell every tick (next occ[C] <= tally[C] <= cap). */
-  for (uint32_t i = 0; i < N_WORLD_CELLS; i++) g_tally[i] = w->mite_cnt[i];
-  for (uint32_t m = 0; m < N_MITES; m++)
-    if (!w->mite_resp[m] && w->mite_tgt[m] != w->mite_cell[m]) g_tally[w->mite_tgt[m]]++;
+  /* the cap tally is now a per-cell BITMASK of reserved sub-segments (bit s = segment s
+   * taken). Seed it with each live mite's segment in its current cell, then add every
+   * in-transit mite's standing reservation — its segment in its TARGET cell (a slot it
+   * already owns, conserved across the traverse) — so at-rest mites this tick only fill
+   * genuinely-free segments. In order, this keeps <= 1 mite per (cell, segment) and
+   * <= cap occupied segments per cell after the step. */
+  for (uint32_t i = 0; i < N_WORLD_CELLS; i++) g_tally[i] = 0;
+  for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;
+    uint8_t bit = (uint8_t)(1u << seg_of(m));
+    g_tally[w->mite_cell[m]] |= bit;
+    if (w->mite_tgt[m] != w->mite_cell[m]) g_tally[w->mite_tgt[m]] |= bit;
+  }
 
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                          /* dead: frozen */

@@ -52,11 +52,20 @@
 #define N_MITES     1000        /* fixed pool, all alive for the whole chapter */
 #define MITE_R      (SUB / 8)   /* collision half-extent = 32 subcells; diameter ~= a quarter cell */
 
-/* The crowding cap: at most MITE_CAP mite centres per world cell, every tick. It
- * is a decision-level rule (mites don't physically collide with each other), and
- * it doubles as the width of the per-cell occupant list — so it sizes a real
- * structure, not just a threshold. */
+/* The crowding cap: a cell is quartered into MITE_CAP=4 sub-segments (a 2x2 grid),
+ * and a mite is assigned to one of them by index (`seg_of` = index & 3). At most ONE
+ * mite per (cell, sub-segment): a mite can enter a cell only if its own sub-segment
+ * there is free (and the cell holds fewer than `mite_cap` segments total). It parks at
+ * its sub-segment's centre — a quarter-cell off the cell centre — so the swarm spreads
+ * inside cells instead of stacking on the centre. MITE_CAP also sizes the per-cell
+ * occupant list (one slot per sub-segment). It is a decision-level rule (mites don't
+ * physically collide with each other). */
 #define MITE_CAP    4
+#define SUBQ        (SUB / 4)   /* 64: a sub-segment centre's offset from the cell centre */
+static inline int seg_of(uint32_t mite) { return (int)(mite & 3u); }            /* 0..3 (NW,NE,SW,SE) */
+static inline int seg_ox(uint32_t mite) { return (mite & 1u) ? SUBQ : -SUBQ; }  /* east half? +x : -x */
+static inline int seg_oy(uint32_t mite) { return (mite & 2u) ? SUBQ : -SUBQ; }  /* south half? +y : -y */
+static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u) + ((b >> 2) & 1u) + ((b >> 3) & 1u)); }
 
 /* Every mite belongs to one of NEST_COUNT home cells, assigned by index. A nest
  * is a destination a mite can path home to (the 20% that carry a sighting home). */
@@ -89,6 +98,7 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define TARGET_MAX_R 12         /* turret search radius, in cells */
 #define TGT_NONE     0xFFFFu    /* tank has no target */
 #define LASER_MAX    64         /* max beam length in cells (it stops at the first wall) */
+#define BEAM_HW      40         /* laser kill half-width, subcells (< SUBQ, so off-line mites dodge) */
 #define LASER_TICKS  6          /* ticks a fired beam stays drawn (~0.1 s at 60 ticks/s) */
 
 /* destruction effects: a small fixed ring of expanding/fading bursts, one per mite the
