@@ -91,6 +91,11 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define MM_HUNT     1           /* path to the recorded tank cell */
 #define MM_HOME     2           /* path to this mite's nest */
 
+/* When a hunter reaches a recorded cell and the tank is GONE, the sighting is stale —
+ * with this chance (percent) it carries that "gone" update HOME to its nest instead of
+ * just wandering, so the nest's shared knowledge gets corrected. */
+#define MITE_PREPORT 50
+
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
  * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction

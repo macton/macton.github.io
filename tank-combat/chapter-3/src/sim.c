@@ -55,6 +55,7 @@ void sim_init(World* w) {
   w->nest_cell[1] = wc_pack(78,  7);   /* screen (3,0) */
   w->nest_cell[2] = wc_pack( 1, 52);   /* screen (0,3) */
   w->nest_cell[3] = wc_pack(78, 52);   /* screen (3,3) */
+  for (uint32_t n = 0; n < NEST_COUNT; n++) { w->nest_rec_cell[n] = REC_EMPTY; w->nest_rec_time[n] = 0; }
 
   /* Build the rarely-changing path tables once: Level 1, then Level 2 on top, then
    * each tank's remaining-distance vector (empty until a destination is set). */

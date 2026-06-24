@@ -119,6 +119,12 @@ struct World {
 
   /* the four nests (home cells), spread across the world; editable on the page */
   uint16_t nest_cell[NEST_COUNT];
+  /* each nest's stored gossip: the latest tank record carried home (cell + timestamp),
+   * REC_EMPTY if it knows nothing. Homing mites overwrite it when they bring NEWER info;
+   * newly revived mites adopt it, so a nest dispatches reinforcements to the last-known
+   * tank position (or wanders them if it's empty). */
+  uint16_t nest_rec_cell[NEST_COUNT];
+  uint32_t nest_rec_time[NEST_COUNT];
 
   /* the shared route-field table: a remaining-distance vector (pg, keyed by edge
    * point, exactly the tank's) per active destination cell. Slots 0..NEST_COUNT-1

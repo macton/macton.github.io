@@ -442,7 +442,23 @@ static void t_mite_behaviour(void) {
   W.frame = 600;
   mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 600, "reaching the recorded cell with no tank erases the record (stamped now)");
-  check(W.mite_mode[0] == MM_WANDER, "after erasing, the mite reverts to wander");
+  check(W.mite_mode[0] == MM_WANDER || W.mite_mode[0] == MM_HOME, "after erasing it wanders, or heads home to report the sighting is stale");
+
+  /* the report die: a stale-sighting arrival heads home ~MITE_PREPORT% of the time */
+  sim_init(&W); gossip_setup(&W, 1);
+  mite_reset(&W, 0, 5, 7);                                 /* open cell, no tank near */
+  mites_build_index(&W);
+  int reports = 0, rtrials = 8000;
+  for (int i = 0; i < rtrials; i++) {
+    W.mite_rec_cell[W.rec_buf][0] = (uint16_t)wcell(5, 7); W.mite_rec_time[W.rec_buf][0] = 100;
+    W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(5, 7);
+    W.frame = 200u + (uint32_t)i;
+    mites_records(&W);
+    if (W.mite_mode[0] == MM_HOME) reports++;
+  }
+  int rpct = reports * 100 / rtrials;
+  printf("  (report-home share over %d stale arrivals: %d%%)\n", rtrials, rpct);
+  check(rpct >= 45 && rpct <= 55, "~50%% of stale-sighting arrivals head home to report");
 
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */
@@ -771,6 +787,48 @@ static void t_tanks_fire(void) {
   check(!breach, "the crowding cap holds across 3000 ticks WITH firing (kills + nest respawns)");
 }
 
+/* ---- nest gossip: mites update the nest; revived mites adopt it ------------ */
+static void t_nest_gossip(void) {
+  printf("nest gossip — mites deposit intel at the nest; revived mites adopt it:\n");
+  uint32_t n = nest_of(0);
+
+  /* a homing mite deposits its (newer) gossip in the nest */
+  sim_init(&W); gossip_setup(&W, 1);
+  uint16_t nest = W.nest_cell[n];
+  mite_reset(&W, 0, wc_x(nest), wc_y(nest));
+  set_rec(&W, 0, (uint16_t)wcell(20, 20), 500); W.mite_mode[0] = MM_HOME; W.mite_dest[0] = nest;
+  W.nest_rec_cell[n] = REC_EMPTY; W.nest_rec_time[n] = 0; W.frame = 600;
+  mites_build_index(&W); mites_records(&W);
+  check(W.nest_rec_cell[n] == (uint16_t)wcell(20, 20) && W.nest_rec_time[n] == 500,
+        "a homing mite deposits its newer gossip in the nest");
+
+  /* older gossip does not overwrite a newer nest record */
+  sim_init(&W); gossip_setup(&W, 1);
+  mite_reset(&W, 0, wc_x(nest), wc_y(nest));
+  set_rec(&W, 0, (uint16_t)wcell(20, 20), 500); W.mite_mode[0] = MM_HOME; W.mite_dest[0] = nest;
+  W.nest_rec_cell[n] = (uint16_t)wcell(30, 30); W.nest_rec_time[n] = 1000; W.frame = 600;
+  mites_build_index(&W); mites_records(&W);
+  check(W.nest_rec_cell[n] == (uint16_t)wcell(30, 30) && W.nest_rec_time[n] == 1000,
+        "older gossip does not overwrite the nest's newer record");
+
+  /* a revived mite adopts the nest's gossip and hunts the last-known tank cell */
+  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
+  W.nest_rec_cell[n] = (uint16_t)wcell(40, 40); W.nest_rec_time[n] = 700;
+  W.mite_resp[0] = 1;                                      /* dead; revives this tick */
+  sim_tick(&W);
+  check(!W.mite_resp[0] && get_rec_cell(&W, 0) == (uint16_t)wcell(40, 40),
+        "a revived mite adopts its nest's gossip");
+  check(W.mite_mode[0] == MM_HUNT, "a revived mite hunts the nest's last-known tank position");
+
+  /* a revived mite at a nest that knows nothing just wanders */
+  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
+  W.nest_rec_cell[n] = REC_EMPTY; W.nest_rec_time[n] = 0;
+  W.mite_resp[0] = 1;
+  sim_tick(&W);
+  check(!W.mite_resp[0] && get_rec_cell(&W, 0) == REC_EMPTY && W.mite_mode[0] == MM_WANDER,
+        "a revived mite at an empty nest just wanders");
+}
+
 int main(void) {
   t_level1();
   t_byte_fit();
@@ -786,6 +844,7 @@ int main(void) {
   t_mite_behaviour();
   t_mite_nests_fields();
   t_tanks_fire();
+  t_nest_gossip();
   t_mite_wall();
   t_mite_determinism();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

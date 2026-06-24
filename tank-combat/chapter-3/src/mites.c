@@ -190,18 +190,21 @@ void mites_records(World* w) {
         if (new_c == REC_EMPTY) mode = MM_WANDER;            /* nowhere to hunt -> wander */
         else mode = (xs32(&w->rng) % 100u) < (uint32_t)w->mite_phunt ? MM_HUNT : MM_HOME;
       } else if (mode == MM_HUNT && my_c != REC_EMPTY && cell_chebyshev(mc, my_c) <= 1) {
-        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh
-         *    (stamp now, keep hunting); gone -> erase (empty, stamp now) + wander.
-         *    The empty-stamped-now record is newest, so "gone" propagates back. */
+        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh (stamp now,
+         *    keep hunting); gone -> erase (empty, stamp now), then with P=MITE_PREPORT
+         *    carry that "gone" update HOME to the nest, else just wander. The
+         *    empty-stamped-now record is newest, so "gone" propagates back either way. */
         int tank_here = 0;
         for (uint32_t t = 0; t < N_TANKS; t++) if (tank_cell(w, t) == my_c) { tank_here = 1; break; }
         if (tank_here) { new_c = my_c; new_t = frame; }
-        else { new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER; }
+        else { new_c = REC_EMPTY; new_t = frame;
+               mode = (xs32(&w->rng) % 100u) < (uint32_t)MITE_PREPORT ? MM_HOME : MM_WANDER; }
       } else if (mode == MM_HOME && mc == w->nest_cell[nest_of(m)]) {
-        /* 3b. Arrive (home): the sighting has been carried to the nest — drop it and
-         *     rejoin the wanderers. Without this, homed mites pile up at the nest, stay
-         *     MM_HOME forever (perpetually nest-tinted), and keep relaying a stale
-         *     record; the empty-stamped-now record propagates "nothing here" like 3. */
+        /* 3b. Arrive (home): deposit the carried gossip in the nest IF it is newer than
+         *     what the nest holds (so the nest tracks the latest tank intel — a sighting
+         *     or a "gone" erase) — then drop it and rejoin the wanderers. */
+        uint32_t n = nest_of(m);
+        if (my_t > w->nest_rec_time[n]) { w->nest_rec_cell[n] = my_c; w->nest_rec_time[n] = my_t; }
         new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER;
       }
       /* 4. else keep the current record, mode, and destination (still wandering, or

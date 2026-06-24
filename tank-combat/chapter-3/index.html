@@ -257,10 +257,17 @@
       <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest (a
       newer record interrupts and re-rolls; either way you keep relaying it).</li>
       <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
-      refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
-      gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
-      <em>newest</em> record.</li>
+      refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and then
+      <strong>50% of the time carry that “it's gone” update home</strong> to the nest, else
+      wander. Empty-stamped-now is the <em>newest</em> record, so it propagates back either way.</li>
     </ul>
+    <p>The nests are <strong>knowledge hubs</strong>. A mite that makes it home <strong>deposits
+    its record in the nest if it is newer</strong> than what the nest holds — both fresh sightings
+    and “gone” updates — and a mite <strong>revived</strong> at the nest <strong>adopts that
+    record</strong>, hunting the last-known tank position (or wandering if the nest knows nothing).
+    So killing the swarm doesn't wipe what it knew: the nest remembers and dispatches the next wave
+    to the front. A patrol that finds the spot empty reports back and clears it, so a stale nest
+    costs at most one wasted trip.</p>
     <p>The gossip is made <strong>order-independent</strong> by double-buffering: every mite reads
     last tick's records and writes this tick's, then the buffers swap, so propagation never
     depends on iteration order (ties break on lowest index). Drive a tank into the swarm and

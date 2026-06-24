@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (114 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (121 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -66,14 +66,26 @@ the inherited tests still pass and the baked escape table is byte-identical.
   *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
   RNG stream statistically, and a newer record interrupts a homing mite.)*
 - **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
-  refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
-  now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
-  *(tested: both refresh and erase.)*
-- **Arrive (home).** A homing mite that reaches its nest **delivers the sighting and
-  reverts to wander** (record erased, stamped now). So a mite carries the nest tint only
-  while in transit — it does not get stuck `MM_HOME` (nest-coloured) at the nest.
-  *(tested: on reaching its nest the mite reverts to wander with its record cleared.)*
+  refreshes the record (stamp now) if a tank is there; if the tank is **gone** it erases
+  the record (empty, stamp now) and then with probability `MITE_PREPORT` (50%) **heads
+  home to report** the stale sighting, else wanders — the erase, being newest, propagates
+  "it's gone" either way. *(tested: refresh; erase; the ~50% report-home split.)*
+- **Arrive (home).** A homing mite that reaches its nest **deposits its record in the
+  nest if it is newer** than the nest's, then reverts to wander. So a mite carries the
+  nest tint only while in transit. *(tested: it reverts to wander; the deposit promise
+  below.)*
 - **An empty record means wander.** A mite with no recorded cell wanders.
+
+## Nests as knowledge hubs
+
+- **Each nest stores the latest gossip** (`nest_rec_cell`/`nest_rec_time`). A homing mite
+  that reaches its nest overwrites it **iff the mite's record is newer** (newest-wins) —
+  both fresh sightings and "gone" erases arrive this way. *(tested: a newer record is
+  deposited; an older one is not.)*
+- **A revived mite adopts its nest's gossip**: it hunts the nest's last-known tank cell,
+  or wanders if the nest knows nothing — so killing the swarm doesn't erase its knowledge;
+  the nest seeds the next wave. *(tested: revive-and-hunt with intel; revive-and-wander
+  without.)*
 
 ## Nests & shared route fields
 
