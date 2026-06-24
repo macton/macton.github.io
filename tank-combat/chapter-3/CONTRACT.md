@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (109 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (112 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -114,12 +114,14 @@ the inherited tests still pass and the baked escape table is byte-identical.
   every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only). The shot
   is a **laser**: a ray marched from the tank along the barrel that **destroys every mite
   in the cells it crosses until it meets a wall** (length capped at `LASER_MAX`); the beam
-  is drawn for `LASER_TICKS` (~0.1 s). Each destroyed mite is marked dead and leaves the
-  per-cell index next rebuild — a corpse is not drawn (on the map either), gossiped, or
-  targeted — and spawns a cosmetic destruction burst. *(tested: the laser destroys the
-  target + a burst; it destroys a whole line of mites; it stops at a wall (a collinear mite
-  beyond survives); the cooldown; the corpse leaving the index; an off-axis target not shot
-  until the turret swings on.)*
+  is drawn for `LASER_TICKS` (~0.1 s), during which the **turret is locked** to its firing
+  direction (it cannot turn toward another target until the beam fades) — a shot commits
+  the aim. Each destroyed mite is marked dead and leaves the per-cell index next rebuild —
+  a corpse is not drawn (on the map either), gossiped, or targeted — and spawns a cosmetic
+  destruction burst. *(tested: the laser destroys the target + a burst; it destroys a whole
+  line of mites; it stops at a wall (a collinear mite beyond survives); the cooldown; the
+  corpse leaving the index; an off-axis target not shot until the turret swings on; the
+  turret holds while the beam is live and turns again once it fades.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip

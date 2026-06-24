@@ -301,7 +301,8 @@
     (default <strong>2 shots/sec</strong>). The shot is a <strong>laser</strong>: the same Bresenham
     walk, now run <em>outward from the tank</em> until it meets a wall, <strong>destroying every mite in
     the cells it crosses</strong> — one beam, a whole line, again just reading the per-cell index. The
-    beam is drawn for ~0.1 s and each destroyed mite leaves a small expanding <strong>burst</strong>.
+    beam is drawn for ~0.1 s — and while it is live the <strong>turret is locked</strong> to its firing
+    direction (a shot commits the aim) — and each destroyed mite leaves a small expanding <strong>burst</strong>.
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
     <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
     so no rule the swarm obeys is broken by combat. The four nests sit away from the tanks' start

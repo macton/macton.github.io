@@ -161,7 +161,9 @@ destruction bursts. Per tank, each tick:
   tank until it meets a wall, **destroying every mite in the cells it crosses** (`LASER_MAX`
   caps the length). Each destroyed mite is marked dead (`mite_resp` = the respawn timer),
   drops out of the index next rebuild (never drawn — minimap included — gossiped, or
-  targeted), and spawns a **destruction burst**. The beam is drawn for `LASER_TICKS` (~0.1 s).
+  targeted), and spawns a **destruction burst**. The beam is drawn for `LASER_TICKS` (~0.1 s),
+  during which the **turret is locked** to its firing direction — a shot commits the aim for
+  its whole duration; the turret is free to track again only once the beam fades.
 - **Death cry.** Each kill writes the **firing tank's cell** into the record of every live
   mite within **2× sensing range** of the destroyed one (stamped now, mode → hunt), through
   the ordinary record buffer — so a laser that mows a line broadcasts the shooter's position
@@ -270,7 +272,7 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **109 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **112 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index**; the **crowding cap** (every tick,
 naturally, under forced convergence, **and with firing on** — kills + nest respawns);
@@ -290,6 +292,7 @@ beam dies; the **beam stops at a wall** — a collinear mite beyond it survives;
 blocks line of sight; the turret **swings at a turn rate** and does not snap; targeting
 picks the mite **closest to the turret's direction**, not the spatially nearest; the
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
+**turret is locked while the beam is live** and free again once it fades; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
 revives at its nest **with its memory cleared** after the timeout); **wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
@@ -297,7 +300,7 @@ with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (109 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (112 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

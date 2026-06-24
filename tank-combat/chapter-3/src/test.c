@@ -694,6 +694,23 @@ static void t_tanks_fire(void) {
   int swung = 0; for (int i = 0; i < 20 && !swung; i++) { sim_tick(&W); if (W.mite_resp[0]) swung = 1; }
   check(swung, "fires once the turret has swung onto the target");
 
+  /* the turret is LOCKED while the laser is live: it cannot turn toward a new target
+   * until the beam fades, then it is free again. */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 2, 7);                                            /* turret east */
+  mite_reset(&W, 0, 5, 7);                                            /* due east -> fire east at once */
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
+  sim_tick(&W);
+  check(W.tank_tracer[0] > 0, "the beam is live just after firing");
+  uint16_t locked = W.tank_turret[0];
+  mite_reset(&W, 1, 2, 4);                                            /* a target due north now appears */
+  int held = 1;
+  for (int i = 0; i < LASER_TICKS - 1; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) held = 0; }
+  check(held && W.tank_turret[0] == locked, "the turret cannot turn while the laser is active");
+  int resumed = 0;
+  for (int i = 0; i < 30 && !resumed; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) resumed = 1; }
+  check(resumed, "once the beam fades the turret is free to turn again");
+
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 2, 7);

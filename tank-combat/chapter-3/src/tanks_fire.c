@@ -143,8 +143,10 @@ void tanks_fire(World* w) {
     } else {
       want = w->tank_ang[t];
     }
-    /* swing the turret toward the desired aim at its turn rate (not an instant snap) */
-    w->tank_turret[t] = turn_toward(turret, want, rate);
+    /* swing the turret toward the desired aim at its turn rate — but NOT while a beam is
+     * live: a shot locks the turret to its firing direction for the laser's lifetime, so
+     * the beam holds steady and the aim is committed for the duration of the shot. */
+    if (w->tank_tracer[t] == 0) w->tank_turret[t] = turn_toward(turret, want, rate);
 
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
     if (w->tank_tracer[t]   > 0) w->tank_tracer[t]--;
