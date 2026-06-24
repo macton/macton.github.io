@@ -309,6 +309,17 @@ static uint32_t mite_hash(World* w) {
     h = (h ^ ((uint32_t)w->mite_dest[m] << 3)) * 16777619u;
     h = (h ^ w->mite_rec_cell[b][m]) * 16777619u;
     h = (h ^ w->mite_rec_time[b][m]) * 16777619u;
+    h = (h ^ ((uint32_t)w->mite_resp[m] << 5)) * 16777619u;   /* combat: alive/dead is state too */
+  }
+  return h;
+}
+/* the tanks' combat state, folded for the determinism check (turret/cooldown/target) */
+static uint32_t tank_combat_hash(World* w) {
+  uint32_t h = 2166136261u;
+  for (uint32_t t = 0; t < N_TANKS; t++) {
+    h = (h ^ w->tank_turret[t]) * 16777619u;
+    h = (h ^ w->tank_cooldown[t]) * 16777619u;
+    h = (h ^ ((uint32_t)w->tank_target[t] | ((uint32_t)w->tank_shot_cell[t] << 16))) * 16777619u;
   }
   return h;
 }
@@ -493,6 +504,9 @@ static void t_mite_determinism(void) {
   sim_init(&W); sim_init(&W2);
   for (int i = 0; i < 2000; i++) { sim_tick(&W); sim_tick(&W2); }
   check(mite_hash(&W) == mite_hash(&W2), "same seed: identical state hash after 2000 ticks");
+  /* firing is on by default, so this run already exercised combat: the turrets,
+   * the kills, and the respawns must replay identically too (firing uses no RNG). */
+  check(tank_combat_hash(&W) == tank_combat_hash(&W2), "same seed: identical tank combat state (turrets/kills) after 2000 ticks");
 
   sim_init(&W); sim_set_seed(&W, 9999);
   uint32_t h_seed = mite_hash(&W);                     /* a different scatter */
@@ -520,8 +534,9 @@ static void t_mite_nests_fields(void) {
   check(part_ok && even, "nest_of(i) = i % 4 partitions the swarm into four equal nests");
 
   /* a homing mite reaches its nest cell (mite 0's nest is (1,7); start on the open
-   * screen-0 corridor left of the central block) */
-  sim_init(&W); gossip_setup(&W, 1);
+   * screen-0 corridor left of the central block). Firing off: this checks navigation,
+   * not combat — we don't want the test mite shot before it arrives. */
+  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
   mite_reset(&W, 0, 5, 7);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);             /* a record it carries home */
   W.mite_mode[0] = MM_HOME; W.mite_dest[0] = W.nest_cell[nest_of(0)];
@@ -529,8 +544,10 @@ static void t_mite_nests_fields(void) {
   for (int i = 0; i < 1200 && !reached_home; i++) { sim_tick(&W); if (W.mite_cell[0] == home) reached_home = 1; }
   check(reached_home, "a homing mite paths to its nest cell");
 
-  /* a hunting mite reaches its recorded cell (a tank sits there, so it converges) */
-  sim_init(&W); gossip_setup(&W, 1);
+  /* a hunting mite reaches its recorded cell (a tank sits there, so it converges).
+   * Firing off: tank 1 sits ON the goal, and would otherwise shoot the mite before
+   * it arrives — here we test the navigation, not the combat. */
+  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
   place_tank(&W, 1, 2, 7);                                 /* the sighting target (open corridor) */
   mite_reset(&W, 0, 5, 7);
   set_rec(&W, 0, (uint16_t)wcell(2, 7), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(2, 7);
@@ -586,6 +603,74 @@ static void t_mite_nests_fields(void) {
   check(mite_hash(&W) == mite_hash(&W2), "the swarm stays deterministic under overflow");
 }
 
+/* ---- combat: the tanks shoot the swarm ----------------------------------- */
+static void t_tanks_fire(void) {
+  printf("combat — aim in line of sight, one-shot kill, death cry, nest respawn:\n");
+
+  /* a tank kills the nearest mite it has line of sight to (open corridor, 3 cells) */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
+  W.fire_period = 30; W.mite_respawn = 300;
+  sim_tick(&W);
+  check(W.tank_target[0] == 0, "the turret acquires the mite in line of sight");
+  check(W.mite_resp[0] > 0, "one shot kills the targeted mite");
+  check(W.tank_cooldown[0] > 0, "the tank goes on cooldown after firing");
+  sim_tick(&W);   /* the next index rebuild drops the corpse */
+  check(W.mite_cnt[wcell(5, 7)] == 0, "a dead mite leaves the per-cell index (not drawn, not targetable)");
+
+  /* line of sight is required: a mite behind the central wall block is NOT shot */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 5, 7); mite_reset(&W, 0, 15, 7);      /* cols 8..11 (walls) lie between them */
+  W.fire_period = 30;
+  sim_tick(&W);
+  check(W.tank_target[0] == TGT_NONE, "a mite behind a wall is not targeted (line of sight required)");
+  check(W.mite_resp[0] == 0, "the wall-shadowed mite survives");
+
+  /* turret aims even when firing is off (fire_period 0): independent of the body */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 2, 7); W.tank_ang[0] = 0; W.tank_turret[0] = 0;   /* body faces east */
+  mite_reset(&W, 0, 2, 4);                                            /* mite due north */
+  W.fire_period = 0;
+  sim_tick(&W);
+  check(W.tank_target[0] == 0, "fire off: the turret still acquires a target in sight");
+  check(W.mite_resp[0] == 0, "fire off: no mite is killed");
+  check((W.tank_turret[0] >> ANGLE_SHIFT) == CARD_DI[DIR_N], "the turret aims independently of the body (north at a mite due north)");
+
+  /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 2, 7);
+  mite_reset(&W, 0, 5, 7);                                /* the target (closest, lowest index) */
+  mite_reset(&W, 1, 5, 8);                                /* a peer within 2x sensing range (=4) */
+  W.mite_sense = 2; W.fire_period = 30; W.mite_respawn = 300;
+  sim_tick(&W);
+  check(W.mite_resp[0] > 0, "the closest in-sight mite is the one shot");
+  check(get_rec_cell(&W, 1) == (uint16_t)wcell(2, 7), "death cry: a nearby mite learns the firing tank's cell");
+  check(W.mite_mode[1] == MM_HUNT && W.mite_dest[1] == (uint16_t)wcell(2, 7),
+        "death cry: the nearby mite turns to hunt the attacker");
+
+  /* respawn: a killed mite revives at its nest after the timeout, once (cap permitting) */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
+  W.fire_period = 30; W.mite_respawn = 10;
+  int died = 0; for (int i = 0; i < 5 && !died; i++) { sim_tick(&W); if (W.mite_resp[0]) died = 1; }
+  check(died, "the mite dies when shot (short respawn set)");
+  /* move the tank far away so the mite isn't instantly re-killed the moment it
+   * revives at its nest (a tank camping a nest legitimately suppresses it). */
+  place_tank(&W, 0, 41, 31);
+  uint16_t nest0 = W.nest_cell[nest_of(0)];
+  int revived = 0; for (int i = 0; i < 60 && !revived; i++) { sim_tick(&W); if (!W.mite_resp[0]) revived = 1; }
+  check(revived, "a dead mite revives after the respawn timeout");
+  check(W.mite_cell[0] == nest0, "the revived mite reappears at its nest cell");
+
+  /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and
+   * confirm reviving never pushes the nest cell over MITE_CAP */
+  sim_init(&W);
+  int breach = 0;
+  for (int i = 0; i < 3000; i++) { sim_tick(&W);
+    for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (W.mite_cnt[c] > MITE_CAP) breach = 1; }
+  check(!breach, "the crowding cap holds across 3000 ticks WITH firing (kills + nest respawns)");
+}
+
 int main(void) {
   t_level1();
   t_byte_fit();
@@ -600,6 +685,7 @@ int main(void) {
   t_mite_gossip();
   t_mite_behaviour();
   t_mite_nests_fields();
+  t_tanks_fire();
   t_mite_wall();
   t_mite_determinism();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

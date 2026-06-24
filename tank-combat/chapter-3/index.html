@@ -126,7 +126,8 @@
     <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 3</div>
     <h1>The Swarm</h1>
     <p class="sub">A thousand cheap units that wander, gossip the last place they saw a tank, and
-    swarm toward it — every structure the volume forces, live on the page.</p>
+    swarm toward it — while the tanks’ turrets pick them off and every kill feeds the gossip back.
+    Every structure the volume forces, live on the page.</p>
   </header>
 
   <div id="map">
@@ -148,6 +149,10 @@
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
     <span class="swatch" style="background:#e8c448"></span> homing ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
+    Each tank’s <b>turret</b> swivels to the nearest mite it can see and fires
+    (<span class="swatch" style="background:#ffee96"></span> tracer); a hit kills the mite — which
+    revives at its nest after a few seconds — and the <b>death cry</b> tells every nearby mite where
+    the shot came from, so the swarm turns on its attackers.
   </div>
 
   <article>
@@ -282,6 +287,28 @@
     served by a handful of routes is the chapter's payoff. Beside them the four tanks each
     compute their own exact route — same world, the cost matched to the need.</p>
 
+    <h2>The tanks shoot back: one transform, the same index</h2>
+    <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it
+    reuses the structures already here rather than adding new ones. Each tank's <strong>turret aims
+    independently of its body</strong>: every tick it scans the per-cell mite index in
+    <strong>rough rings</strong> outward, stops at the first ring holding a mite it has
+    <strong>line of sight</strong> to (an integer Bresenham walk over the wall grid), and snaps the
+    turret to it — “nearest” needs no sort, just the first non-empty ring. With a target and the
+    cooldown elapsed it fires on a fixed rate (default <strong>2 shots/sec</strong>); one shot
+    <strong>kills</strong> the mite, which leaves the board and <strong>revives at its nest</strong>
+    after a timeout (default <strong>5 s</strong>). Reviving respects the same crowding cap as
+    spawning — a full nest just waits a tick — so no rule the swarm obeys is broken by combat.</p>
+    <p>The payoff is the feedback loop. A kill is a <strong>death cry</strong>: every mite within
+    <strong>2× sensing range</strong> of the dead one has its record overwritten with the
+    <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
+    kill doesn't thin the swarm quietly, it <strong>broadcasts the shooter's position</strong> into
+    the very same gossip that spreads any sighting, and the survivors converge on the attacker. It
+    writes through the ordinary record buffer and the ordinary route fields; the belief field above
+    lights up around a tank that is firing. And it is <strong>deterministic</strong> — firing draws
+    no randomness — so same seed plus same inputs still replays exactly. The stats above report the
+    per-tick <strong>update</strong> cost (the whole CPU step: index, gossip, fields, movement,
+    combat) beside the frame, and the live <strong>alive / dead</strong> split of the pool.</p>
+
     <h2>Determinism &amp; the seed</h2>
     <p>All the randomness — every wander direction and every hunt/home roll — comes from a
     <strong>single integer PRNG</strong> (xorshift32) seeded in the world and advanced as mites
@@ -289,7 +316,7 @@
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
     to re-scatter the swarm, move the four nests, and tune the rest live:</p>
     <div class="fig">
-      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), mite speed/turn</p>
+      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay</p>
       <div id="w-mite-tunables"></div>
     </div>
 
@@ -302,10 +329,14 @@
     for a thousand routes. No central state. Integer fixed point throughout, no dynamic
     allocation, the simulation separated from rendering and wasm so the swarm, the gossip, the
     cap, and the route table are all tested natively with no browser or GPU. The render scales
-    with what's <em>visible</em>, not with the population.</p>
+    with what's <em>visible</em>, not with the population. And when the tanks shoot back, combat
+    <strong>added no new structures</strong> — aiming reads the per-cell index, the death cry writes
+    the existing record buffer, respawn obeys the existing cap — the proof that the layout, not the
+    feature list, is what the volume bought.</p>
 
     <p class="note">Source for this chapter:
     <a href="src/mites.c">mites.c</a> ·
+    <a href="src/tanks_fire.c">tanks_fire.c</a> ·
     <a href="src/agent_move.c">agent_move.c</a> ·
     <a href="src/agent_turn.c">agent_turn.c</a> ·
     <a href="src/sim.c">sim.c</a> ·

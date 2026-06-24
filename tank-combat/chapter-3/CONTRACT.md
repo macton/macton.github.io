@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (78 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (95 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -78,11 +78,11 @@ the inherited tests still pass and the baked escape table is byte-identical.
   pathing returns for that destination — the field *is* the tank route, keyed by
   destination instead of by tank. *(tested.)*
 - **The field table is sized from a measured peak.** Across representative scenarios the
-  distinct active-destination count peaks at ~22, and `N_FIELDS = 64` holds it with
-  headroom; the live count and peak are shown on the page. If the count ever exceeds
-  `N_FIELDS`, the overflow mites steer greedily that tick — **no crash, no cap break**.
-  *(tested: the peak stays within `N_FIELDS`; a forced overflow holds the cap and stays
-  deterministic.)*
+  distinct active-destination count peaks at ~22 (≈21 with combat on — the death cry's
+  goals overlap existing sightings), and `N_FIELDS = 64` holds it with headroom; the live
+  count and peak are shown on the page. If the count ever exceeds `N_FIELDS`, the overflow
+  mites steer greedily that tick — **no crash, no cap break**. *(tested: the peak stays
+  within `N_FIELDS`; a forced overflow holds the cap and stays deterministic.)*
 
 ## Movement & collision
 
@@ -91,12 +91,38 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Mites do not collide with tanks or with each other** — crowding is the cap (a
   decision-level rule), not physics. The cap gates the actual step in every mode.
 
+## Combat (the tanks shoot the swarm)
+
+- **Each turret aims independently of the body.** `tank_turret` tracks the nearest mite
+  the tank has line of sight to, found by scanning the per-cell index in rough rings and
+  stopping at the first ring with a visible mite (lowest index breaks ties); `tank_ang`
+  (movement heading) is unaffected. With no target the turret rests aligned with the
+  body. *(tested: the turret acquires an in-sight mite; it aims even with firing off.)*
+- **Line of sight is required.** A mite is targetable only if an integer Bresenham walk
+  from the tank cell to the mite cell crosses no wall. *(tested: a mite behind a wall is
+  not targeted.)*
+- **Fire is fixed-rate and one-shot-kill.** With a target and the cooldown elapsed, the
+  tank fires every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim
+  only). One shot kills the target mite: it is marked dead and leaves the per-cell index
+  on the next rebuild — a corpse is not drawn, gossiped, or targeted. *(tested: the kill,
+  the cooldown, and the corpse leaving the index.)*
+- **A kill is a death cry.** Every mite within **2× `mite_sense`** cells of the dead one
+  has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
+  through the ordinary record buffer — the swarm turns on its attacker by the same gossip
+  that spreads any sighting. *(tested.)*
+- **A dead mite revives at its nest after `mite_respawn` ticks** (default 300 = 5 s),
+  **respecting the crowding cap** (current occupancy + inbound reservations); if the nest
+  is full it waits a tick. *(tested: revival at the nest after the timeout; the cap holds
+  across thousands of ticks with firing on.)*
+
 ## Determinism
 
 - **The swarm is a pure function of the seed and the inputs.** Same seed + same inputs
   ⇒ identical state hash after K ticks; a different seed scatters differently;
   re-seeding to the same seed is reproducible. *(tested.)* All randomness is one
-  xorshift32 stream advanced in index order.
+  xorshift32 stream advanced in index order. **Combat draws no randomness** — aiming,
+  firing, kills, and respawns are deterministic, so they replay identically too.
+  *(tested: the tank combat-state hash matches across runs, with firing on by default.)*
 
 ## Boundaries / non-promises
 
@@ -109,6 +135,10 @@ the inherited tests still pass and the baked escape table is byte-identical.
   the mites share a few fields keyed by destination. A mite stuck where no field route
   exists (overflow, or a sealed goal) falls back to greedy and relies on the
   wander/erase rules and the swarm's collective coverage.
+- **The shot is hitscan, and only mites take damage.** A shot is an instant
+  line-of-sight kill, not a travelling projectile; tanks fire but are not damaged by the
+  swarm (tank health/score is not promised here). A turret parked on a nest legitimately
+  suppresses it — a revived mite in a tank's sights is shot again.
 - **The viewport is presentation only** (inherited): following, sliding, the picker,
   and which mites are drawn never change the simulation.
 

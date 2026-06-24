@@ -48,6 +48,14 @@ struct World {
   uint32_t tank_vxy[N_TANKS];   /* packed last-tick applied move vx|vy<<16 */
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
 
+  /* ---- per-tank turret/firing (the body heading drives movement; the turret
+   *      aims independently at the nearest mite in line of sight) ------------- */
+  uint16_t tank_turret  [N_TANKS];  /* turret aim angle (Q5.11), separate from the body heading */
+  uint16_t tank_cooldown[N_TANKS];  /* ticks until the next shot (0 = ready) */
+  uint16_t tank_target  [N_TANKS];  /* targeted mite index, or TGT_NONE */
+  uint16_t tank_shot_cell[N_TANKS]; /* world cell of the last shot (for the tracer) */
+  uint8_t  tank_tracer  [N_TANKS];  /* ticks the shot tracer is still drawn */
+
   /* ---- per-tank interaction + routing (every tank can path) -------------- */
   uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
   uint8_t  pdest_screen[N_TANKS];   /* destination screen (0..15) */
@@ -87,6 +95,7 @@ struct World {
   uint16_t mite_dest[N_MITES];   /* destination world cell (hunt=record, home=nest), or REC_EMPTY when wandering */
   uint16_t mite_cell[N_MITES];   /* current centre world cell, recomputed each tick from position */
   uint16_t mite_tgt [N_MITES];   /* reserved destination cell (== mite_cell at rest); the cap slot it owns */
+  uint16_t mite_resp[N_MITES];   /* respawn countdown: 0 = alive; >0 = dead (shot), ticks until it revives at its nest */
 
   /* the shared knowledge: last-known tank position (a world cell, or REC_EMPTY)
    * + the frame it was stamped. Double-buffered (read rec_buf, write 1-rec_buf,
@@ -127,6 +136,8 @@ struct World {
   uint8_t  mite_cap;             /* crowding cap in effect, 1..MITE_CAP */
   uint8_t  mite_phunt;           /* P(hunt) on adopting a newer peer record, percent (0..100); else go home */
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
+  uint16_t fire_period;          /* tank shot interval in ticks (0 = firing off); 30 = 2/sec at 60 ticks/sec */
+  uint16_t mite_respawn;         /* ticks a killed mite stays dead before reviving at its nest (300 = 5 s) */
 };
 
 _Static_assert(GRID_W <= 32, "a screen-grid row must fit in one uint32_t");

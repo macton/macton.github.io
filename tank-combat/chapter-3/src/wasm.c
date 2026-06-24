@@ -62,6 +62,7 @@ EXPORT(mite_xy_ptr)   uint32_t* mite_xy_ptr(void)   { return g_world.mite_xy; }
 EXPORT(mite_angle_ptr) uint16_t* mite_angle_ptr(void) { return g_world.mite_ang; }
 EXPORT(mite_mode_ptr) uint8_t*  mite_mode_ptr(void) { return g_world.mite_mode; }
 EXPORT(mite_dest_ptr) uint16_t* mite_dest_ptr(void) { return g_world.mite_dest; }   /* per-mite destination cell */
+EXPORT(mite_resp_ptr) uint16_t* mite_resp_ptr(void) { return g_world.mite_resp; }   /* per-mite respawn timer (0 = alive) */
 EXPORT(mite_cnt_ptr)  uint8_t*  mite_cnt_ptr(void)  { return g_world.mite_cnt; }   /* per-cell occupancy (heatmap) */
 EXPORT(nest_cell_ptr) uint16_t* nest_cell_ptr(void) { return g_world.nest_cell; }  /* the NEST_COUNT home cells */
 /* the record arrays are double-buffered; expose the CURRENT (post-tick) buffer so
@@ -90,6 +91,11 @@ EXPORT(set_mite_cap)   void     set_mite_cap(uint32_t v)   { g_world.mite_cap = 
 EXPORT(mite_phunt)     uint32_t mite_phunt(void)       { return g_world.mite_phunt; }
 EXPORT(set_mite_phunt) void     set_mite_phunt(uint32_t v) { g_world.mite_phunt = (uint8_t)(v > 100 ? 100 : v); }
 EXPORT(mite_seed)      uint32_t mite_seed(void)        { return g_world.mite_seed; }
+/* combat tunables: shot interval in ticks (0 = firing off) and respawn delay in ticks */
+EXPORT(fire_period)      uint32_t fire_period(void)        { return g_world.fire_period; }
+EXPORT(set_fire_period)  void     set_fire_period(uint32_t v)  { g_world.fire_period = (uint16_t)(v > 6000 ? 6000 : v); }
+EXPORT(mite_respawn)     uint32_t mite_respawn(void)       { return g_world.mite_respawn; }
+EXPORT(set_mite_respawn) void     set_mite_respawn(uint32_t v) { g_world.mite_respawn = (uint16_t)(v < 1 ? 1 : (v > 60000 ? 60000 : v)); }
 
 /* pointers — only the World fields the page reads (the chapter-2 path tables stay
  * simulation-internal in chapter 3, so they are no longer exported) */

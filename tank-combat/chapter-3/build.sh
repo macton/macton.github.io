@@ -18,11 +18,12 @@ cd "$(dirname "$0")"
 #   mite pool SoA + double-buffered records (1000)        ~= 35 KB
 #   mites.c BFS/scatter/tally scratch (file-static)       ~= 29 KB
 #   instance buffer (2 screens + up to N_MITES quads)     ~= 43 KB
+#   combat state (per-tank turret/cooldown/target + mite_resp[1000]) ~= 2 KB
 #   trace scratch, World scalars, 128 KB stack
-# Measured high-water mark (__heap_base) ~1.15 MiB (1,203,536 bytes) — chapter 2's
+# Measured high-water mark (__heap_base) ~1.04 MiB (1,088,408 bytes) — chapter 2's
 # 1 MiB no longer holds it (the mite pool, its per-cell index, and the bigger
 # instance buffer push it over), so the linear memory is raised to 2 MiB (32
-# pages, ~1.7x headroom). Still all static, integer, allocation-free.
+# pages, ~1.9x headroom). Still all static, integer, allocation-free.
 clang \
   --target=wasm32 \
   -nostdlib \
@@ -37,7 +38,7 @@ clang \
   -Wl,--stack-first \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_path.c src/agent_turn.c src/agent_move.c src/mites.c \
-  src/render.c src/dirtab.c src/collide.c src/escape_table.c \
+  src/tanks_fire.c src/render.c src/dirtab.c src/collide.c src/escape_table.c \
   src/grid_paths.c src/edge_paths.c src/map_data.c
 
 VER="$(date -u '+%Y.%m.%d-%H%M%S')"

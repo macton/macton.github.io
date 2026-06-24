@@ -80,6 +80,7 @@ async function main() {
     mcnt:  () => new Uint8Array(mem(), wasm.mite_cnt_ptr(), C.NWC),
     mrecCell: () => new Uint16Array(mem(), wasm.mite_rec_cell_ptr(), C.NM),  // CURRENT buffer (post-tick)
     mrecTime: () => new Uint32Array(mem(), wasm.mite_rec_time_ptr(), C.NM),
+    mresp: () => new Uint16Array(mem(), wasm.mite_resp_ptr(), C.NM),         // 0 = alive; >0 = dead (respawn countdown)
     instBytes: (n) => new Uint8Array(mem(), wasm.inst_ptr(), n * C.STRIDE),
   };
 
@@ -164,7 +165,10 @@ async function main() {
   if (statusEl) statusEl.style.display = "none";
 
   // --- frame loop ---------------------------------------------------------
-  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0;
+  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
+  // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
+  // movement, combat) — EMA-smoothed so the readout is stable across frames.
+  const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
   dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; }; dbg.onReset = () => { wasm.init(); slide = null; setPicker(false); };
 
   function frame(now) {
@@ -178,8 +182,8 @@ async function main() {
     if (manual) wasm.set_input(sel, bits);
     document.querySelector(".pad").style.display = manual ? "grid" : "none";
 
-    if (stepOnce) { wasm.tick(); stepOnce = false; acc = 0; }
-    else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { wasm.tick(); acc -= TICK_DT; s++; } }
+    if (stepOnce) { tick(); stepOnce = false; acc = 0; }
+    else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
 
     if (!pickerOpen && !manualView && sel !== 255 && !slide) {
@@ -205,7 +209,7 @@ async function main() {
     articleMap.update(camIdx);
     if (pickerOpen) pickerMap.update(camIdx);
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
-    dbg.update({ fps, dt, instCount: n, cam });
+    dbg.update({ fps, dt, updMs, instCount: n, cam });
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -272,12 +276,14 @@ function mountWidgets(wasm, view, C) {
 
   const sc = at("w-stats");
   if (sc) { sc.classList.add("stats");
-    updaters.push(({ fps, dt, instCount, cam }) => {
-      const mode = view.mmode();
-      let hunt = 0, home = 0; for (let m = 0; m < C.NM; m++) { if (mode[m] === 1) hunt++; else if (mode[m] === 2) home++; }
+    updaters.push(({ fps, dt, updMs, instCount, cam }) => {
+      const mode = view.mmode(), resp = view.mresp();
+      let hunt = 0, home = 0, dead = 0;
+      for (let m = 0; m < C.NM; m++) { if (resp[m]) { dead++; continue; } if (mode[m] === 1) hunt++; else if (mode[m] === 2) home++; }
+      const alive = C.NM - dead;
       sc.innerHTML =
-        `frame <b>${wasm.frame()}</b> · ${(dt * 1000).toFixed(1)} ms · ${fps.toFixed(0)} fps · viewport <b>${cam.sx},${cam.sy}</b><br>` +
-        `mites <b>${C.NM}</b> · hunting <b>${hunt}</b> · homing <b>${home}</b> · wandering <b>${C.NM - hunt - home}</b><br>` +
+        `frame <b>${wasm.frame()}</b> · update <b>${updMs.toFixed(2)}</b> ms · ${(dt * 1000).toFixed(1)} ms/frame · ${fps.toFixed(0)} fps · viewport <b>${cam.sx},${cam.sy}</b><br>` +
+        `mites <b>${alive}</b> alive · hunting <b>${hunt}</b> · homing <b>${home}</b> · wandering <b>${alive - hunt - home}</b> · dead <b>${dead}</b><br>` +
         `shared routes <b>${wasm.field_active()}</b>/${C.NF} active · peak <b>${wasm.field_peak()}</b> · cap <b>${wasm.mite_cap()}</b>/cell<br>` +
         `drawn instances <b>${instCount}</b> · mem <b>${(wasm.memory.buffer.byteLength / 1048576).toFixed(1)}</b> MiB`;
     });
@@ -392,6 +398,12 @@ function mountWidgets(wasm, view, C) {
     const phunt = numField("P(hunt) on adopt (%)", 0, 100, 5, wasm.mite_phunt());
     const speed = numField("mite speed (sub/tick)", 0, 64, 1, wasm.mite_speed());
     const turn  = numField("mite turn (ang/tick)", 0, 8000, 64, wasm.mite_turn());
+    // combat: the page edits human units (shots/sec, seconds); the sim stores ticks
+    // (60/sec). fire rate 0 turns the turrets to aim-only (no firing).
+    const rateOf = () => { const p = wasm.fire_period(); return p > 0 ? Math.round(600 / p) / 10 : 0; };
+    const respOf = () => Math.round(wasm.mite_respawn() / 6) / 10;
+    const fire    = numField("fire rate (shots/sec, 0=off)", 0, 20, 0.5, rateOf());
+    const respawn = numField("respawn delay (sec)", 0.5, 120, 0.5, respOf());
     const size  = numField("mite radius (subcells)", C.MR, C.MR, 1, C.MR); size.input.disabled = true;
     seed.input.onchange  = () => wasm.set_seed(parseInt(seed.input.value) | 0);
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
@@ -399,7 +411,9 @@ function mountWidgets(wasm, view, C) {
     phunt.input.onchange = () => wasm.set_mite_phunt(parseInt(phunt.input.value) | 0);
     speed.input.onchange = () => wasm.set_mite_speed(parseInt(speed.input.value) | 0);
     turn.input.onchange  = () => wasm.set_mite_turn(parseInt(turn.input.value) | 0);
-    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, size.wrap);
+    fire.input.onchange    = () => { const r = parseFloat(fire.input.value) || 0; wasm.set_fire_period(r > 0 ? Math.max(1, Math.round(60 / r)) : 0); };
+    respawn.input.onchange = () => { const s = parseFloat(respawn.input.value) || 0; wasm.set_mite_respawn(Math.max(1, Math.round(s * 60))); };
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, size.wrap);
 
     // the four nest positions (re-fold a nest's field on change)
     const nests = [];
@@ -413,6 +427,7 @@ function mountWidgets(wasm, view, C) {
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
       sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
+      sync(fire, rateOf); sync(respawn, respOf);
       const nc = view.nest();
       for (let n = 0; n < C.NEST; n++) { sync(nests[n].x, () => nc[n] % C.BW); sync(nests[n].y, () => (nc[n] / C.BW) | 0); } });
   }

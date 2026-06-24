@@ -4,12 +4,15 @@
 #include "agent_turn.h"
 #include "agent_move.h"
 #include "mites.h"
+#include "tanks_fire.h"
 
 /* place a tank centred in world cell (wcx,wcy), facing discrete direction di */
 static void place(World* w, uint32_t t, uint32_t wcx, uint32_t wcy, uint32_t di) {
   w->tank_xy[t]  = xy_pack((int32_t)wcx * SUB + SUB / 2, (int32_t)wcy * SUB + SUB / 2);
   w->tank_ang[t] = (uint16_t)(di << ANGLE_SHIFT);
   w->tank_in[t] = 0; w->tank_vxy[t] = 0; w->tank_hit[t] = 0;
+  w->tank_turret[t] = w->tank_ang[t]; w->tank_cooldown[t] = 0;
+  w->tank_target[t] = TGT_NONE; w->tank_shot_cell[t] = 0; w->tank_tracer[t] = 0;
 }
 
 void sim_init(World* w) {
@@ -35,10 +38,12 @@ void sim_init(World* w) {
   /* mite tunables (the page edits these live) */
   w->mite_speed = 12;         /* a touch slower than the tanks, so the swarm gives chase */
   w->mite_turn  = 2048;       /* nimble: ~8 ticks per 90 degrees */
-  w->mite_sense = 1;          /* sense a tank within one cell (Chebyshev) */
+  w->mite_sense = 2;          /* sense a tank within two cells (Chebyshev) */
   w->mite_cap   = MITE_CAP;   /* at most 4 mite centres per cell */
   w->mite_phunt = 80;         /* 80% hunt the sighting on adopting a record; 20% carry it home */
   w->mite_seed  = 1337;       /* the editable swarm seed */
+  w->fire_period  = 30;       /* tank shots every 30 ticks = 2/sec (0 = firing off) */
+  w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */
 
   /* the four nests (home cells): one open ring cell in each corner screen */
   w->nest_cell[0] = wc_pack( 1,  7);
@@ -65,6 +70,11 @@ void sim_init(World* w) {
 void sim_tick(World* w) {
   /* 1. the swarm's acceleration structure, rebuilt from current positions */
   mites_build_index(w);
+  /* 1b. combat respawn: revive timed-out dead mites at their nests, INTO the freshly
+   *     built index (so the crowding cap and this tick's gossip/movement see them as
+   *     ordinary live mites). Must precede mites_step, whose cap reservation reads the
+   *     index — reviving after it could push a nest cell over the cap. */
+  mites_respawn(w);
   /* 2. tank input (controls for MANUAL, route lookup for the rest) — unchanged */
   tanks_path(w);
   /* 3. records: gossip the last-known tank position (double-buffered LWW); each
@@ -75,6 +85,10 @@ void sim_tick(World* w) {
   mites_update_fields(w);
   /* 5. mite movement: crowding cap (in-order reservation) + steer along the field */
   mites_step(w);
+  /* 5b. combat: aim every turret at the nearest mite in line of sight and fire — a
+   *     kill is a "death cry" that feeds the firing tank's position back into the
+   *     gossip near the dead mite (revival happened in step 1b). */
+  tanks_fire(w);
   /* 6. turn + auto-steer: tanks at TANK turn rate, mites at the mite turn rate */
   agent_turn(w->tank_xy, w->tank_ang, w->tank_in, w->tank_hit, N_TANKS, w->turn_rate, w->grid);
   agent_turn(w->mite_xy, w->mite_ang, w->mite_in, w->mite_hit, N_MITES, w->mite_turn, w->grid);

@@ -97,7 +97,7 @@ void mites_spawn(World* w) {
     w->mite_xy[m]  = xy_pack(wcx * SUB + SUB / 2, wcy * SUB + SUB / 2);
     w->mite_ang[m] = (uint16_t)(CARD_DI[xs32(&w->rng) & 3] << ANGLE_SHIFT);
     w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
-    w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY;
+    w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_resp[m] = 0;
     w->mite_cell[m] = (uint16_t)cell; w->mite_tgt[m] = (uint16_t)cell;
     w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
     w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
@@ -109,6 +109,7 @@ void mites_spawn(World* w) {
 void mites_build_index(World* w) {
   for (uint32_t i = 0; i < N_WORLD_CELLS; i++) w->mite_cnt[i] = 0;
   for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;             /* dead (shot): not on the board */
     int wcx = wrap_wcx(xy_lo(w->mite_xy[m]) >> SUB_SHIFT);
     int wcy = wrap_wcy(xy_hi(w->mite_xy[m]) >> SUB_SHIFT);
     uint32_t c = (uint32_t)wc_pack(wcx, wcy);
@@ -142,6 +143,7 @@ void mites_records(World* w) {
   int sense = w->mite_sense;
 
   for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;                         /* dead: no gossip */
     uint32_t mc = w->mite_cell[m];
     uint16_t my_c = rc_in[m]; uint32_t my_t = rt_in[m];
     uint16_t new_c = my_c; uint32_t new_t = my_t; uint8_t mode = w->mite_mode[m];
@@ -221,7 +223,7 @@ void mites_update_fields(World* w) {
     if (!g_destmark[c]) { g_destmark[c] = 1; distinct++; }
   }
   for (uint32_t m = 0; m < N_MITES; m++) {
-    if (w->mite_mode[m] != MM_HUNT) continue;
+    if (w->mite_resp[m] || w->mite_mode[m] != MM_HUNT) continue;  /* dead, or not hunting */
     uint16_t d = w->mite_dest[m];
     if (d == REC_EMPTY || g_destmark[d]) continue;               /* a nest or an already-seen goal */
     g_destmark[d] = 1; distinct++;
@@ -323,9 +325,10 @@ void mites_step(World* w) {
    * keeps <= cap centres per cell every tick (next occ[C] <= tally[C] <= cap). */
   for (uint32_t i = 0; i < N_WORLD_CELLS; i++) g_tally[i] = w->mite_cnt[i];
   for (uint32_t m = 0; m < N_MITES; m++)
-    if (w->mite_tgt[m] != w->mite_cell[m]) g_tally[w->mite_tgt[m]]++;
+    if (!w->mite_resp[m] && w->mite_tgt[m] != w->mite_cell[m]) g_tally[w->mite_tgt[m]]++;
 
   for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;                          /* dead: frozen */
     uint32_t mc = w->mite_cell[m];
     if (w->mite_tgt[m] == mc) pick_step(w, m, mc, cap);     /* arrived/at rest -> re-choose */
     set_mite_input(w, m);

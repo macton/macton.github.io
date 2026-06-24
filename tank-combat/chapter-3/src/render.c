@@ -27,6 +27,7 @@ static const uint32_t COL_MITE_HUNT_COLD= RGBA(150,  64,  74, 255);
 /* the four nests, drawn on the map and used to tint the mites homing to each */
 static const uint32_t COL_NEST[NEST_COUNT] = {
   RGBA(232, 196, 72, 255), RGBA(120, 196, 232, 255), RGBA(150, 210, 130, 255), RGBA(206, 140, 226, 255) };
+static const uint32_t COL_TRACER = RGBA(255, 238, 150, 255);   /* the muzzle-to-target shot line */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
 
 static uint32_t mite_colour(const World* w, uint32_t m) {
@@ -99,6 +100,7 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
    * the cost scales with the visible swarm, not the 1000-strong pool. Each is one
    * small quad rotated to its heading, tinted by its role (mite_colour). */
   for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;                          /* dead mites aren't drawn (or indexed) */
     int wcx = wrap_wcx(xy_lo(w->mite_xy[m]) >> SUB_SHIFT), wcy = wrap_wcy(xy_hi(w->mite_xy[m]) >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + xy_lo(w->mite_xy[m]) - sox, ly = oy + xy_hi(w->mite_xy[m]) - soy;
@@ -114,14 +116,33 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     int lx = ox + xy_lo(w->tank_xy[t]) - sox, ly = oy + xy_hi(w->tank_xy[t]) - soy;
     k = push(out, k, lx, ly, 118, 100, 16384, 0, w->tstate[t] == TS_MANUAL ? COL_MANUAL : COL_AUTOPATH);
   }
-  /* tank bodies + barrels */
+  /* tank bodies + barrels: the BODY faces its movement heading (tank_ang); the
+   * BARREL faces the turret (tank_turret), which aims independently at the target.
+   * A live tracer is a thin bright beam from the muzzle to the shot cell. */
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int wcx = wrap_wcx(xy_lo(w->tank_xy[t]) >> SUB_SHIFT), wcy = wrap_wcy(xy_hi(w->tank_xy[t]) >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + xy_lo(w->tank_xy[t]) - sox, ly = oy + xy_hi(w->tank_xy[t]) - soy;
-    uint32_t di = w->tank_ang[t] >> ANGLE_SHIFT; int32_t co = dir_cos(di), si = dir_sin(di);
-    k = push(out, k, lx, ly, 87, 67, co, si, COL_BODY[t]);
-    k = push(out, k, lx + ((co * 87) >> TRIG_SHIFT), ly + ((si * 87) >> TRIG_SHIFT), 56, 18, co, si, COL_BARR[t]);
+    uint32_t bi = w->tank_ang[t]    >> ANGLE_SHIFT; int32_t bco = dir_cos(bi), bsi = dir_sin(bi);
+    uint32_t ti = w->tank_turret[t] >> ANGLE_SHIFT; int32_t tco = dir_cos(ti), tsi = dir_sin(ti);
+
+    /* tracer: project the (toroidal) muzzle->target vector onto the turret dir for
+     * its length, then a thin quad centred on the half-way point along that dir. */
+    if (w->tank_tracer[t]) {
+      int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
+      int scx = wc_x(w->tank_shot_cell[t]) * SUB + SUB / 2, scy = wc_y(w->tank_shot_cell[t]) * SUB + SUB / 2;
+      int ddx = scx - tx; if (ddx >  ARENA_W_SUB / 2) ddx -= ARENA_W_SUB; if (ddx < -ARENA_W_SUB / 2) ddx += ARENA_W_SUB;
+      int ddy = scy - ty; if (ddy >  ARENA_H_SUB / 2) ddy -= ARENA_H_SUB; if (ddy < -ARENA_H_SUB / 2) ddy += ARENA_H_SUB;
+      int len = (ddx * tco + ddy * tsi) >> TRIG_SHIFT;     /* ~distance along the turret */
+      if (len > 0) {
+        int half = len / 2;
+        k = push(out, k, lx + ((tco * half) >> TRIG_SHIFT), ly + ((tsi * half) >> TRIG_SHIFT),
+                 half, 6, tco, tsi, COL_TRACER);
+      }
+    }
+
+    k = push(out, k, lx, ly, 87, 67, bco, bsi, COL_BODY[t]);
+    k = push(out, k, lx + ((tco * 87) >> TRIG_SHIFT), ly + ((tsi * 87) >> TRIG_SHIFT), 56, 18, tco, tsi, COL_BARR[t]);
   }
   return k;
 }
