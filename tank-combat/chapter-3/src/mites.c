@@ -100,6 +100,7 @@ void mites_spawn(World* w) {
     w->mite_ang[m] = (uint16_t)(CARD_DI[xs32(&w->rng) & 3] << ANGLE_SHIFT);
     w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
     w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_resp[m] = 0;
+    w->mite_stuck[m] = 0;
     w->mite_cell[m] = (uint16_t)cell; w->mite_tgt[m] = (uint16_t)cell;
     w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
     w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
@@ -371,7 +372,22 @@ void mites_step(World* w) {
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                          /* dead: frozen */
     uint32_t mc = w->mite_cell[m];
-    if (w->mite_tgt[m] == mc) pick_step(w, m, mc, cap);     /* arrived/at rest -> re-choose */
+    if (w->mite_tgt[m] == mc) {
+      pick_step(w, m, mc, cap);                             /* arrived/at rest -> re-choose */
+      /* jam detector: a hunter/homer that still can't advance (no open, non-full neighbour)
+       * is stuck. After MITE_STUCK_MAX such ticks it gives up and wanders, so a knot of mites
+       * jammed around a nest (revived hunters funnelling out, homers blocked from a full nest
+       * cell) dissolves instead of freezing. A mite making progress, or any wanderer, resets. */
+      if ((w->mite_mode[m] == MM_HUNT || w->mite_mode[m] == MM_HOME) && w->mite_tgt[m] == mc) {
+        if (++w->mite_stuck[m] >= MITE_STUCK_MAX) {
+          w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_stuck[m] = 0;
+        }
+      } else {
+        w->mite_stuck[m] = 0;
+      }
+    } else {
+      w->mite_stuck[m] = 0;                                 /* in transit: making progress */
+    }
     set_mite_input(w, m);
   }
 }

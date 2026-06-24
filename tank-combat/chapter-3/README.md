@@ -82,6 +82,17 @@ mites in index order against a per-cell **bitmask** of reserved sub-segments (cu
 occupants + committed inbound, each a `1 << seg`). Pinned by tests, including a
 forced-convergence stress and the one-mite-per-sub-segment invariant.
 
+**Jam detector (give up if stuck).** The cap can deadlock a *knot* of mites all wanting
+the same exits — most visibly a cluster of revived hunters funnelling out of one nest, or
+homers blocked from a full nest cell. So a **hunting or homing** mite that cannot advance
+toward its destination for `MITE_STUCK_MAX` (= 16) consecutive ticks **gives up and
+wanders**, and the knot dissolves instead of freezing. It is self-targeting: a mite making
+any progress resets its counter, and a mite stuck *at the front* (against a tank) re-senses
+the tank the very next tick and resumes — so the attack holds while dead-end pile-ups clear.
+Without it the swarm collapses into permanent green blobs around the nests (measured: ~170
+hunters frozen at the nests and climbing; with it, that knot churns out and the wanderer
+population recovers from ~14 to ~180).
+
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
 One **record** per mite, a **last-write-wins register** packed into a `uint16` cell +

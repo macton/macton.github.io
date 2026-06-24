@@ -103,6 +103,7 @@ struct World {
   uint16_t mite_cell[N_MITES];   /* current centre world cell, recomputed each tick from position */
   uint16_t mite_tgt [N_MITES];   /* reserved destination cell (== mite_cell at rest); the cap slot it owns */
   uint16_t mite_resp[N_MITES];   /* respawn countdown: 0 = alive; >0 = dead (shot), ticks until it revives at its nest */
+  uint8_t  mite_stuck[N_MITES];  /* consecutive ticks a hunter/homer has been unable to advance (jam detector) */
 
   /* the shared knowledge: last-known tank position (a world cell, or REC_EMPTY)
    * + the frame it was stamped. Double-buffered (read rec_buf, write 1-rec_buf,

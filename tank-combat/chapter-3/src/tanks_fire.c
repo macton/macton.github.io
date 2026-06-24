@@ -219,6 +219,7 @@ void mites_respawn(World* w) {
       uint32_t c = (uint32_t)rc; int wcx = wc_x(c), wcy = wc_y(c);
       w->mite_xy[m] = xy_pack(wcx * SUB + SUB / 2 + seg_ox(m), wcy * SUB + SUB / 2 + seg_oy(m));
       w->mite_ang[m] = 0; w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
+      w->mite_stuck[m] = 0;
       w->mite_cell[m] = (uint16_t)c; w->mite_tgt[m] = (uint16_t)c;
       /* adopt the nest's stored gossip: hunt the last-known tank position it holds, or
        * wander if it knows nothing. Both record buffers are seeded so the next gossip

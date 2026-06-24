@@ -40,6 +40,13 @@ the inherited tests still pass and the baked escape table is byte-identical.
   sub-segment, or holds, and re-evaluates next tick. *(tested: the cap and the
   one-per-sub-segment invariant hold across thousands of natural ticks **and** under
   forced convergence of the whole swarm on one cell; and it is binding — cells reach 4.)*
+- **Jam detector.** A **hunting or homing** mite that cannot advance toward its destination
+  for `MITE_STUCK_MAX` (= 16) consecutive ticks **gives up and wanders**, so a cap-deadlocked
+  knot (revived hunters funnelling out of a nest, homers blocked from a full nest cell)
+  dissolves instead of freezing into a permanent blob. Any progress resets the counter, and
+  a mite jammed against a tank re-senses it next tick and resumes — the front holds while
+  dead-ends clear. *(tested: a boxed-in hunter keeps hunting until the patience runs out,
+  then reverts to wander.)*
 
 ## The shared record (last-write-wins)
 

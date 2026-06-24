@@ -101,6 +101,14 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define MM_HUNT     1           /* path to the recorded tank cell */
 #define MM_HOME     2           /* path to this mite's nest */
 
+/* A hunter/homer that cannot advance toward its destination for this many consecutive ticks
+ * is jammed (e.g. a knot of revived mites funnelling out of one nest) — it gives up and
+ * wanders, so the knot dissolves instead of freezing. Near a tank it re-senses next tick and
+ * resumes hunting, so the front still holds; only a genuine standstill triggers it. */
+#ifndef MITE_STUCK_MAX
+#define MITE_STUCK_MAX 16
+#endif
+
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
  * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction

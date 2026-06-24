@@ -508,6 +508,23 @@ static void t_mite_behaviour(void) {
   mites_build_index(&W); mites_records(&W);
   check(W.mite_mode[1] == MM_HUNT && get_rec_cell(&W, 1) == (uint16_t)wcell(40, 40),
         "a newer record interrupts a homing mite and re-rolls (here -> hunt the new cell)");
+
+  /* the jam detector: a hunter that cannot advance for MITE_STUCK_MAX ticks gives up and
+   * wanders (so a knot of jammed mites dissolves instead of freezing forever) */
+  sim_init(&W); gossip_setup(&W, 1);
+  W.grid[7] |= (1u << 9) | (1u << 11);   /* box cell (10,7): force its four neighbours to walls */
+  W.grid[6] |= (1u << 10);               /* (10,6) */
+  W.grid[8] |= (1u << 10);               /* (10,8) */
+  mite_reset(&W, 0, 10, 7);
+  W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(30, 30); W.mite_stuck[0] = 0;
+  int gaveup = 0, before = -1;
+  for (int i = 0; i < MITE_STUCK_MAX + 2; i++) {
+    mites_build_index(&W); mites_step(&W);
+    if (i == MITE_STUCK_MAX - 2) before = (W.mite_mode[0] == MM_HUNT);   /* still hunting just before */
+    if (W.mite_mode[0] == MM_WANDER) { gaveup = 1; break; }
+  }
+  check(before == 1, "a jammed hunter keeps hunting until the patience runs out");
+  check(gaveup, "a hunter jammed for MITE_STUCK_MAX ticks gives up and wanders (knots dissolve)");
 }
 
 /* ---- wall safety at MITE_R ----------------------------------------------- */
