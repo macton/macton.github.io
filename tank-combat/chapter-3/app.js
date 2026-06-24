@@ -247,11 +247,12 @@ function makeMiniMap(container, onPick, R) {
   const put = (img, lcx, lcy, c) => { const o = (lcy * C.GW + lcx) * 4, d = img.data; d[o] = c[0]; d[o+1] = c[1]; d[o+2] = c[2]; d[o+3] = 255; };
   const scr = (wcx, wcy) => ((wcy / C.GH) | 0) * C.SX + ((wcx / C.GW) | 0);
   return { update(camIdx) {
-    const grid = view.grid(), xy = view.xy(), mxy = view.mxy(), mmode = view.mmode(), nest = view.nest();
+    const grid = view.grid(), xy = view.xy(), mxy = view.mxy(), mmode = view.mmode(), resp = view.mresp(), nest = view.nest();
     for (let s = 0; s < C.NS; s++) { const img = imgs[s];
       for (let cy = 0; cy < C.GH; cy++) { const w = grid[s * C.GH + cy];
         for (let cx = 0; cx < C.GW; cx++) put(img, cx, cy, ((w >> cx) & 1) ? WALL : BG); } }
-    for (let m = 0; m < C.NM; m++) { const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8;
+    for (let m = 0; m < C.NM; m++) { if (resp[m]) continue;             // dead mites aren't on the board
+      const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8;
       const md = mmode[m], c = md === 1 ? MITE_HUNT : md === 2 ? NESTC[m % C.NEST] : MITE;
       put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, c); }
     for (let n = 0; n < C.NEST; n++) { const wcx = nest[n] % C.BW, wcy = (nest[n] / C.BW) | 0; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, NESTB); }
@@ -404,6 +405,7 @@ function mountWidgets(wasm, view, C) {
     const respOf = () => Math.round(wasm.mite_respawn() / 6) / 10;
     const fire    = numField("fire rate (shots/sec, 0=off)", 0, 20, 0.5, rateOf());
     const respawn = numField("respawn delay (sec)", 0.5, 120, 0.5, respOf());
+    const trate   = numField("turret turn (ang/tick)", 64, 8000, 64, wasm.turret_rate());
     const size  = numField("mite radius (subcells)", C.MR, C.MR, 1, C.MR); size.input.disabled = true;
     seed.input.onchange  = () => wasm.set_seed(parseInt(seed.input.value) | 0);
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
@@ -413,7 +415,8 @@ function mountWidgets(wasm, view, C) {
     turn.input.onchange  = () => wasm.set_mite_turn(parseInt(turn.input.value) | 0);
     fire.input.onchange    = () => { const r = parseFloat(fire.input.value) || 0; wasm.set_fire_period(r > 0 ? Math.max(1, Math.round(60 / r)) : 0); };
     respawn.input.onchange = () => { const s = parseFloat(respawn.input.value) || 0; wasm.set_mite_respawn(Math.max(1, Math.round(s * 60))); };
-    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, size.wrap);
+    trate.input.onchange   = () => wasm.set_turret_rate(parseInt(trate.input.value) | 0);
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, trate.wrap, size.wrap);
 
     // the four nest positions (re-fold a nest's field on change)
     const nests = [];
@@ -427,7 +430,7 @@ function mountWidgets(wasm, view, C) {
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
       sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
-      sync(fire, rateOf); sync(respawn, respOf);
+      sync(fire, rateOf); sync(respawn, respOf); sync(trate, () => wasm.turret_rate());
       const nc = view.nest();
       for (let n = 0; n < C.NEST; n++) { sync(nests[n].x, () => nc[n] % C.BW); sync(nests[n].y, () => (nc[n] / C.BW) | 0); } });
   }

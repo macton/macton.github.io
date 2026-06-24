@@ -127,7 +127,8 @@ struct World {
 
   uint32_t frame;
   uint16_t move_speed;           /* tank speed: subcells per tick */
-  uint16_t turn_rate;            /* tank turn: angle units per tick */
+  uint16_t turn_rate;            /* tank turn: angle units per tick (the body) */
+  uint16_t turret_rate;          /* tank turret turn: angle units per tick (aims independently of the body) */
   uint16_t collide_scale;        /* speed scale while colliding, Q0.8 (256 = full, 128 = 50%) */
   /* mite tunables (the page edits these live) */
   uint16_t mite_speed;           /* mite speed: subcells per tick */

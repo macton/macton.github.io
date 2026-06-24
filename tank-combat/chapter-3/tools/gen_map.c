@@ -38,7 +38,8 @@ static void draw_interior(uint32_t s) {
     case 9:  box(3,3,8,6); box(11,8,16,11); break;                   /* two rectangles */
     case 10: ring(13,3,15,5); setw(4,4,1); box(8,10,10,11); break;   /* small island + scatter */
     case 11: ring(5,3,14,11); setw(10,3,0); setw(10,11,0); setw(5,7,0); setw(14,7,0); break; /* frame w/ doorways */
-    case 12: ring(3,2,16,12); ring(6,5,13,9); break;                 /* nested frames */
+    case 12: ring(3,2,16,12); ring(6,5,13,9);
+             setw(3,7,0); setw(16,7,0); setw(6,7,0); setw(13,7,0); break; /* nested frames, doorways on row 7 (no islands) */
     case 13: hbar(3,3,12); vbar(12,3,7); hbar(7,7,16); vbar(7,7,11); hbar(11,7,16); break; /* zigzag */
     case 14: for(int y=3;y<=10;y+=3) for(int x=3;x<=15;x+=3) box(x,y,x+1,y+1); break; /* checker blocks */
     default: for(int k=0;k<5;k++){ hbar(3+k,3,16-k); } box(8,9,11,11); break;     /* steps + block */

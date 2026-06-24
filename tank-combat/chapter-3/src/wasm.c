@@ -84,6 +84,8 @@ EXPORT(mite_speed)     uint32_t mite_speed(void)       { return g_world.mite_spe
 EXPORT(set_mite_speed) void     set_mite_speed(uint32_t v) { g_world.mite_speed = (uint16_t)v; }
 EXPORT(mite_turn)      uint32_t mite_turn(void)        { return g_world.mite_turn; }
 EXPORT(set_mite_turn)  void     set_mite_turn(uint32_t v)  { g_world.mite_turn = (uint16_t)v; }
+EXPORT(turret_rate)     uint32_t turret_rate(void)        { return g_world.turret_rate; }
+EXPORT(set_turret_rate) void     set_turret_rate(uint32_t v) { g_world.turret_rate = (uint16_t)v; }
 EXPORT(mite_sense)     uint32_t mite_sense(void)       { return g_world.mite_sense; }
 EXPORT(set_mite_sense) void     set_mite_sense(uint32_t v) { g_world.mite_sense = (uint8_t)(v > BIG_W ? BIG_W : v); }
 EXPORT(mite_cap)       uint32_t mite_cap(void)         { return g_world.mite_cap; }

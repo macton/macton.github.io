@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (95 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (103 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -93,27 +93,37 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Combat (the tanks shoot the swarm)
 
-- **Each turret aims independently of the body.** `tank_turret` tracks the nearest mite
-  the tank has line of sight to, found by scanning the per-cell index in rough rings and
-  stopping at the first ring with a visible mite (lowest index breaks ties); `tank_ang`
-  (movement heading) is unaffected. With no target the turret rests aligned with the
-  body. *(tested: the turret acquires an in-sight mite; it aims even with firing off.)*
+- **Each turret aims independently of the body and turns at a finite rate.**
+  `tank_turret` is separate from `tank_ang` (movement heading) and swings toward its aim
+  at `turret_rate` per tick — it does not snap. With no target it relaxes toward the body
+  heading. *(tested: the turret aims even with firing off; it does not snap; the body is
+  unaffected.)*
+- **The target is the mite MOST LIKELY TO BE HIT, not the spatially nearest.** Among the
+  mites in line of sight (within the search radius), the turret targets the one closest to
+  its current direction — the least rotation to bring the barrel on — over the per-cell
+  index; lowest index breaks angle ties. *(tested: a farther but aligned mite is chosen
+  over a nearer off-axis one.)*
 - **Line of sight is required.** A mite is targetable only if an integer Bresenham walk
   from the tank cell to the mite cell crosses no wall. *(tested: a mite behind a wall is
   not targeted.)*
-- **Fire is fixed-rate and one-shot-kill.** With a target and the cooldown elapsed, the
-  tank fires every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim
-  only). One shot kills the target mite: it is marked dead and leaves the per-cell index
-  on the next rebuild — a corpse is not drawn, gossiped, or targeted. *(tested: the kill,
-  the cooldown, and the corpse leaving the index.)*
+- **Fire is fixed-rate, aimed, and one-shot-kill.** The tank fires only once the turret
+  has swung onto the target (within `FIRE_CONE`) and the cooldown is elapsed, every
+  `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only) — so the turn
+  rate gates firing. One shot kills the target mite: it is marked dead and leaves the
+  per-cell index on the next rebuild — a corpse is not drawn (on the map either),
+  gossiped, or targeted. *(tested: the kill, the cooldown, the corpse leaving the index,
+  and an off-axis target not shot until the turret swings on.)*
 - **A kill is a death cry.** Every mite within **2× `mite_sense`** cells of the dead one
   has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
   that spreads any sighting. *(tested.)*
-- **A dead mite revives at its nest after `mite_respawn` ticks** (default 300 = 5 s),
-  **respecting the crowding cap** (current occupancy + inbound reservations); if the nest
-  is full it waits a tick. *(tested: revival at the nest after the timeout; the cap holds
-  across thousands of ticks with firing on.)*
+- **A dead mite revives at its nest with its memory cleared, after `mite_respawn` ticks**
+  (default 300 = 5 s). The record is emptied and the mode reset to wander, so it does not
+  resume an old hunt. Revival **respects the crowding cap** (current occupancy + inbound
+  reservations); if the nest is full it waits a tick. The four nests sit **off the tanks'
+  start screen** so revived mites don't appear under a barrel. *(tested: revival at the
+  nest after the timeout with the record cleared; the cap holds across thousands of ticks
+  with firing on.)*
 
 ## Determinism
 

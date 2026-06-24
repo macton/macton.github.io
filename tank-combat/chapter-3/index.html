@@ -149,10 +149,11 @@
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
     <span class="swatch" style="background:#e8c448"></span> homing ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
-    Each tank’s <b>turret</b> swivels to the nearest mite it can see and fires
+    Each tank’s <b>turret</b> turns at its own rate onto the mite it can most easily hit — the one
+    closest to where the barrel already points — and fires once it swings on
     (<span class="swatch" style="background:#ffee96"></span> tracer); a hit kills the mite — which
-    revives at its nest after a few seconds — and the <b>death cry</b> tells every nearby mite where
-    the shot came from, so the swarm turns on its attackers.
+    revives (memory wiped) at its nest after a few seconds — and the <b>death cry</b> tells every
+    nearby mite where the shot came from, so the swarm turns on its attackers.
   </div>
 
   <article>
@@ -290,14 +291,17 @@
     <h2>The tanks shoot back: one transform, the same index</h2>
     <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it
     reuses the structures already here rather than adding new ones. Each tank's <strong>turret aims
-    independently of its body</strong>: every tick it scans the per-cell mite index in
-    <strong>rough rings</strong> outward, stops at the first ring holding a mite it has
-    <strong>line of sight</strong> to (an integer Bresenham walk over the wall grid), and snaps the
-    turret to it — “nearest” needs no sort, just the first non-empty ring. With a target and the
-    cooldown elapsed it fires on a fixed rate (default <strong>2 shots/sec</strong>); one shot
-    <strong>kills</strong> the mite, which leaves the board and <strong>revives at its nest</strong>
-    after a timeout (default <strong>5 s</strong>). Reviving respects the same crowding cap as
-    spawning — a full nest just waits a tick — so no rule the swarm obeys is broken by combat.</p>
+    independently of its body</strong> and <strong>turns at its own rate</strong> (it can't snap
+    instantly), so it targets the mite <strong>most likely to be hit — the one closest to the turret's
+    current direction</strong>, needing the least rotation, not the spatially nearest. It scans the
+    per-cell mite index over its search box, takes one <strong>line-of-sight</strong> test per cell
+    (an integer Bresenham walk over the wall grid), and tracks the smallest bearing change. The turret
+    swings onto that target and, once on it (and the cooldown elapsed), fires at a fixed rate (default
+    <strong>2 shots/sec</strong>); one shot <strong>kills</strong> the mite, which leaves the board and
+    <strong>revives — its memory wiped — at its nest</strong> after a timeout (default <strong>5 s</strong>).
+    Reviving respects the same crowding cap as spawning — a full nest just waits a tick — so no rule the
+    swarm obeys is broken by combat. The four nests sit away from the tanks' start screen, so revived
+    mites don't pop up under a barrel.</p>
     <p>The payoff is the feedback loop. A kill is a <strong>death cry</strong>: every mite within
     <strong>2× sensing range</strong> of the dead one has its record overwritten with the
     <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
@@ -316,7 +320,7 @@
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
     to re-scatter the swarm, move the four nests, and tune the rest live:</p>
     <div class="fig">
-      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay</p>
+      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay, turret turn</p>
       <div id="w-mite-tunables"></div>
     </div>
 

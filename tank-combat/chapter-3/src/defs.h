@@ -79,14 +79,16 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define MM_HOME     2           /* path to this mite's nest */
 
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
- * Each tank's turret aims at the nearest mite it has line of sight to (found by
- * scanning the per-cell index in rough rings) and fires at a fixed rate; one shot
- * kills the target mite, which revives at its nest after a timeout. A kill is a
- * "death cry": every mite within 2x sensing range of the dead one learns the firing
- * tank's cell (record + hunt), so the swarm turns on its attackers — emergent
- * escalation from the same gossip. */
-#define TARGET_MAX_R 12         /* turret search radius, in cells (rough rings) */
+ * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
+ * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction
+ * (least rotation), found over the per-cell index — and fires at a fixed rate once
+ * it has swung onto the target; one shot kills the mite, which revives (memory wiped)
+ * at its nest after a timeout. A kill is a "death cry": every mite within 2x sensing
+ * range of the dead one learns the firing tank's cell (record + hunt), so the swarm
+ * turns on its attackers — emergent escalation from the same gossip. */
+#define TARGET_MAX_R 12         /* turret search radius, in cells */
 #define TGT_NONE     0xFFFFu    /* tank has no target */
+#define FIRE_CONE    2048       /* fire only when the turret is within this of the target (Q5.11, ~11 deg) */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u

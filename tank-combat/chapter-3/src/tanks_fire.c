@@ -35,59 +35,63 @@ static uint16_t aim_angle(int dx, int dy) {
   return (uint16_t)(bd << ANGLE_SHIFT);
 }
 
-/* Scan one cell (cx,cy) for the lowest-index mite the tank at (tcx,tcy) can see;
- * a whole cell is one line-of-sight test. Updates *best (lower index wins). */
-static void scan_cell(const World* w, int tcx, int tcy, int cx, int cy, uint32_t* best) {
-  uint32_t c = (uint32_t)wc_pack(wrap_wcx(cx), wrap_wcy(cy));
-  uint8_t k = w->mite_cnt[c]; if (k > MITE_CAP) k = MITE_CAP;
-  if (k == 0) return;
-  if (!los(w->grid, tcx, tcy, cx, cy)) return;             /* whole cell out of sight */
-  for (uint8_t j = 0; j < k; j++) {
-    uint32_t m = w->mite_list[c * MITE_CAP + j];
-    if (m < *best) *best = m;                              /* dead mites aren't indexed */
-  }
+/* Turn `cur` toward `want` by at most `rate`, the shortest way round, clamping so it
+ * never overshoots — the turret's equivalent of the bodies' agent_turn step. */
+static uint16_t turn_toward(uint16_t cur, uint16_t want, int rate) {
+  int d = (int16_t)(want - cur);                 /* shortest signed delta (Q5.11 wraps) */
+  if (d >  rate) d =  rate;
+  if (d < -rate) d = -rate;
+  return (uint16_t)((int)cur + d);
 }
 
 void tanks_fire(World* w) {
   uint32_t frame = w->frame;
   int period = w->fire_period;
+  int rate = w->turret_rate;
 
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
     int tcx = wrap_wcx(tx >> SUB_SHIFT), tcy = wrap_wcy(ty >> SUB_SHIFT);
+    uint16_t turret = w->tank_turret[t];
 
-    /* nearest mite in line of sight, by rough rings outward (stop at the first
-     * ring that holds a visible mite — that ring's lowest index is the target). */
-    uint32_t target = TGT_NONE;
-    for (int r = 0; r <= TARGET_MAX_R && target == TGT_NONE; r++) {
-      uint32_t best = TGT_NONE;
-      if (r == 0) {
-        scan_cell(w, tcx, tcy, tcx, tcy, &best);
-      } else {
-        for (int ox = -r; ox <= r; ox++) { scan_cell(w, tcx, tcy, tcx + ox, tcy - r, &best);
-                                           scan_cell(w, tcx, tcy, tcx + ox, tcy + r, &best); }
-        for (int oy = -r + 1; oy <= r - 1; oy++) { scan_cell(w, tcx, tcy, tcx - r, tcy + oy, &best);
-                                                   scan_cell(w, tcx, tcy, tcx + r, tcy + oy, &best); }
+    /* Target = the mite in line of sight MOST LIKELY TO BE HIT: the one closest to the
+     * turret's CURRENT direction (least rotation to bring the barrel onto it), not the
+     * spatially nearest — with a finite turn rate that is the soonest-hittable. Scan the
+     * per-cell index over the search box; a whole cell is one line-of-sight test; the
+     * cell's bearing sets its angular distance to the turret; lowest index breaks ties. */
+    uint32_t target = TGT_NONE; int best_ang = 0x7FFFFFFF;
+    for (int oy = -TARGET_MAX_R; oy <= TARGET_MAX_R; oy++)
+      for (int ox = -TARGET_MAX_R; ox <= TARGET_MAX_R; ox++) {
+        uint32_t c = (uint32_t)wc_pack(wrap_wcx(tcx + ox), wrap_wcy(tcy + oy));
+        uint8_t k = w->mite_cnt[c]; if (k == 0) continue; if (k > MITE_CAP) k = MITE_CAP;
+        if (!los(w->grid, tcx, tcy, tcx + ox, tcy + oy)) continue;  /* whole cell out of sight */
+        int ad = (int16_t)(aim_angle(ox * SUB, oy * SUB) - turret); if (ad < 0) ad = -ad;
+        uint32_t m = w->mite_list[c * MITE_CAP];                    /* lowest index in the cell */
+        for (uint8_t j = 1; j < k; j++) { uint32_t mm = w->mite_list[c * MITE_CAP + j]; if (mm < m) m = mm; }
+        if (ad < best_ang || (ad == best_ang && m < target)) { best_ang = ad; target = m; }
       }
-      if (best != TGT_NONE) target = best;
-    }
     w->tank_target[t] = (uint16_t)target;
 
-    /* aim: at the target if any, else rest aligned with the body heading */
+    /* desired aim: the exact bearing to the target, else relax to the body heading */
+    uint16_t want;
     if (target != TGT_NONE) {
       int mx = xy_lo(w->mite_xy[target]), my = xy_hi(w->mite_xy[target]);
       int ddx = mx - tx; if (ddx >  ARENA_W_SUB / 2) ddx -= ARENA_W_SUB; if (ddx < -ARENA_W_SUB / 2) ddx += ARENA_W_SUB;
       int ddy = my - ty; if (ddy >  ARENA_H_SUB / 2) ddy -= ARENA_H_SUB; if (ddy < -ARENA_H_SUB / 2) ddy += ARENA_H_SUB;
-      w->tank_turret[t] = (ddx | ddy) ? aim_angle(ddx, ddy) : w->tank_ang[t];
+      want = (ddx | ddy) ? aim_angle(ddx, ddy) : w->tank_ang[t];
     } else {
-      w->tank_turret[t] = w->tank_ang[t];
+      want = w->tank_ang[t];
     }
+    /* swing the turret toward the desired aim at its turn rate (not an instant snap) */
+    w->tank_turret[t] = turn_toward(turret, want, rate);
 
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
     if (w->tank_tracer[t]   > 0) w->tank_tracer[t]--;
 
-    /* fire: one shot kills the target, on the fixed cooldown (period 0 = off) */
-    if (period > 0 && target != TGT_NONE && w->tank_cooldown[t] == 0) {
+    /* fire only once the barrel has swung onto the target (within FIRE_CONE) and the
+     * cooldown is ready (period 0 = off). One shot kills it. */
+    int err = (int16_t)(want - w->tank_turret[t]); if (err < 0) err = -err;
+    if (period > 0 && target != TGT_NONE && err <= FIRE_CONE && w->tank_cooldown[t] == 0) {
       uint32_t m = target;
       uint16_t deadcell = w->mite_cell[m];
       w->mite_resp[m] = w->mite_respawn ? w->mite_respawn : 1;   /* dead until it revives */

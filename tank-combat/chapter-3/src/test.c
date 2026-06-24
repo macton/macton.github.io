@@ -53,6 +53,10 @@ static int big_bfs(World* w, uint32_t src, uint32_t dst) {
 static void place_tank(World* w, uint32_t t, int wcx, int wcy) {
   w->tank_xy[t] = xy_pack(wcx * SUB + SUB / 2, wcy * SUB + SUB / 2);
   w->tank_ang[t] = 0; w->tank_in[t] = 0; w->tank_vxy[t] = 0; w->tank_hit[t] = 0;
+  /* match sim's place(): body east, turret resting east, no target/cooldown — so the
+   * turret-turn-rate combat tests start from a known aim. */
+  w->tank_turret[t] = 0; w->tank_cooldown[t] = 0; w->tank_target[t] = TGT_NONE;
+  w->tank_tracer[t] = 0; w->tank_shot_cell[t] = 0;
 }
 /* drive tank `t` (UNSELECTED, so it follows its own path) to a destination */
 static void run_to_dest(World* w, uint32_t t, int wcx, int wcy, int maxticks,
@@ -533,11 +537,11 @@ static void t_mite_nests_fields(void) {
   int even = 1; for (int n = 0; n < NEST_COUNT; n++) if (cnt[n] != (int)(N_MITES / NEST_COUNT)) even = 0;
   check(part_ok && even, "nest_of(i) = i % 4 partitions the swarm into four equal nests");
 
-  /* a homing mite reaches its nest cell (mite 0's nest is (1,7); start on the open
-   * screen-0 corridor left of the central block). Firing off: this checks navigation,
-   * not combat — we don't want the test mite shot before it arrives. */
+  /* a homing mite reaches its nest cell (mite 0's nest is (21,22) in screen (1,1);
+   * start a few open cells along its row). Firing off: this checks navigation, not
+   * combat — we don't want the test mite shot before it arrives. */
   sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
-  mite_reset(&W, 0, 5, 7);
+  mite_reset(&W, 0, 28, 22);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);             /* a record it carries home */
   W.mite_mode[0] = MM_HOME; W.mite_dest[0] = W.nest_cell[nest_of(0)];
   uint16_t home = W.nest_cell[nest_of(0)]; int reached_home = 0;
@@ -626,15 +630,42 @@ static void t_tanks_fire(void) {
   check(W.tank_target[0] == TGT_NONE, "a mite behind a wall is not targeted (line of sight required)");
   check(W.mite_resp[0] == 0, "the wall-shadowed mite survives");
 
-  /* turret aims even when firing is off (fire_period 0): independent of the body */
+  /* turret aims even when firing is off (fire_period 0): independent of the body, and
+   * it SWINGS at a turn rate rather than snapping. Body east, mite due north, mite pinned. */
   sim_init(&W); gossip_setup(&W, 1);
-  place_tank(&W, 0, 2, 7); W.tank_ang[0] = 0; W.tank_turret[0] = 0;   /* body faces east */
+  place_tank(&W, 0, 2, 7);                                            /* body + turret east */
   mite_reset(&W, 0, 2, 4);                                            /* mite due north */
-  W.fire_period = 0;
+  W.fire_period = 0; W.mite_speed = 0;                                /* aim only; pin the mite */
   sim_tick(&W);
   check(W.tank_target[0] == 0, "fire off: the turret still acquires a target in sight");
+  check((W.tank_turret[0] >> ANGLE_SHIFT) != CARD_DI[DIR_N], "the turret does not snap instantly — it has a turn rate");
+  for (int i = 0; i < 12; i++) sim_tick(&W);                          /* let it swing onto the target */
   check(W.mite_resp[0] == 0, "fire off: no mite is killed");
-  check((W.tank_turret[0] >> ANGLE_SHIFT) == CARD_DI[DIR_N], "the turret aims independently of the body (north at a mite due north)");
+  check((W.tank_turret[0] >> ANGLE_SHIFT) == CARD_DI[DIR_N], "the turret swings to aim north at a mite due north");
+  check((W.tank_ang[0] >> ANGLE_SHIFT) == 0, "the body heading is unchanged (turret aims separately)");
+
+  /* targeting picks the mite closest to the turret's CURRENT direction (most likely to
+   * be hit), not the spatially nearest: turret east, a near mite due north vs a farther
+   * mite due east -> the east (aligned) one wins even though it is farther and higher index. */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 2, 7);                                            /* turret east */
+  mite_reset(&W, 0, 2, 5);                                            /* nearer (2 cells), due north */
+  mite_reset(&W, 1, 6, 7);                                            /* farther (4 cells), due east */
+  W.fire_period = 0;
+  sim_tick(&W);
+  check(W.tank_target[0] == 1, "targets the mite closest to the turret direction (east), not the nearest (north)");
+
+  /* the turn rate GATES firing: a target 90 deg off the turret is not shot on tick 1;
+   * the turret must swing onto it first (instant aim would have killed immediately). */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 2, 7);                                            /* turret east */
+  mite_reset(&W, 0, 2, 4);                                            /* 90 deg off, due north */
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;         /* pin the mite */
+  sim_tick(&W);
+  check(W.tank_target[0] == 0, "acquires the off-axis target");
+  check(W.mite_resp[0] == 0, "does not fire on tick 1 — the turret must swing on first (turn rate gates firing)");
+  int swung = 0; for (int i = 0; i < 20 && !swung; i++) { sim_tick(&W); if (W.mite_resp[0]) swung = 1; }
+  check(swung, "fires once the turret has swung onto the target");
 
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it */
   sim_init(&W); gossip_setup(&W, 2);
@@ -661,6 +692,8 @@ static void t_tanks_fire(void) {
   int revived = 0; for (int i = 0; i < 60 && !revived; i++) { sim_tick(&W); if (!W.mite_resp[0]) revived = 1; }
   check(revived, "a dead mite revives after the respawn timeout");
   check(W.mite_cell[0] == nest0, "the revived mite reappears at its nest cell");
+  check(get_rec_cell(&W, 0) == REC_EMPTY, "a revived mite's memory (its record) is cleared");
+  check(W.mite_mode[0] == MM_WANDER, "a revived mite starts wandering (no stale hunt/home)");
 
   /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and
    * confirm reviving never pushes the nest cell over MITE_CAP */

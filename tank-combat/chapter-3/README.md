@@ -144,27 +144,31 @@ Combat is its own transform and **adds no new structures** — it reuses the per
 index, the record gossip, and the nests already here. Per tank, each tick:
 
 - **Aim.** The turret aims **independently of the body** (`tank_turret`, separate from
-  the movement heading `tank_ang`). It finds the nearest mite it has line of sight to by
-  scanning the per-cell index in **rough rings** outward and stopping at the first ring
-  that holds a visible mite (lowest index breaks ties) — "nearest" needs no sort, just
-  the first non-empty ring. **Line of sight** is an integer Bresenham walk over the wall
-  grid (one test per candidate cell, the whole cell in or out). The turret snaps to one
-  of the 32 headings (largest dot product with the target vector).
-- **Fire.** With a target and the cooldown elapsed, fire on a fixed rate (`fire_period`,
-  default 30 ticks = **2/sec**; `0` = aim-only). One shot **kills** the target: it is
-  marked dead (`mite_resp` = the respawn timer) and drops out of the index next rebuild,
-  so a corpse is never drawn, gossiped, or targeted.
+  the movement heading `tank_ang`) and **turns at its own rate** (`turret_rate`, default
+  ~8 ticks/90°) — it can't snap. So it targets the mite **most likely to be hit: the one
+  closest to the turret's current direction** (least rotation to bring the barrel onto
+  it), not the spatially nearest. It scans the per-cell index over its search box, takes
+  one **line-of-sight** test per cell (an integer Bresenham walk over the wall grid, the
+  whole cell in or out), and keeps the smallest bearing change (lowest index breaks ties).
+  The turret then swings toward that bearing at its turn rate.
+- **Fire.** Once the turret has **swung onto the target** (within `FIRE_CONE`) and the
+  cooldown is elapsed, fire on a fixed rate (`fire_period`, default 30 ticks = **2/sec**;
+  `0` = aim-only). One shot **kills** the target: it is marked dead (`mite_resp` = the
+  respawn timer) and drops out of the index next rebuild, so a corpse is never drawn,
+  gossiped, or targeted (the minimap skips it too).
 - **Death cry.** A kill writes the **firing tank's cell** into the record of every mite
   within **2× sensing range** of the dead one (stamped now, mode → hunt), through the
   ordinary record buffer — so a kill broadcasts the shooter's position into the same
   gossip that spreads any sighting, and the survivors converge on the attacker.
 
-A dead mite **revives at its nest** after `mite_respawn` ticks (default 300 = **5 s**),
-respecting the crowding cap: it revives only if the nest cell has a free slot once
-current occupancy **and inbound reservations** are counted (the same tally `mites_step`
-uses), else it waits a tick. Reviving happens right after the index is built (step 1b)
-so the revived mite is an ordinary live mite for the rest of the tick. Firing draws **no
-randomness**, so the swarm stays a pure function of the seed and inputs.
+A dead mite **revives at its nest with its memory wiped** (record emptied, mode reset to
+wander) after `mite_respawn` ticks (default 300 = **5 s**), respecting the crowding cap:
+it revives only if the nest cell has a free slot once current occupancy **and inbound
+reservations** are counted (the same tally `mites_step` uses), else it waits a tick.
+Reviving happens right after the index is built (step 1b) so the revived mite is an
+ordinary live mite for the rest of the tick. The **four nests sit off the tanks' start
+screen** (nest 0 moved to screen (1,1)), so revived mites don't pop up under a barrel.
+Firing draws **no randomness**, so the swarm stays a pure function of the seed and inputs.
 
 ## Per-tick order (`sim.c`)
 
@@ -197,7 +201,7 @@ New in chapter 3:
 | file | responsibility |
 |------|----------------|
 | `src/mites.c/.h` | the swarm: spawn, the per-cell index, the record gossip, the shared route-field table, and the cap-gated movement (hunt/home via fields, greedy on overflow, wander), plus the xorshift32 PRNG and the nests |
-| `src/tanks_fire.c/.h` | combat: per-tank turret aim (ring scan + Bresenham line of sight), the fixed-rate fire + one-shot kill, the death-cry gossip, and the cap-respecting nest respawn |
+| `src/tanks_fire.c/.h` | combat: per-tank turret aim (turns at a rate toward the most-hittable mite — closest to the turret's bearing — via a box scan + Bresenham line of sight), the fixed-rate fire + one-shot kill, the death-cry gossip, and the cap-respecting nest respawn |
 
 `defs.h` adds the mite vocabulary (`N_MITES`, `MITE_R`, `MITE_CAP`, `NEST_COUNT`,
 `nest_of`, `N_FIELDS`, the modes, `REC_EMPTY`, world-cell + toroidal-distance helpers,
@@ -205,7 +209,8 @@ the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NON
 `sim.h`'s `World` gains the mite pool (SoA, incl. `mite_dest` and `mite_resp`), the
 double-buffered records, the per-cell index, the four nests, the shared route-field
 table, the field active/peak counters, the per-tank turret/cooldown/target/tracer
-state, the PRNG, and the mite + combat tunables (`fire_period`, `mite_respawn`).
+state, the PRNG, and the mite + combat tunables (`fire_period`, `mite_respawn`,
+`turret_rate`).
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
 `tank_turret` (separate from the body) and a firing tracer, plus the four nest markers;
@@ -255,7 +260,7 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **95 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **103 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index**; the **crowding cap** (every tick,
 naturally, under forced convergence, **and with firing on** — kills + nest respawns);
@@ -266,27 +271,32 @@ boundaries and statistically, a newer record interrupts a homing mite and re-rol
 the **nests & shared fields** (`nest_of` partitions the swarm into four; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
-**distinct-destination peak is measured and stays within `N_FIELDS`** — ~21 with combat
+**distinct-destination peak is measured and stays within `N_FIELDS`** — ~28 with combat
 on; a forced overflow falls back to greedy without breaking the cap or determinism);
 **combat** (the turret acquires a mite in line of sight; one shot kills it and it
-leaves the index; a wall blocks line of sight; the turret aims with firing off; the
-death cry teaches a nearby mite the shooter's cell and flips it to hunt; a dead mite
-revives at its nest after the timeout); **wall safety** at `MITE_R`; and
-**determinism** (the swarm state hash **and** the tank combat-state hash, with firing
-on by default).
+leaves the index; a wall blocks line of sight; the turret **swings at a turn rate** and
+does not snap; targeting picks the mite **closest to the turret's direction**, not the
+spatially nearest; the **turn rate gates firing** — an off-axis target isn't shot until
+the turret swings on; the death cry teaches a nearby mite the shooter's cell and flips
+it to hunt; a dead mite revives at its nest **with its memory cleared** after the
+timeout); **wall safety** at `MITE_R`; and **determinism** (the swarm state hash **and**
+the tank combat-state hash, with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (95 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (103 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the
   baked escape table is byte-identical to chapter 2.
+- The baked map is connected: the generator's self-check passes and screen (0,3) is
+  **island-free** (the world drops from 93 island cells to 7 — only screens (3,0) and
+  (2,2) keep their small deliberate pockets).
 - `game.wasm` exercised in Node (init, ticks with driven tanks, the per-cell
   occupancy / belief / route-field counters, the editable tunables / seed / nests, and
-  the **combat exports** — `fire_period`/`mite_respawn` get+set, `mite_resp_ptr`) and
-  the page booted under a headless DOM/WebGPU stub (stats render the update-time + the
-  alive/dead split) — identical to native, as they share `sim.c`.
+  the **combat exports** — `fire_period`/`mite_respawn`/`turret_rate` get+set,
+  `mite_resp_ptr`) and the page booted under a headless DOM/WebGPU stub (stats render the
+  update-time + the alive/dead split) — identical to native, as they share `sim.c`.
 - **Not** verified here: the live WebGPU render and on-screen touch — no GPU/browser
   in the build environment. Render-test in a browser.
 
