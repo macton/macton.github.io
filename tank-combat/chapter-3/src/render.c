@@ -47,6 +47,16 @@ static uint32_t fx_colour(int age) {
   return RGBA(r, g, b, 255);
 }
 
+/* a wall-impact spark's colour by age: a hot bolt-orange flash darkening to the background,
+ * so a bolt splashing on a wall reads differently from a mite popping white. */
+static uint32_t fx_colour_impact(int age) {
+  int n = FX_DURATION - 1; if (n < 1) n = 1; if (age > n) age = n;
+  int r = 255 + (40  - 255) * age / n;
+  int g = 170 + (38  - 170) * age / n;
+  int b =  78 + (48  -  78) * age / n;
+  return RGBA(r, g, b, 255);
+}
+
 static uint32_t mite_colour(const World* w, uint32_t m) {
   uint8_t mode = w->mite_mode[m];
   if (mode == MM_HOME) return COL_NEST[nest_of(m)];                          /* carrying it home */
@@ -171,8 +181,8 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     k = push(out, k, lx, ly, 24,    9, co, si, COL_BOLT_CORE);   /* bright leading head */
   }
 
-  /* destruction bursts on top: expanding, darkening diamonds where a bolt destroyed a
-   * mite — only those whose position is on this screen (cost scales with what's shown). */
+  /* bursts on top: expanding, darkening diamonds — white where a mite died (a bolt kill or a
+   * tank running one over), hot orange where a bolt struck a wall. Only those on this screen. */
   for (uint32_t i = 0; i < N_FX; i++) {
     if (!w->fx_t[i]) continue;
     int fxx = xy_lo(w->fx_xy[i]), fxy = xy_hi(w->fx_xy[i]);
@@ -181,7 +191,8 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     int lx = ox + fxx - sox, ly = oy + fxy - soy;
     int age = FX_DURATION - (int)w->fx_t[i];             /* 0 (fresh) .. FX_DURATION-1 */
     int half = 22 + age * 9;                              /* expands as it fades */
-    k = push(out, k, lx, ly, half, half, 11585, 11585, fx_colour(age));   /* 45-degree diamond */
+    uint32_t fcol = w->fx_kind[i] == FX_IMPACT ? fx_colour_impact(age) : fx_colour(age);
+    k = push(out, k, lx, ly, half, half, 11585, 11585, fcol);   /* 45-degree diamond */
   }
   return k;
 }

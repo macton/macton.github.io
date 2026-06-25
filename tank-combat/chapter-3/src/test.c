@@ -794,6 +794,30 @@ static void t_tanks_fire(void) {
   tanks_fire(&W);
   check(W.tank_proj_live[0], "with the friendly clear, the shooter takes the shot");
 
+  /* run-over: a MOVING tank squashes a mite under its (cell-sized) footprint; a STILL tank
+   * doesn't, and a mite a cell away (outside the footprint) survives either way. */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 5, 7);
+  mite_reset(&W, 0, 5, 7);                                  /* a mite directly under the tank */
+  mite_reset(&W, 1, 6, 7);                                  /* a mite one cell over (outside the footprint) */
+  W.fire_period = 0;                                        /* no firing — isolate the run-over */
+  mites_build_index(&W); tanks_fire(&W);                    /* tank still (vxy 0 from place_tank) */
+  check(W.mite_resp[0] == 0, "a still tank does not crush the mite under it");
+  W.tank_vxy[0] = xy_pack(16, 0);                           /* now the tank is moving */
+  mites_build_index(&W); tanks_fire(&W);
+  check(W.mite_resp[0] > 0, "a moving tank runs over the mite under it");
+  check(W.mite_resp[1] == 0, "a mite a cell away is outside the tank's footprint and survives");
+
+  /* a bolt splashing on a wall spawns an impact effect (FX_IMPACT) at the wall. */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 5, 7);                                  /* turret east; cols 8..11 are walls */
+  mite_reset(&W, 0, 6, 7);                                  /* a target east, so it fires toward the wall */
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
+  int impact = 0;
+  for (int i = 0; i < 30 && !impact; i++) { sim_tick(&W);
+    for (uint32_t f = 0; f < N_FX; f++) if (W.fx_t[f] && W.fx_kind[f] == FX_IMPACT) impact = 1; }
+  check(impact, "a bolt striking a wall spawns an impact effect");
+
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
    * so the bolt connects, and step until it lands. */
   sim_init(&W); gossip_setup(&W, 2);

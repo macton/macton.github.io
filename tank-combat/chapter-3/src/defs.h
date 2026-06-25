@@ -122,6 +122,8 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
  * bolt destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */
 #define N_FX         256        /* effect ring capacity (bursts overwrite the oldest) */
 #define FX_DURATION  8          /* ticks a burst is drawn before it expires */
+#define FX_KILL      0          /* burst kind: a destroyed mite (a white pop) */
+#define FX_IMPACT    1          /* burst kind: a bolt splashing on a wall (a hot orange spark) */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u

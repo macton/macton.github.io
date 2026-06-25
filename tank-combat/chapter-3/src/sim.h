@@ -66,8 +66,9 @@ struct World {
   /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite a
    *      bolt destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
    *      drawn by render; deterministic (no RNG), so it never perturbs the swarm. ----- */
-  uint32_t fx_xy[N_FX];   /* burst position (packed subcells, the mite's last position) */
+  uint32_t fx_xy[N_FX];   /* burst position (packed subcells: a mite's last spot, or a wall impact) */
   uint16_t fx_t [N_FX];   /* ticks remaining (0 = inactive); set to FX_DURATION on spawn */
+  uint8_t  fx_kind[N_FX]; /* FX_KILL (mite pop) or FX_IMPACT (wall spark) — picks the burst colour */
   uint8_t  fx_head;       /* ring write cursor (wraps; bursts overwrite the oldest) */
 
   /* ---- per-tank interaction + routing (every tank can path) -------------- */

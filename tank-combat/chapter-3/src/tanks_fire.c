@@ -56,10 +56,11 @@ static uint16_t turn_toward(uint16_t cur, uint16_t want, int rate) {
   return (uint16_t)((int)cur + d);
 }
 
-/* record a destruction burst at a mite's position (cosmetic ring; overwrite the oldest) */
-static void spawn_fx(World* w, uint32_t xy) {
-  w->fx_xy[w->fx_head] = xy;
-  w->fx_t [w->fx_head] = FX_DURATION;
+/* record a cosmetic burst (a mite kill or a wall impact) in the ring; overwrite the oldest */
+static void spawn_fx(World* w, uint32_t xy, uint8_t kind) {
+  w->fx_xy  [w->fx_head] = xy;
+  w->fx_kind[w->fx_head] = kind;
+  w->fx_t   [w->fx_head] = FX_DURATION;
   w->fx_head = (uint8_t)((w->fx_head + 1u) % N_FX);
 }
 
@@ -69,7 +70,7 @@ static void spawn_fx(World* w, uint32_t xy) {
  * tick), so a kill turns the nearby swarm on its attacker. */
 static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
   uint16_t deadcell = w->mite_cell[m];
-  spawn_fx(w, w->mite_xy[m]);
+  spawn_fx(w, w->mite_xy[m], FX_KILL);
   w->mite_resp[m] = w->mite_respawn ? w->mite_respawn : 1;
   w->mite_in[m] = 0; w->mite_hit[m] = 0;
   int rad = 2 * (int)w->mite_sense, dcx = wc_x(deadcell), dcy = wc_y(deadcell);
@@ -138,7 +139,14 @@ static void proj_step(World* w, uint32_t b, uint32_t frame) {
     if (e2 <  adx) { err += adx; cy += sy; }
   }
 
-  if (hitwall) { w->tank_proj_live[b] = 0; return; }       /* spent against the wall */
+  if (hitwall) {                                           /* spent against the wall — splash an impact there */
+    int iwx = wrap_wcx(cx), iwy = wrap_wcy(cy);            /* the wall cell struck (extended -> wrapped) */
+    int impx = iwx * SUB + SUB / 2 - ((co * (SUB / 2)) >> TRIG_SHIFT);   /* pulled back to the near face */
+    int impy = iwy * SUB + SUB / 2 - ((si * (SUB / 2)) >> TRIG_SHIFT);
+    spawn_fx(w, xy_pack(wrap_x(impx), wrap_y(impy)), FX_IMPACT);
+    w->tank_proj_live[b] = 0;
+    return;
+  }
   w->tank_proj_xy[b]   = xy_pack(wrap_x(ex), wrap_y(ey));  /* advance the head (torus-wrapped) */
   w->tank_proj_dist[b] = (uint16_t)(w->tank_proj_dist[b] + step);
   if (w->tank_proj_dist[b] >= PROJ_RANGE * SUB) w->tank_proj_live[b] = 0;  /* flew its full range */
@@ -183,6 +191,24 @@ void tanks_fire(World* w) {
     int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
     int tcx = wrap_wcx(tx >> SUB_SHIFT), tcy = wrap_wcy(ty >> SUB_SHIFT);
     uint16_t turret = w->tank_turret[t];
+
+    /* run-over: a MOVING tank (the size of one grid cell) squashes any live mite under its
+     * footprint — a one-cell box around its centre — found over the 3x3 cells of the index.
+     * A still tank is harmless; the kill is an ordinary death (burst + death cry). */
+    if (w->tank_vxy[t]) {
+      uint16_t crush_cell = (uint16_t)wc_pack(tcx, tcy);
+      for (int oy = -1; oy <= 1; oy++) for (int ox = -1; ox <= 1; ox++) {
+        uint32_t c = (uint32_t)wc_pack(wrap_wcx(tcx + ox), wrap_wcy(tcy + oy));
+        if (!w->mite_cnt[c]) continue;
+        for (uint8_t s = 0; s < MITE_CAP; s++) {
+          uint32_t m = w->mite_list[c * MITE_CAP + s];
+          if (m == REC_EMPTY || w->mite_resp[m]) continue;       /* empty / already dead */
+          int dx = xy_lo(w->mite_xy[m]) - tx; if (dx >  ARENA_W_SUB / 2) dx -= ARENA_W_SUB; if (dx < -ARENA_W_SUB / 2) dx += ARENA_W_SUB;
+          int dy = xy_hi(w->mite_xy[m]) - ty; if (dy >  ARENA_H_SUB / 2) dy -= ARENA_H_SUB; if (dy < -ARENA_H_SUB / 2) dy += ARENA_H_SUB;
+          if (dx >= -SUB / 2 && dx <= SUB / 2 && dy >= -SUB / 2 && dy <= SUB / 2) kill_mite(w, m, crush_cell, frame);
+        }
+      }
+    }
 
     /* Target = the mite in line of sight MOST LIKELY TO BE HIT: the one closest to the
      * turret's CURRENT direction (least rotation to bring the barrel onto it), not the

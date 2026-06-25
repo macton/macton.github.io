@@ -139,7 +139,8 @@ the inherited tests still pass and the baked escape table is byte-identical.
   not a hitscan beam: launched from the muzzle along the barrel, each tick it marches forward
   `proj_speed` subcells (a page tunable; slow default 1 cell/tick), **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
-  has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin a
+  has flown `PROJ_RANGE` cells, then it expires — a hot **impact spark** marks where a bolt
+  strikes a wall. Because the 32-direction aim can't pin a
   sub-segment-offset mite exactly, the bolt **carries the mite it was aimed at** and kills it
   for sure when it reaches that mite's cell — so a locked turret reliably drops what it shot at,
   while the thin half-width means other mites a sub-segment **off** the line dodge. Firing
@@ -155,7 +156,12 @@ the inherited tests still pass and the baked escape table is byte-identical.
   cooldown; the corpse leaving the index; an off-axis target not shot until the turret swings
   on; the turret swings onto a new target while the bolt is still in flight; a tank keeps
   several bolts aloft at once, capped at `PROJ_MAX`; a tank holds fire when the shot would pass
-  through a friendly and takes it once clear.)*
+  through a friendly and takes it once clear; a bolt striking a wall leaves an impact spark.)*
+- **A moving tank runs mites over.** A tank is the size of one grid cell; while it is **moving**
+  it crushes any live mite whose centre falls inside that one-cell footprint — an ordinary kill
+  (burst + death cry), found over the 3×3 cells of the per-cell index. A **stationary** tank is
+  harmless. *(tested: a moving tank squashes the mite under it; a still tank doesn't; a mite a
+  cell away is outside the footprint and survives.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip

@@ -195,7 +195,8 @@ destruction bursts. Per tank, each tick:
   travelling shot (`proj_speed`, a page tunable — slow default 1 cell/tick), not a hitscan beam: each tick `proj_step`
   marches it along its fixed heading, **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
-  has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin an
+  has flown `PROJ_RANGE` cells, then it expires — a hot **impact spark** marks where it struck a
+  wall. Because the 32-direction aim can't pin an
   off-centre mite exactly, the bolt **carries the mite it was aimed at** (`tank_proj_tgt`) and
   kills it for sure when it reaches that mite's cell — so a locked turret reliably drops what
   it shot at, while the thin half-width means other mites a sub-segment off the line **dodge**.
@@ -214,6 +215,10 @@ destruction bursts. Per tank, each tick:
   the ordinary record buffer — so a bolt that mows a line broadcasts the shooter's position
   from every body it drops, into the same gossip that spreads any sighting, and the
   survivors converge on the attacker.
+- **Run-over.** A tank is one grid cell across; while it is **moving** it crushes any live mite
+  whose centre lies under that one-cell footprint (an ordinary kill — burst + death cry), found
+  over the 3×3 cells of the index. A parked tank is harmless — so driving through the swarm mows
+  a path the way the bolt does, and the crushed mites' death cries turn the neighbours on the tank.
 
 A dead mite **revives at its nest with its memory wiped** (record emptied, mode reset to
 wander) after `mite_respawn` ticks (default 300 = **5 s**), respecting the crowding cap:
@@ -275,7 +280,7 @@ table, the field active/peak counters, the per-tank turret/cooldown/target + in-
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
 `tank_turret` (separate from the body), each in-flight **bolt** (a hot streak + bright head)
-and the **destruction bursts**, plus the fifteen nest markers; the minimap (`app.js`) shows the
+and the **bursts** (white mite-kills, orange wall impacts), plus the fifteen nest markers; the minimap (`app.js`) shows the
 whole live swarm and the nests (it skips the dead too).
 
 ## Memory budget (static, no dynamic allocation)
@@ -348,7 +353,9 @@ picks the mite **closest to the turret's direction**, not the spatially nearest;
 **turret is free to swing onto a new target while the bolt is still travelling** (firing no
 longer locks it); a tank keeps **several bolts aloft at once, capped at `PROJ_MAX`**; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
-revives at its nest **with its memory cleared** after the timeout); **wall safety** at
+revives at its nest **with its memory cleared** after the timeout; a **moving** tank runs over
+a mite under it (a still one doesn't); a bolt striking a wall leaves an **impact** spark);
+**wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
 with firing on by default).
 
