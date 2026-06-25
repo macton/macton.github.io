@@ -775,6 +775,25 @@ static void t_tanks_fire(void) {
   check(maxlive >= 2, "a tank keeps several bolts in flight at once (fast fire + slow bolt)");
   check(maxlive <= PROJ_MAX, "simultaneous bolts are capped at PROJ_MAX");
 
+  /* tanks hold fire through each other: a shot that would pass through another tank is not taken.
+   * Two tanks face a mite parked between them (each in the other's line), so neither fires and the
+   * mite lives; clear one aside and the other shoots. (Direct tanks_fire + exact positions, so the
+   * aim is axis-clean and the corridor check is exercised precisely.) */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 1, 7);                                  /* shooter, turret east */
+  place_tank(&W, 1, 7, 7);                                  /* friendly beyond the mite */
+  W.tank_turret[1] = (uint16_t)((uint32_t)CARD_DI[DIR_W] << ANGLE_SHIFT);   /* aimed back west, at the mite */
+  mite_reset(&W, 0, 4, 7); W.mite_xy[0] = xy_pack(4 * SUB + SUB / 2, 7 * SUB + SUB / 2);  /* between, on the line */
+  W.fire_period = 30; W.mite_respawn = 300;
+  mites_build_index(&W);
+  for (int i = 0; i < 10; i++) tanks_fire(&W);
+  check(W.tank_target[0] == 0, "the shooter acquires the mite past the friendly");
+  check(!W.tank_proj_live[0] && !W.tank_proj_live[1 * PROJ_MAX] && W.mite_resp[0] == 0,
+        "neither tank fires through the other — the mite between them survives");
+  place_tank(&W, 1, 7, 2);                                  /* move the friendly out of the line */
+  tanks_fire(&W);
+  check(W.tank_proj_live[0], "with the friendly clear, the shooter takes the shot");
+
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
    * so the bolt connects, and step until it lands. */
   sim_init(&W); gossip_setup(&W, 2);

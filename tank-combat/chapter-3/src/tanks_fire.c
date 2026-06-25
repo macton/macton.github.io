@@ -144,6 +144,29 @@ static void proj_step(World* w, uint32_t b, uint32_t frame) {
   if (w->tank_proj_dist[b] >= PROJ_RANGE * SUB) w->tank_proj_live[b] = 0;  /* flew its full range */
 }
 
+/* Would a bolt fired from tank t along (co,si) reach ANOTHER tank before a wall or its range?
+ * If so the shot is held — tanks don't fire through each other. A friendly counts as "in the
+ * path" when it lies ahead (along >= 0), within the bolt's reach (<= PROJ_RANGE), inside a
+ * body-plus-beam-width corridor of the line, and with clear line of sight (a wall between would
+ * stop the bolt first). The mites the bolt is meant for sit between, so a near friendly behind
+ * the target still blocks the shot — the swarm is spared a little, but no tank is ever hit. */
+static int friendly_in_path(World* w, uint32_t t, int co, int si) {
+  int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
+  int tcx = wrap_wcx(tx >> SUB_SHIFT), tcy = wrap_wcy(ty >> SUB_SHIFT);
+  for (uint32_t u = 0; u < N_TANKS; u++) {
+    if (u == t) continue;
+    int vx = xy_lo(w->tank_xy[u]) - tx; if (vx >  ARENA_W_SUB / 2) vx -= ARENA_W_SUB; if (vx < -ARENA_W_SUB / 2) vx += ARENA_W_SUB;
+    int vy = xy_hi(w->tank_xy[u]) - ty; if (vy >  ARENA_H_SUB / 2) vy -= ARENA_H_SUB; if (vy < -ARENA_H_SUB / 2) vy += ARENA_H_SUB;
+    int along = (vx * co + vy * si) >> TRIG_SHIFT;
+    if (along < 0 || along > PROJ_RANGE * SUB) continue;          /* behind us, or beyond the bolt's reach */
+    int perp = (vx * si - vy * co) >> TRIG_SHIFT; if (perp < 0) perp = -perp;
+    if (perp > TANK_R + PROJ_HW) continue;                        /* clear of the body-plus-beam corridor */
+    int ucx = wrap_wcx(xy_lo(w->tank_xy[u]) >> SUB_SHIFT), ucy = wrap_wcy(xy_hi(w->tank_xy[u]) >> SUB_SHIFT);
+    if (los(w->grid, tcx, tcy, ucx, ucy)) return 1;              /* clear line to it: a bolt would hit it */
+  }
+  return 0;
+}
+
 void tanks_fire(World* w) {
   uint32_t frame = w->frame;
   int period = w->fire_period;
@@ -197,11 +220,13 @@ void tanks_fire(World* w) {
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
 
     /* fire only once the barrel has swung EXACTLY onto the target bearing (so the bolt leaves
-     * straight along the barrel) and the cooldown is ready (period 0 = off). The cadence is
-     * the cooldown; a tank may have up to PROJ_MAX bolts aloft at once, so a slow bolt no longer
+     * straight along the barrel) and the cooldown is ready (period 0 = off) — and NOT if the shot
+     * would pass through a friendly tank (tanks hold fire through each other). The cadence is the
+     * cooldown; a tank may have up to PROJ_MAX bolts aloft at once, so a slow bolt no longer
      * throttles the fire rate — only when ALL slots are full does firing wait. The shot is a
      * PROJECTILE: a piercing bolt from the muzzle that mows the line ahead (proj_step flies it). */
-    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0) {
+    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0
+        && !friendly_in_path(w, t, fine_cos(w->tank_turret[t]), fine_sin(w->tank_turret[t]))) {
       uint32_t slot = PROJ_MAX;                             /* the first free bolt slot, if any */
       for (uint32_t s = 0; s < PROJ_MAX; s++) if (!w->tank_proj_live[t * PROJ_MAX + s]) { slot = s; break; }
       if (slot < PROJ_MAX) {

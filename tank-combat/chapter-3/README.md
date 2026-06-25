@@ -205,7 +205,10 @@ destruction bursts. Per tank, each tick:
   barrel is free to swing onto the next target while the shot is still travelling. A tank may
   have **up to `PROJ_MAX` (4) bolts in flight at once** (a flat pool, `t*PROJ_MAX + slot`), so a
   slow bolt no longer throttles the fire rate — only when **all four slots are full** does
-  firing wait for one to clear; the cadence is otherwise the cooldown.
+  firing wait for one to clear; the cadence is otherwise the cooldown. A tank also **holds its
+  shot if the bolt would pass through a friendly tank** (`friendly_in_path`: another tank ahead,
+  within range, inside a body-plus-beam corridor, in clear line of sight) — tanks never fire
+  through each other, even at the cost of sparing a mite hiding behind one.
 - **Death cry.** Each kill writes the **firing tank's cell** into the record of every live
   mite within **2× sensing range** of the destroyed one (stamped now, mode → hunt), through
   the ordinary record buffer — so a bolt that mows a line broadcasts the shooter's position

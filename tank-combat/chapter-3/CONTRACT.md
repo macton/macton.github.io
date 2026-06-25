@@ -144,14 +144,18 @@ the inherited tests still pass and the baked escape table is byte-identical.
   for sure when it reaches that mite's cell — so a locked turret reliably drops what it shot at,
   while the thin half-width means other mites a sub-segment **off** the line dodge. Firing
   **does not lock the turret**: the instant the bolt is away the barrel is free to swing onto
-  the next target while the shot is still travelling. Each destroyed mite is marked dead and
+  the next target while the shot is still travelling. A tank **holds its shot if the bolt would
+  pass through a friendly tank** (another tank ahead, within range, inside a body-plus-beam
+  corridor, in clear line of sight) — tanks never fire through each other, even when that spares
+  a mite behind one. Each destroyed mite is marked dead and
   leaves the per-cell index next rebuild — a corpse is not drawn (on the map either), gossiped,
   or targeted — and spawns a cosmetic destruction burst. *(tested: a bolt travels to the target
   and destroys it + a burst; it **pierces** the first mite on its line and destroys the next;
   it **misses ones off it**; it stops at a wall (a collinear mite beyond survives); the
   cooldown; the corpse leaving the index; an off-axis target not shot until the turret swings
   on; the turret swings onto a new target while the bolt is still in flight; a tank keeps
-  several bolts aloft at once, capped at `PROJ_MAX`.)*
+  several bolts aloft at once, capped at `PROJ_MAX`; a tank holds fire when the shot would pass
+  through a friendly and takes it once clear.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
