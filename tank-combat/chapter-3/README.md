@@ -23,8 +23,9 @@ Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge). Th
 **mites run themselves**. The four tanks are still yours: **tap a tank** to cycle it
 *auto-path* (tap a cell to route it there) → *manual* (drive it, `W`/`S`/`A`/`D` or
 the pad) → *unselected*. Drive a tank through the swarm and watch a sighting spread,
-then 80% **hunt** it (red) while 20% carry it **home** to a nest (the nest's colour);
-mites with no record **wander** (teal). Each tank's **turret** also aims at the nearest
+then **hunt** it (red) — by default every adopter hunts; lower the **P(hunt)** tunable to
+peel off a fraction that carry it **home** to a nest (the nest's colour). Mites with no
+record **wander** (teal). Each tank's **turret** also aims at the nearest
 mite it can see and **fires** (2 shots/sec): one shot kills the mite — it revives at its
 nest after 5 s — and every nearby mite hears the **death cry** and turns to hunt the
 shooter, so thinning the swarm also enrages it.
@@ -98,10 +99,11 @@ tick, for each mite (`mites_records`):
   now, and **hunt** it. A self-sensed tank is always hunted.
 - **Read a peer.** Otherwise adopt the **newest** record among the mites in the 3×3
   (read from the index), if strictly newer — including an *empty* one (LWW, lowest
-  index breaks ties). On adopting, roll the **role die**: `mite_phunt`% (80) → **hunt**
-  the recorded cell, else → **home** (path to this mite's nest). It fires **even while
-  already hunting/homing** — a newer record interrupts and re-rolls. Either way the
-  mite keeps and relays the record; an adopted *empty* record means **wander**.
+  index breaks ties). On adopting, roll the **role die**: `mite_phunt`% → **hunt** the
+  recorded cell, else → **home** (path to this mite's nest). `mite_phunt` **defaults to
+  100** (every adopter hunts — no couriers; lower it to send a fraction home). It fires
+  **even while already hunting/homing** — a newer record interrupts and re-rolls. Either
+  way the mite keeps and relays the record; an adopted *empty* record means **wander**.
 - **Arrive (hunt).** A hunting mite within one cell of its recorded cell: tank there →
   **refresh** (stamp now); gone → **erase** (empty, stamp now) and wander. The
   empty-stamped-now record is newest, so "it's gone" propagates back.
@@ -160,18 +162,18 @@ hunters **flow with the swarm around a jam instead of stalling**, so **kills ris
 while alive stays ~945 and the cap holds. The worst single nest ticks up slightly
 (~19.8→21.7) — cohesion's cost — which the light `COH` keeps small.
 
-**Parting around the laser.** A flocking mite also feels a **repulsion** away from any
-**live laser beam**: `beam_offset` gives its perpendicular distance to each firing tank's
-beam segment, and it votes a cardinal **off the line**, strongest at the beam and fading
-to 0 at `REPEL_RANGE`. On its own that barely showed — measured, **94% of the mites near a
-beam are committed *hunters*** that path straight through it. So the beam is also made a
-**transient obstacle**: a cell within `BEAM_BLOCK` (¾ cell) of a live beam is impassable
-that tick, like a wall, so a hunter's preferred step onto the beam comes back "not free"
-and it drops into the flocking-and-flee fallback — it **detours around the barrel's line
-and resumes when the beam fades** (~`LASER_TICKS`). The swarm opens a visible gap along a
-firing tank's sightline: measured, mites within half a cell of a live beam drop ~21%
-without piling at the edges. It costs some aggression (kills ~175→~159 — hunters keep a
-berth from the barrel) and is deterministic; the cap still holds.
+**Parting around the laser — everything is repelled.** A **live laser beam repels every
+mite near it**, hunter included. `beam_offset` gives a mite's perpendicular distance to
+each firing tank's beam segment; if it is within `REPEL_RANGE` it **drops its path and
+flees** — it falls into the flocking branch and the **repulsion** vote (strongest at the
+line, fading to 0 at `REPEL_RANGE`) steers it perpendicular off the beam, then it **resumes
+hunting once the beam fades** (~`LASER_TICKS`; its mode and destination are untouched, only
+the step changes). The catch: **94% of the mites near a beam are committed *hunters*** all
+charging the same tank, so the repulsion has to be **weighted heavily** (`FLOCK_REPEL`) to
+beat that hunt-drive — too light and they churn at the edge instead of clearing. At the
+tuned weight the swarm opens a **real gap** along a firing tank's sightline and closes
+behind it: measured, mites within the beam's reach drop **~40%**. It costs aggression
+(kills ease as hunters keep a berth from the barrel) and is deterministic; the cap holds.
 
 ### Determinism
 

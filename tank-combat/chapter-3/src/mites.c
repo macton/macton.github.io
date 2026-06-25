@@ -278,13 +278,11 @@ void mites_update_fields(World* w) {
 #define FLOCK_SEP_RANGE SUB  /* "close" = within one cell (subcells) */
 #endif
 #ifndef FLOCK_REPEL
-#define FLOCK_REPEL 60       /* flee a live laser: max vote at the beam line, 0 at REPEL_RANGE */
+#define FLOCK_REPEL 300      /* flee a live laser: max vote at the beam line, 0 at REPEL_RANGE. Strong
+                              * enough to override the hunt-drive (everyone is repelled), so a real gap opens */
 #endif
 #ifndef REPEL_RANGE
-#define REPEL_RANGE (2 * SUB) /* how far (subcells) a flocking mite feels a beam's repulsion */
-#endif
-#ifndef BEAM_BLOCK
-#define BEAM_BLOCK (3 * SUB / 4) /* a cell this close to a live beam is impassable this tick (mites detour around) */
+#define REPEL_RANGE (2 * SUB) /* within this far (subcells) of a live beam, ANY mite drops its path and flees */
 #endif
 
 static inline int iabs_(int x) { return x < 0 ? -x : x; }
@@ -346,17 +344,9 @@ static int beam_offset(World* w, uint32_t t, int px, int py, int* ax, int* ay) {
   *ay = vy - ((along * si) >> TRIG_SHIFT);
   return (*ax) * (*ax) + (*ay) * (*ay);
 }
-/* is a cell's centre within BEAM_BLOCK of any live beam? such a cell is impassable this tick,
- * so a mite (hunter or not) routes around the beam instead of stepping onto it. */
-static int cell_on_beam(World* w, uint16_t cell) {
-  int px = wc_x(cell) * SUB + SUB / 2, py = wc_y(cell) * SUB + SUB / 2, ax, ay;
-  for (uint32_t t = 0; t < N_TANKS; t++)
-    if (beam_offset(w, t, px, py, &ax, &ay) < BEAM_BLOCK * BEAM_BLOCK) return 1;
-  return 0;
-}
-
 static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   int cx = wc_x(mc), cy = wc_y(mc);
+  int mx = xy_lo(w->mite_xy[m]), my = xy_hi(w->mite_xy[m]);
   uint8_t bit = (uint8_t)(1u << seg_of(m));
   uint8_t vd[4]; uint16_t vc[4]; int nv = 0;                 /* open + cap-free neighbours */
   for (uint8_t d = 0; d < 4; d++) {
@@ -365,7 +355,6 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
     uint32_t nc = (uint32_t)wc_pack(nx, ny);
     if (g_tally[nc] & bit) continue;                   /* my sub-segment is taken there */
     if (popcount4(g_tally[nc]) >= cap) continue;       /* the cell already holds `cap` segments */
-    if (cell_on_beam(w, (uint16_t)nc)) continue;       /* a live beam blocks the step -> route around it */
     vd[nv] = d; vc[nv] = (uint16_t)nc; nv++;
   }
   if (nv == 0) { w->mite_tgt[m] = (uint16_t)mc; return DIR_NONE; }   /* hold */
@@ -374,17 +363,22 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   uint16_t dest = w->mite_dest[m];
   int bi = -1;
 
-  /* pathing AND the sub-segment it wants is free -> just take it (the route-field step). */
-  if (mode != MM_WANDER && dest != REC_EMPTY && dest != mc) {
+  /* EVERYTHING is repelled by a live laser: a mite (hunter included) within REPEL_RANGE of a
+   * live beam drops its path and flees it (in the flocking branch below), then resumes the hunt
+   * once the beam fades. */
+  int near_beam = 0, r2 = REPEL_RANGE * REPEL_RANGE;
+  { int ax, ay; for (uint32_t t = 0; t < N_TANKS; t++) if (beam_offset(w, t, mx, my, &ax, &ay) < r2) { near_beam = 1; break; } }
+
+  /* cleanly pathing, no beam to flee, AND the sub-segment it wants is free -> take it. */
+  if (!near_beam && mode != MM_WANDER && dest != REC_EMPTY && dest != mc) {
     int pref = preferred_card(w, dest, mc);
     if (pref >= 0) for (int i = 0; i < nv; i++) if (vd[i] == pref) { bi = i; break; }
   }
 
-  /* any other case (preferred blocked, or wandering) -> basic flocking off the 3x3,
-   * plus repulsion away from any live laser beam (the swarm parts around a firing tank). */
+  /* any other case (fleeing a beam, preferred blocked, or wandering) -> basic flocking off the
+   * 3x3, plus repulsion away from any live laser beam (the swarm parts around a firing tank). */
   if (bi < 0) {
     int vote[4] = { 0, 0, 0, 0 }, influenced = 0;
-    int mx = xy_lo(w->mite_xy[m]), my = xy_hi(w->mite_xy[m]);
     for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
       uint32_t nc = (uint32_t)wc_pack(wrap_wcx(cx + dx), wrap_wcy(cy + dy));
       for (uint8_t s = 0; s < MITE_CAP; s++) {

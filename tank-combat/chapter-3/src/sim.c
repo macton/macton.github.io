@@ -43,7 +43,7 @@ void sim_init(World* w) {
   w->mite_turn  = 2048;       /* nimble: ~8 ticks per 90 degrees */
   w->mite_sense = 2;          /* sense a tank within two cells (Chebyshev) */
   w->mite_cap   = MITE_CAP;   /* at most 4 mite centres per cell */
-  w->mite_phunt = 80;         /* 80% hunt the sighting on adopting a record; 20% carry it home */
+  w->mite_phunt = 100;        /* 100% hunt the sighting on adopting a record (no carry-home) */
   w->mite_seed  = 1337;       /* the editable swarm seed */
   w->fire_period  = 30;       /* tank shots every 30 ticks = 2/sec (0 = firing off) */
   w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */

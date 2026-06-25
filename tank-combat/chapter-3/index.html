@@ -144,8 +144,8 @@
     The <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
-    unselected. Drive a tank through the swarm and watch a sighting spread — 80% then
-    <b>hunt</b> it while 20% carry it <b>home</b> to a nest:
+    unselected. Drive a tank through the swarm and watch a sighting spread — by default every
+    mite <b>hunts</b> it (lower <b>P(hunt)</b> to send a fraction <b>home</b> to a nest):
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
     <span class="swatch" style="background:#e6926e"></span><span class="swatch" style="background:#dae66e"></span><span class="swatch" style="background:#6ee692"></span><span class="swatch" style="background:#6eaae6"></span><span class="swatch" style="background:#e66eda"></span> homing (briefly, in its nest’s colour — one per screen) ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
@@ -254,8 +254,9 @@
       <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and <strong>hunt</strong> it.</li>
       <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> record among the
       mites in your 3×3 (including an empty one) — last-write-wins — then roll the role die:
-      <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest (a
-      newer record interrupts and re-rolls; either way you keep relaying it).</li>
+      <strong>P(hunt)</strong> hunt the cell, else <strong>carry it home</strong> to your nest.
+      It defaults to <strong>100% hunt</strong> (no couriers; lower it to split some home) — a
+      newer record interrupts and re-rolls; either way you keep relaying it.</li>
       <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
       refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
       gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
@@ -305,16 +306,15 @@
     clumping; and because a blocked hunter now <em>flows with the crowd around a jam</em> instead of
     stalling against it, the swarm presses tanks harder (measured: kills up ~20%, the average nest
     less crowded) while the cap still holds every tick.</p>
-    <p>The same fallback is where the swarm learns to <strong>fear the laser</strong>. A flocking mite
-    feels a <strong>repulsion</strong> away from any <em>live beam</em> — it votes the cardinal
-    perpendicular off the line, strongest at the beam. But that alone barely shows: the mites packed
-    around a firing tank are almost all <em>hunters</em>, and a clean hunter paths straight through. So a
-    live beam is also made a <strong>transient obstacle</strong> — a cell on it is impassable that tick,
-    like a wall — so the hunter's preferred step comes back <em>blocked</em>, it drops into the
-    flock-and-flee fallback, and it <strong>detours around the barrel's line</strong>, resuming once the
-    beam blinks out. Watch a tank fire into the knot: the swarm <strong>parts along the sightline</strong>
-    and closes again behind it. It is the same one rule — <em>path if the step is free, else flock</em> —
-    with the beam simply making the step un-free.</p>
+    <p>The same fallback is where the swarm learns to <strong>fear the laser</strong>. A <em>live beam
+    repels every mite near it</em> — hunter included. A mite within range of a firing barrel <strong>drops
+    its path and flees</strong>: it falls into the flock branch, where a <strong>repulsion</strong> vote
+    perpendicular off the beam (strongest at the line) carries it clear, and it <strong>goes back to
+    hunting once the beam blinks out</strong> — its target never changed, only the one step. The catch is
+    that the mites packed around a firing tank are almost all <em>hunters</em> charging the same target, so
+    the repulsion has to be <strong>weighted heavily</strong> to beat that pull — too gentle and they just
+    churn at the edge. Tuned up, watch a tank fire into the knot: the swarm <strong>parts along the
+    sightline</strong> (measured: ~40% fewer mites in the beam's reach) and closes again behind it.</p>
 
     <h2>The tanks shoot back: one transform, the same index</h2>
     <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it

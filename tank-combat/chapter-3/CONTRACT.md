@@ -59,12 +59,14 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Sense → record + hunt.** A tank within `mite_sense` cells sets the record to the
   tank's cell, stamped this frame, and the mite hunts it. A self-sensed tank is always
   hunted. *(tested.)*
-- **Adopt → 80/20 hunt/home.** On adopting a newer peer record, the mite rolls the role
-  die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
-  **paths home** to its nest; either way it keeps and relays the record. The roll fires
-  **even while already hunting or homing** — a newer record interrupts and re-rolls.
-  *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
-  RNG stream statistically, and a newer record interrupts a homing mite.)*
+- **Adopt → hunt (with a tunable carry-home split).** On adopting a newer peer record,
+  the mite rolls the role die: with probability `mite_phunt` it **hunts** the recorded
+  cell, else it **paths home** to its nest; either way it keeps and relays the record. The
+  roll fires **even while already hunting or homing** — a newer record interrupts and
+  re-rolls. `mite_phunt` **defaults to 100** (every adopter hunts; no couriers), and is a
+  live tunable — lower it to split off mites that carry sightings home. *(tested: the
+  boundaries `P_HUNT = 0`/`100` are exact; a set split matches the RNG stream; a newer
+  record interrupts a homing mite.)*
 - **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
   refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
   now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
@@ -111,14 +113,15 @@ the inherited tests still pass and the baked escape table is byte-identical.
   utterly alone, it falls back to a random wander step. It is integer + deterministic and
   never breaks the cap. *(tested: a wanderer with east-heading neighbours steps east with
   them, not at random; the cap + determinism hold with flocking on.)*
-- **A live laser beam is a transient obstacle the swarm parts around.** A cell within
-  `BEAM_BLOCK` of any live beam line is **impassable that tick**, so a mite — hunter
-  included — never steps onto a firing barrel's line; its blocked preferred step drops it
-  into the flocking fallback, where a **repulsion** vote (strongest at the line, falling to
-  0 at `REPEL_RANGE`) steers it perpendicular **away** from the beam. So hunters detour
-  around the beam and resume once it fades (~`LASER_TICKS`), and the swarm opens a gap along
-  a firing tank's line of sight. Deterministic; the cap still holds. *(tested: a flocking
-  mite beside a live beam steps perpendicular off it.)*
+- **A live laser repels every mite near it.** A mite — hunter or not — within
+  `REPEL_RANGE` of a live beam **drops its path and flees**: it falls into the flocking
+  branch, where a **repulsion** vote (strongest at the line, falling to 0 at `REPEL_RANGE`,
+  weighted to override the hunt-drive) steers it perpendicular **away** from the beam. It
+  **resumes hunting once the beam fades** (~`LASER_TICKS`) — its mode and destination are
+  untouched, only the step changes. So the swarm opens a real gap along a firing tank's line
+  of sight (measured: ~40% fewer mites within the beam's reach) and closes again behind it.
+  Deterministic; the cap still holds. *(tested: a mite beside a live beam steps perpendicular
+  off it.)*
 
 ## Combat (the tanks shoot the swarm)
 
