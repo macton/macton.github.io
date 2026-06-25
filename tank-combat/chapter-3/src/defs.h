@@ -76,20 +76,10 @@ static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u
  * There is one nest per screen EXCEPT the tank start screen (0,0) — 15 of the 16
  * screens. Spreading the homes across all the screens spreads the spawn/revival
  * load: with a single screenful of nests every revived mite funnelled out through
- * that one screen's two or three border openings (a Poisson pile-up at the exits);
- * one nest per screen gives each its own exits and roughly N_MITES/15 residents. */
+ * that one screen's two or three border openings; one nest per screen gives each
+ * its own exits and roughly N_MITES/15 residents. */
 #define NEST_COUNT  15
 static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
-
-/* A killed mite revives at its nest — but the nest CELL sits on the swarm's hunt routes
- * and is usually full of passing hunters (the crowding cap is per (cell, sub-segment)).
- * So revival searches an expanding ring around the nest (radius 0 = the nest cell first,
- * then out to MITE_REVIVE_R) for a free sub-segment, instead of waiting on the one cell.
- * Without this the respawn queue jams: dead mites pile up with expired timers because the
- * exact nest cell never frees, and the live swarm bleeds away. */
-#ifndef MITE_REVIVE_R
-#define MITE_REVIVE_R 3      /* a 7x7 search; measured to keep revival ahead of a 4-tank camp */
-#endif
 
 /* The shared route-field table: a fixed pool of remaining-distance fields keyed by
  * destination cell (the NEST_COUNT resident nests + cached tank-sighting goals).
@@ -105,28 +95,6 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define MM_WANDER   0           /* no destination: drunk walk over the open cell graph */
 #define MM_HUNT     1           /* path to the recorded tank cell */
 #define MM_HOME     2           /* path to this mite's nest */
-
-/* A hunter/homer that cannot advance toward its destination for this many consecutive ticks
- * is jammed (e.g. a knot of revived mites funnelling out of one nest) — it gives up and
- * wanders, so the knot dissolves instead of freezing. Near a tank it re-senses next tick and
- * resumes hunting, so the front still holds; only a genuine standstill triggers it. */
-#ifndef MITE_STUCK_MAX
-#define MITE_STUCK_MAX 16
-#endif
-
-/* A wandering mite usually steps at random, but `wander_bias` percent of the time (a World
- * tunable, edited on the page) it instead takes the step pointing away from the NEAREST nest
- * — a gentle outward drift, so mites that just revived or gave up a jam sift off the nest
- * rather than re-clumping on it. (The value lives in World, not here, so it is tunable live.) */
-
-/* "Leave home" period (ticks): after a mite gives up a jam OR revives at its nest, it spends
- * this many ticks as a forced wanderer — it ignores second-hand hunts and just drifts (with
- * the outward bias above) so it clears the nest before re-engaging, instead of the revived
- * hunters funnelling straight back into a knot. A tank it directly SENSES still overrides at
- * once, so the front line is unaffected. 0 = disabled. */
-#ifndef MITE_REFRAC_TICKS
-#define MITE_REFRAC_TICKS 120
-#endif
 
 /* ---- combat: the tanks shoot the swarm (chapter-3 gameplay) ----------------
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
@@ -186,27 +154,10 @@ static inline uint32_t screen_of(uint32_t sx, uint32_t sy) { return sy * SCREENS
  * one such cell (the last-known tank position); REC_EMPTY is the out-of-range
  * sentinel for "no cell" (4800 cells, so 0xFFFF can never be a real one). */
 #define N_WORLD_CELLS (BIG_W * BIG_H)        /* 4800 */
-#define REC_EMPTY     0xFFFFu                 /* no-info record (never propagates) */
+#define REC_EMPTY     0xFFFFu                 /* empty record: a readable, propagating value */
 static inline uint16_t wc_pack(int32_t wcx, int32_t wcy) { return (uint16_t)(wcy * BIG_W + wcx); }
 static inline int32_t  wc_x(uint32_t c) { return (int32_t)(c % BIG_W); }
 static inline int32_t  wc_y(uint32_t c) { return (int32_t)(c / BIG_W); }
-
-/* ---- the mite record is a world cell plus a TYPE, packed into one uint16 ----
- * A cell index needs only 13 bits (< 4800), so the top bit carries the type:
- *   sighting  "a tank is at X"   -> X              (a plain world cell)
- *   gone      "cell X is empty"  -> X | GONE_FLAG  (a dispersal broadcast)
- *   no info                      -> REC_EMPTY (0xFFFF)
- * Why typed: a sighting spreads to anyone (newest-wins). A "gone" is adopted ONLY
- * by mites already hunting that exact cell — so it clears a stale cluster off X
- * without ever wiping a live sighting of some OTHER cell. A no-info record never
- * propagates. (This is the fix for the swarm "forgetting" a tank that never moved:
- * an untyped, freely-propagating "gone" was always the newest record and swept the
- * whole swarm back to wander.) */
-#define GONE_FLAG 0x8000u
-static inline int      rec_is_sighting(uint16_t c) { return c != REC_EMPTY && !(c & GONE_FLAG); }
-static inline int      rec_is_gone    (uint16_t c) { return c != REC_EMPTY &&  (c & GONE_FLAG); }
-static inline uint16_t rec_cell_of    (uint16_t c) { return (uint16_t)(c & 0x7FFFu); }
-static inline uint16_t rec_gone_of    (uint16_t c) { return (uint16_t)(c | GONE_FLAG); }
 
 /* toroidal distances between world cells. tor1 is the wrapped 1-D distance on an
  * axis of length n; the swarm seeks on the 4-connected graph (Manhattan), and

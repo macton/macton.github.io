@@ -19,7 +19,7 @@ static const uint32_t COL_MANUAL   = RGBA(245, 225, 90, 255);
 
 /* a mite's tint shows its CURRENT role (re-derived every tick, so it is never stale):
  * idle teal (wander, no record) -> hunting red, fading hot to cold as the sighting ages
- * -> homing in its NEST's colour (the 20% carrying a record back to one of the four
+ * -> homing in its NEST's colour (the 20% carrying a record back to one of the
  * nests). Homing is transient: on reaching its nest a mite delivers the record and
  * reverts to wander (teal), so nest-tint means "in transit", not a permanent state.
  * Watch a sighting diffuse out from a contact, swarm in, and dissolve when it goes stale. */

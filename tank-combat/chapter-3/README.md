@@ -45,8 +45,8 @@ Every mite belongs to one of **`NEST_COUNT = 15` nests** (`nest_of(i) = i % 15`)
 its screen centre. A nest is a home a mite can path back to. Spreading the homes over
 fifteen screens (rather than crowding a few) spreads the spawn/revival load across
 fifteen screens' worth of exits instead of piling it out through one screen's two or
-three border openings — a Poisson pile-up at the exits. Measured, the worst nest's
-local crowd drops ~36% and the average nest neighbourhood empties ~69%.
+three border openings — which is what let the revival logic stay dead simple (revive,
+wander, re-acquire) with no jam to dissolve.
 
 ### One movement model, sized by a parameter
 
@@ -87,100 +87,32 @@ mites in index order against a per-cell **bitmask** of reserved sub-segments (cu
 occupants + committed inbound, each a `1 << seg`). Pinned by tests, including a
 forced-convergence stress and the one-mite-per-sub-segment invariant.
 
-**Jam detector (give up if stuck).** The cap can deadlock a *knot* of mites all wanting
-the same exits — most visibly a cluster of revived hunters funnelling out of one nest, or
-homers blocked from a full nest cell. So a **hunting or homing** mite that cannot advance
-toward its destination for `MITE_STUCK_MAX` (= 16) consecutive ticks **gives up and
-wanders**, and the knot dissolves instead of freezing. It is self-targeting: a mite making
-any progress resets its counter, and a mite stuck *at the front* (against a tank) re-senses
-the tank the very next tick and resumes — so the attack holds while dead-end pile-ups clear.
-Without it the swarm collapses into permanent green blobs around the nests (measured: ~170
-hunters frozen at the nests and climbing; with it, that knot churns out and the wanderer
-population recovers from ~14 to ~180).
-
-**Outward wander bias.** To keep the churned-out wanderers from immediately re-clumping on
-the nest, a wandering mite takes the step *away from the nearest nest* `wander_bias`% of the
-time (a live tunable, default 60) instead of a uniform random step — a gentle outward drift.
-Two subtleties learned by simulation: (1) use the outward *direction* (a dot product with
-the nest→mite vector), **not** "max toroidal distance", which ties three-ways one cell out
-and silently biased everything *north*; (2) the bias has to be more than a token —
-below ~50% a freed mite takes one step out, re-adopts a hunt from the dense neighbours, and
-drifts *back*; it needs ~60% to reach escape velocity. Even so it is a polish on top of the
-jam detector (which does the heavy lifting): the nest cluster is mostly transiting hunters,
-which the bias doesn't touch.
-
-**Leave-home period.** The bias only moves *wanderers*, and the second escape-velocity
-problem above is the real obstacle: a freed or freshly-revived mite re-adopts a hunt from
-the dense neighbours before it can drift away. So after a mite **gives up a jam OR revives at
-its nest**, it spends `MITE_REFRAC_TICKS` (= 120, ~2 s) as a forced wanderer — it ignores
-second-hand hunts and drifts out (with the bias) before re-engaging, so the revived hunters
-sift off the nest instead of funnelling straight back into a knot. A tank it *directly
-senses* still overrides at once, so the front line is unaffected. Applying it on **revival**
-(the knot's source) is what makes it bite — measured near-nest density falls ~145 → ~134 on
-top of the bias, with the live count and kill rate unchanged.
-
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
-One **record** per mite, a **last-write-wins register** packed into a `uint16` cell +
-a `uint32` timestamp. The cell is **typed** (the top bit, since a cell index needs only
-13 of 16 bits — see `defs.h`):
+One **record** per mite: the **last known tank position** as a world cell (or
+`REC_EMPTY`), plus the **frame it was recorded** (a timestamp). A **last-write-wins
+register**; the swarm's behaviour emerges entirely from copying it on contact. Per
+tick, for each mite (`mites_records`):
 
-- a **sighting** `X` — "a tank is at X",
-- a **gone** `X | GONE_FLAG` — "cell X is empty" (a dispersal broadcast),
-- **no info** (`REC_EMPTY`).
-
-The swarm's behaviour emerges from copying records on contact. Per tick, for each mite
-(`mites_records`):
-
-- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record a **sighting**, stamped
+- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record its cell, stamped
   now, and **hunt** it. A self-sensed tank is always hunted.
-- **Read a peer.** Otherwise adopt the **newest** qualifying record in the 3×3 (read from
-  the index), if strictly newer (LWW, lowest index breaks ties). A **sighting** qualifies
-  for anyone. A **gone-of-X** qualifies **only for a mite that is hunting X** — so "X is
-  empty" reaches X's hunters and no one else. On adopting a sighting, roll the **role
-  die**: `mite_phunt`% (80) → **hunt** the cell, else → **home** (carry it to the nest);
-  it re-rolls **even while already hunting/homing**. On adopting a gone-of-X, **stand down
-  to wander** (and relay it onward to the rest of the X-cluster).
+- **Read a peer.** Otherwise adopt the **newest** record among the mites in the 3×3
+  (read from the index), if strictly newer — including an *empty* one (LWW, lowest
+  index breaks ties). On adopting, roll the **role die**: `mite_phunt`% (80) → **hunt**
+  the recorded cell, else → **home** (path to this mite's nest). It fires **even while
+  already hunting/homing** — a newer record interrupts and re-rolls. Either way the
+  mite keeps and relays the record; an adopted *empty* record means **wander**.
 - **Arrive (hunt).** A hunting mite within one cell of its recorded cell: tank there →
-  **refresh** (stamp now, keep hunting); gone → **broadcast a gone-of-X** (stamped now)
-  and **wander**.
-- **Arrive (home).** A homing mite that reaches its nest **deposits its sighting in the
-  nest if it is newer** than what the nest holds (see *the nest as a hub* below), then
-  drops the record and reverts to wander.
-
-> **Why the record is typed — the swarm used to "forget" a tank that never moved.** An
-> earlier version stored an untyped cell and erased it to a fresh-stamped *empty* on
-> arrival. That empty was the newest record in the system, so it propagated like any other
-> and a single stale "gone" swept the whole swarm back to wander — a tank parked away from
-> a nest was wiped to green within seconds (confirmed in simulation). Typing the record
-> fixes it: a **gone-of-X** is adopted **only by mites already hunting X**, so it disperses
-> a stale cluster off X (when a tank actually leaves, its hunters clear within a couple of
-> seconds) **without ever wiping a live sighting of some other cell**. A moving tank is
-> tracked the whole time, because each new cell is a newer *sighting* that supersedes the
-> old via ordinary last-write-wins.
+  **refresh** (stamp now); gone → **erase** (empty, stamp now) and wander. The
+  empty-stamped-now record is newest, so "it's gone" propagates back.
+- **Arrive (home).** A homing mite that reaches its nest has delivered the sighting:
+  it **drops the record and reverts to wander** (empty, stamp now), rejoining the swarm.
+  So a mite is nest-tinted only while *in transit*; without this, homed mites pile up at
+  the nests, stay `MM_HOME` forever (perpetually nest-coloured), and relay a stale record.
 
 The gossip is **order-independent**: every mite reads last tick's records and writes
 this tick's into a **second buffer**, then they swap (double-buffered LWW). Timestamps
 are monotone.
-
-### The nest as a knowledge hub
-
-Each nest keeps its own record (`nest_rec_cell`/`nest_rec_time`) — the latest tank
-**sighting** carried home. Two flows feed it and a timer drains it:
-
-- **Deposit.** A homing mite (the `1 − mite_phunt` ≈ 20% that carry a contact home) that
-  reaches its nest overwrites the nest's record **iff its own sighting is newer**
-  (newest-wins, like the per-mite register). Only sightings are ever deposited — a courier
-  never *erases* the nest, so a "gone" can't wipe the hub's knowledge.
-- **Dispatch.** A mite **revived** at the nest **adopts the nest's record**: it hunts the
-  last-known tank cell (reinforcements to the front), or just wanders if the nest knows
-  nothing. So killing mites doesn't reset the swarm's knowledge — the nest remembers it
-  and seeds the next wave.
-- **Timeout.** Because the deposit flow can't erase the nest, a nest sighting that no
-  courier refreshes would otherwise re-seed hunters at a ghost forever. So a nest record
-  older than `nest_ttl` (default 600 ticks = 10 s; `0` = never) simply **expires**. That
-  is the nest's only forgetting mechanism — a stale entry costs at most `nest_ttl` of
-  wasted reinforcements before it clears (editable live on the page).
 
 ### Navigation — a handful of shared route fields for a thousand mites
 
@@ -197,16 +129,15 @@ Because the swarm shares destinations, the set of *distinct* active destinations
 small — the 15 nests plus the recent sighting cells the gossip converges on — even
 though 1000 mites move. So a fixed table of `N_FIELDS` fields, keyed by destination:
 
-- The **15 nest fields stay resident** (re-folded only on a wall edit / nest move).
+- The **15 nest fields stay resident** (re-folded only on a wall edit).
 - A **tank-goal field is folded the first tick its cell becomes an active
   destination and reused while active**; its slot is freed once no mite wants it.
 - **`N_FIELDS` is sized from a measured peak, not a guess.** Instrumenting the distinct
   active-destination count puts the high-water mark at **~19** in normal play (the 15
-  resident nests plus the few sighting cells the gossip has converged on); adversarial
-  tank churn — the corner-roaming stress test — pushes it into the low 50s, so
-  `N_FIELDS = 64` holds it. The prove/measure/detect discipline the Level-1 byte got,
-  applied to a runtime peak. The page shows the live **active / 64** count and the
-  running **peak**, and a test asserts the peak stays within `N_FIELDS`.
+  resident nests plus the few sighting cells the gossip has converged on), so
+  `N_FIELDS = 64` holds it with headroom — the prove/measure/detect discipline the Level-1
+  byte got, applied to a runtime peak. The page shows the live **active / 64** count
+  and the running **peak**, and a test asserts the peak stays within `N_FIELDS`.
 - **Overflow → greedy fallback.** If the live count ever exceeds `N_FIELDS`, those
   mites steer greedily (toroidal distance) that tick — no crash, no cap break (tested).
 
@@ -249,21 +180,18 @@ destruction bursts. Per tank, each tick:
   from every body it drops, into the same gossip that spreads any sighting, and the
   survivors converge on the attacker.
 
-A dead mite **revives near its nest** after `mite_respawn` ticks (default 300 = **5 s**),
-**adopting the nest's gossip** (hunt the last-known tank cell, or wander if the nest knows
-nothing — see *the nest as a hub*). Revival respects the crowding cap (a free
-`(cell, sub-segment)` slot once current occupancy **and inbound reservations** are counted,
-the same tally `mites_step` uses). But the nest *cell itself* sits on the swarm's hunt
-routes and is usually full of passing hunters — so revival searches an **expanding ring**
-around the nest (`MITE_REVIVE_R = 3`: the nest cell first, then outward) for a free slot,
-rather than waiting on the one cell. Without the ring the respawn queue **jams**: once the
-swarm reliably hunts (the typed-gossip fix), hunters camp the nest cells, dead mites can't
-revive, and the live count bleeds away (measured: ~480 alive and falling vs ~925 stable
-with the ring). Reviving happens right after the index is built (step 1b) so the revived
-mite is an ordinary live mite for the rest of the tick. There is **one nest per screen
-except the tanks' start screen (0,0)** — fifteen homes — so revived mites never pop up under
-a barrel, and the spawn load is spread over fifteen screens' exits, not piled out one screen's.
-Firing draws **no randomness**, so the swarm stays a pure function of the seed and inputs.
+A dead mite **revives at its nest with its memory wiped** (record emptied, mode reset to
+wander) after `mite_respawn` ticks (default 300 = **5 s**), respecting the crowding cap:
+it revives only if the nest cell has a free slot once current occupancy **and inbound
+reservations** are counted (the same tally `mites_step` uses), else it waits a tick.
+Reviving happens right after the index is built (step 1b) so the revived mite is an
+ordinary live mite for the rest of the tick. There is **one nest per screen except the
+tanks' start screen (0,0)** — fifteen homes — so revived mites never pop up under a barrel,
+and the spawn load is spread over fifteen screens' exits, not piled out one screen's. That
+spread is what keeps this revival dead simple: a busy nest cell just makes the mite wait a
+tick — with the load shared, that almost never happens, so no neighbourhood-fallback or
+jam-detector machinery is needed. Firing draws **no randomness**, so the swarm stays a pure
+function of the seed and inputs.
 
 ## Per-tick order (`sim.c`)
 
@@ -304,8 +232,7 @@ New in chapter 3:
 the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NONE`,
 `LASER_MAX`, `LASER_TICKS`, `N_FX`, `FX_DURATION`).
 `sim.h`'s `World` gains the mite pool (SoA, incl. `mite_dest` and `mite_resp`), the
-double-buffered records, the per-cell index, the fifteen nests **and their stored gossip**
-(`nest_rec_cell`/`nest_rec_time`), the shared route-field
+double-buffered records, the per-cell index, the fifteen nests, the shared route-field
 table, the field active/peak counters, the per-tank turret/cooldown/target/beam state,
 the **destruction-effect ring** (`fx_xy`/`fx_t`), the PRNG, and the mite + combat
 tunables (`fire_period`, `mite_respawn`, `turret_rate`).
@@ -359,21 +286,17 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **133 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **115 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
 sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
 convergence, **and with firing on** — kills + nest respawns; ≤1 mite per sub-segment);
 the **gossip** (one-hop-per-tick propagation = order-independent, newer overwrites
-older, older never overwrites newer, a newer no-info record does **not** overwrite a
-sighting); the **behaviour** (sense → hunt, arrive refresh / gone-of-X broadcast, the
-80/20 hunt/home split at the `P_HUNT` boundaries and statistically, a newer sighting
-interrupts a homing mite and re-rolls, **a gone-of-X clears an X-hunter but never a
-Y-hunter**, a mite that reaches its nest reverts to wander); **nest gossip** (a homing
-mite deposits its newer sighting; older gossip doesn't overwrite; an empty courier never
-erases the nest; **a nest sighting expires past `nest_ttl`** and is kept within it; a
-revived mite adopts the nest's record and hunts it, or wanders if the nest is empty); the
-**nests & shared fields** (`nest_of` partitions the swarm into fifteen balanced groups; a homing mite
+older, older never overwrites newer, a newer *empty* propagates); the **behaviour**
+(sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
+boundaries and statistically, a newer record interrupts a homing mite and re-rolls, a
+mite that reaches its nest **reverts to wander** with its record cleared — so homed mites
+don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into fifteen balanced groups; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
 **distinct-destination peak is measured and stays within `N_FIELDS`** — ~32 with combat
@@ -387,14 +310,13 @@ picks the mite **closest to the turret's direction**, not the spatially nearest;
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
 **turret is locked while the beam is live** and free again once it fades; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
-revives **at or next to its nest** after the timeout, and **into the neighbourhood when the
-nest cell is full**); **wall safety** at
+revives at its nest **with its memory cleared** after the timeout); **wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
 with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (133 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (115 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

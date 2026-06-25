@@ -173,68 +173,44 @@ void tanks_fire(World* w) {
   }
 }
 
-/* Per-cell occupied-sub-segment bitmask for the whole board, rebuilt each respawn tick:
- * a live mite reserves its segment in its CURRENT cell and (if in transit) its TARGET cell.
- * Revival reads this to find a free (cell, segment) slot. One byte per world cell. */
-static uint8_t g_revocc[N_WORLD_CELLS];
-
-/* Runs right after mites_build_index (sim_tick step 1b): revive timed-out dead mites near
- * their nest. The nest CELL is usually full of passing hunters (the per-(cell,segment) cap),
- * so a mite revives into the first free sub-segment found in an expanding ring around the
- * nest — the nest cell itself first, then out to MITE_REVIVE_R. Without the ring the respawn
- * queue jams on the one cell. The revived mite is slotted straight into the index, so the cap
- * holds and the rest of the tick treats it as an ordinary live mite; else it waits a tick. */
+/* Runs right after mites_build_index (sim_tick step 1b): the index holds the live mites,
+ * one slot per (nest cell, sub-segment). A mite revives only if its OWN sub-segment at its
+ * nest is free — counting current occupants AND mites already in transit toward the nest
+ * (a slot they reserved last tick) — and the cell holds fewer than `mite_cap` segments. It
+ * is then slotted straight into the index, so the cap holds and the rest of the tick treats
+ * it as an ordinary live mite. Otherwise it waits one more tick. */
 void mites_respawn(World* w) {
   int cap = w->mite_cap;
-  /* board occupancy = current segment + standing in-transit reservation of every live mite */
-  for (uint32_t i = 0; i < N_WORLD_CELLS; i++) g_revocc[i] = 0;
+  /* per-nest occupied-sub-segment bitmask: current occupants (from the index) + inbound */
+  uint8_t occ[NEST_COUNT];
+  for (int n = 0; n < NEST_COUNT; n++) {
+    uint32_t nc = (uint32_t)w->nest_cell[n]; uint8_t b = 0;
+    for (int s = 0; s < MITE_CAP; s++) if (w->mite_list[nc * MITE_CAP + s] != REC_EMPTY) b |= (uint8_t)(1u << s);
+    occ[n] = b;
+  }
   for (uint32_t m = 0; m < N_MITES; m++) {
-    if (w->mite_resp[m]) continue;
-    uint8_t b = (uint8_t)(1u << seg_of(m));
-    g_revocc[w->mite_cell[m]] |= b;
-    if (w->mite_tgt[m] != w->mite_cell[m]) g_revocc[w->mite_tgt[m]] |= b;
+    if (w->mite_resp[m] || w->mite_tgt[m] == w->mite_cell[m]) continue;  /* dead or at rest */
+    for (int n = 0; n < NEST_COUNT; n++) if (w->mite_tgt[m] == w->nest_cell[n]) occ[n] |= (uint8_t)(1u << seg_of(m));
   }
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m] == 0) continue;                  /* alive */
     if (--w->mite_resp[m] > 0) continue;                 /* still dead */
     uint32_t n = nest_of(m); uint16_t nest = w->nest_cell[n];
-    uint8_t seg = (uint8_t)seg_of(m), bit = (uint8_t)(1u << seg);
-    int ncx = wc_x(nest), ncy = wc_y(nest);
-
-    /* expanding-ring search for a free (cell, my-segment) slot: radius 0 (the nest cell),
-     * then each ring out to MITE_REVIVE_R; first open, non-full, segment-free cell wins. */
-    int rc = -1;
-    for (int r = 0; r <= MITE_REVIVE_R && rc < 0; r++) {
-      for (int dy = -r; dy <= r && rc < 0; dy++) for (int dx = -r; dx <= r; dx++) {
-        int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
-        if (adx != r && ady != r) continue;              /* the ring at exactly radius r */
-        int cx = wrap_wcx(ncx + dx), cy = wrap_wcy(ncy + dy);
-        if (cell_is_wall(w->grid, cx, cy)) continue;
-        uint32_t c = (uint32_t)wc_pack(cx, cy);
-        if (!(g_revocc[c] & bit) && popcount4(g_revocc[c]) < cap) { rc = (int)c; break; }
-      }
-    }
-
-    if (rc >= 0) {
-      uint32_t c = (uint32_t)rc; int wcx = wc_x(c), wcy = wc_y(c);
+    uint8_t bit = (uint8_t)(1u << seg_of(m));
+    /* revive only if its sub-segment is free and the cell isn't already `cap`-full */
+    if (!(occ[n] & bit) && popcount4(occ[n]) < cap) {
+      int wcx = wc_x(nest), wcy = wc_y(nest);
       w->mite_xy[m] = xy_pack(wcx * SUB + SUB / 2 + seg_ox(m), wcy * SUB + SUB / 2 + seg_oy(m));
       w->mite_ang[m] = 0; w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
-      w->mite_stuck[m] = 0;
-      w->mite_cell[m] = (uint16_t)c; w->mite_tgt[m] = (uint16_t)c;
-      /* adopt the nest's stored gossip: hunt the last-known tank position it holds, or
-       * wander if it knows nothing. Both record buffers are seeded so the next gossip
-       * step reads a consistent record whichever buffer is current. */
-      uint16_t nrc = w->nest_rec_cell[n]; uint32_t nrt = w->nest_rec_time[n];   /* always a sighting or REC_EMPTY */
-      w->mite_rec_cell[0][m] = nrc; w->mite_rec_cell[1][m] = nrc;
-      w->mite_rec_time[0][m] = nrt; w->mite_rec_time[1][m] = nrt;
-      if (rec_is_sighting(nrc)) { w->mite_mode[m] = MM_HUNT;   w->mite_dest[m] = rec_cell_of(nrc); }
-      else                      { w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; }
-      w->mite_refrac[m] = MITE_REFRAC_TICKS;    /* leave home first: drift out, then path to the front */
+      w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY;
+      w->mite_cell[m] = nest; w->mite_tgt[m] = nest;
+      w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
+      w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
       w->mite_resp[m] = 0;
-      w->mite_list[c * MITE_CAP + seg] = (uint16_t)m;      /* into its sub-segment slot */
-      w->mite_cnt[c]++; g_revocc[c] |= bit;
+      w->mite_list[(uint32_t)nest * MITE_CAP + seg_of(m)] = (uint16_t)m;   /* into its sub-segment slot */
+      w->mite_cnt[nest]++; occ[n] |= bit;
     } else {
-      w->mite_resp[m] = 1;                                /* whole neighbourhood busy: retry next tick */
+      w->mite_resp[m] = 1;                                /* nest sub-segment busy: retry next tick */
     }
   }
 }

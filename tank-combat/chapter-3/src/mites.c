@@ -100,7 +100,6 @@ void mites_spawn(World* w) {
     w->mite_ang[m] = (uint16_t)(CARD_DI[xs32(&w->rng) & 3] << ANGLE_SHIFT);
     w->mite_in[m] = 0; w->mite_vxy[m] = 0; w->mite_hit[m] = 0;
     w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_resp[m] = 0;
-    w->mite_stuck[m] = 0; w->mite_refrac[m] = 0;
     w->mite_cell[m] = (uint16_t)cell; w->mite_tgt[m] = (uint16_t)cell;
     w->mite_rec_cell[0][m] = REC_EMPTY; w->mite_rec_cell[1][m] = REC_EMPTY;
     w->mite_rec_time[0][m] = 0;         w->mite_rec_time[1][m] = 0;
@@ -136,16 +135,11 @@ static uint32_t tank_cell(const World* w, uint32_t t) {
 
 /* ---- records: the last-write-wins gossip (double-buffered) ----------------- */
 /* Reads the previous-tick record buffer and writes the next, so propagation is
- * order-independent. Each record is a TYPED cell (see defs.h): a SIGHTING "tank at X",
- * a GONE "cell X is empty", or no-info. Per mite, in order:
- *   sense a tank          -> record a SIGHTING, HUNT it
- *   adopt a newer SIGHTING -> roll P_HUNT: HUNT the cell, or carry it HOME
- *   adopt a newer GONE-of-my-target -> stand down (the cell I hunt is confirmed empty)
- *   arrive at a HUNT cell -> refresh (tank there) or broadcast GONE-of-X + WANDER (gone)
- *   arrive home           -> deposit my SIGHTING at the nest, then wander
- * A SIGHTING spreads to anyone (newest-wins). A GONE-of-X is adopted ONLY by mites that
- * are hunting X, so it disperses a stale cluster off X without ever wiping a live sighting
- * of another cell — the swarm no longer "forgets" a tank that is still sitting there. */
+ * order-independent. Decides each mite's mode + destination:
+ *   sense a tank  -> record it, HUNT it
+ *   adopt a newer peer record -> roll P_HUNT: HUNT the cell, or carry it HOME
+ *   arrive at a HUNT cell -> refresh (tank there) or erase + WANDER (gone)
+ * A HOME or HUNT mite holds and relays its record; an empty record is WANDER. */
 void mites_records(World* w) {
   uint32_t cur = w->rec_buf, nxt = cur ^ 1u;
   const uint16_t* rc_in = w->mite_rec_cell[cur];
@@ -155,21 +149,13 @@ void mites_records(World* w) {
   uint32_t frame = w->frame;
   int sense = w->mite_sense;
 
-  /* nest memory times out: a nest record older than nest_ttl is dropped, so the nest
-   * stops re-seeding hunters at a position no courier has refreshed (0 = never expire). */
-  if (w->nest_ttl) for (uint32_t n = 0; n < NEST_COUNT; n++)
-    if (w->nest_rec_cell[n] != REC_EMPTY && frame >= w->nest_rec_time[n] &&
-        frame - w->nest_rec_time[n] > (uint32_t)w->nest_ttl)
-      w->nest_rec_cell[n] = REC_EMPTY;
-
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                         /* dead: no gossip */
     uint32_t mc = w->mite_cell[m];
     uint16_t my_c = rc_in[m]; uint32_t my_t = rt_in[m];
     uint16_t new_c = my_c; uint32_t new_t = my_t; uint8_t mode = w->mite_mode[m];
-    uint8_t refr = w->mite_refrac[m]; if (refr) w->mite_refrac[m] = refr - 1;  /* "leave home" countdown */
 
-    /* 1. Sense a tank within `sense` cells (Chebyshev): record a SIGHTING, stamp now, hunt.
+    /* 1. Sense a tank within `sense` cells (Chebyshev): record it, stamp now, hunt.
      *    A few tanks, so scan directly; nearest (Manhattan) wins, low index ties. */
     int sensed = 0, best_md = 0; uint16_t seen_c = 0;
     for (uint32_t t = 0; t < N_TANKS; t++) {
@@ -179,15 +165,12 @@ void mites_records(World* w) {
       if (!sensed || md < best_md) { best_md = md; seen_c = (uint16_t)tc; sensed = 1; }
     }
     if (sensed) {
-      new_c = seen_c; new_t = frame; mode = MM_HUNT; w->mite_refrac[m] = 0;  /* direct contact ends leave-home */
-    } else if (refr) {
-      /* leaving home: hold the record (no adopt / arrive) so the forced outward wander in
-       * mites_step carries this just-revived / just-freed mite clear of the nest first. */
+      new_c = seen_c; new_t = frame; mode = MM_HUNT;
     } else {
-      /* 2. Read a peer: the newest record strictly newer than mine in the 3x3 (from the
-       *    index). A SIGHTING is always a candidate. A GONE-of-X is a candidate ONLY if I
-       *    am hunting X (so "X is empty" reaches X's hunters and no one else). No-info
-       *    never propagates. Lowest-index tie-break keeps equal timestamps deterministic. */
+      /* 2. Read a peer: the newest record strictly newer than mine in the 3x3
+       *    (from the index). Adopt it (cell + time, incl. empty), then roll the
+       *    role die — even while already hunting/homing, a newer record re-rolls.
+       *    Canonical lowest-index tie-break keeps equal timestamps deterministic. */
       int found = 0; uint32_t best_pt = 0; uint16_t best_pc = REC_EMPTY; uint32_t best_pp = 0;
       int cx = wc_x(mc), cy = wc_y(mc);
       for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
@@ -195,46 +178,39 @@ void mites_records(World* w) {
         for (uint8_t s = 0; s < MITE_CAP; s++) {
           uint32_t p = w->mite_list[nc * MITE_CAP + s];
           if (p == REC_EMPTY || p == m) continue;
-          uint16_t pc = rc_in[p];
-          if (pc == REC_EMPTY) continue;                   /* no-info never propagates */
-          if (rec_is_gone(pc) && !(rec_is_sighting(my_c) && rec_cell_of(my_c) == rec_cell_of(pc)))
-            continue;                                       /* a GONE-of-X is only for X's hunters */
           uint32_t pt = rt_in[p];
           if (pt <= my_t) continue;
           if (!found || pt > best_pt || (pt == best_pt && p < best_pp)) {
-            found = 1; best_pt = pt; best_pc = pc; best_pp = p;
+            found = 1; best_pt = pt; best_pc = rc_in[p]; best_pp = p;
           }
         }
       }
       if (found) {
-        new_c = best_pc; new_t = best_pt;                  /* adopt + relay the newer record */
-        if (rec_is_gone(new_c)) mode = MM_WANDER;          /* my target is confirmed gone: stand down + relay */
+        new_c = best_pc; new_t = best_pt;                    /* adopt + relay the newer record */
+        if (new_c == REC_EMPTY) mode = MM_WANDER;            /* nowhere to hunt -> wander */
         else mode = (xs32(&w->rng) % 100u) < (uint32_t)w->mite_phunt ? MM_HUNT : MM_HOME;
-      } else if (mode == MM_HUNT && rec_is_sighting(my_c) && cell_chebyshev(mc, my_c) <= 1) {
-        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh (stamp now,
-         *    keep hunting). Gone -> broadcast a GONE-of-X (stamped now) and wander; only the
-         *    other mites hunting X will adopt it, so the stale cluster clears off X while
-         *    sightings of every other cell are left untouched. */
+      } else if (mode == MM_HUNT && my_c != REC_EMPTY && cell_chebyshev(mc, my_c) <= 1) {
+        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh
+         *    (stamp now, keep hunting); gone -> erase (empty, stamp now) + wander.
+         *    The empty-stamped-now record is newest, so "gone" propagates back. */
         int tank_here = 0;
         for (uint32_t t = 0; t < N_TANKS; t++) if (tank_cell(w, t) == my_c) { tank_here = 1; break; }
         if (tank_here) { new_c = my_c; new_t = frame; }
-        else { new_c = rec_gone_of(my_c); new_t = frame; mode = MM_WANDER; }
+        else { new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER; }
       } else if (mode == MM_HOME && mc == w->nest_cell[nest_of(m)]) {
-        /* 3b. Arrive (home): deposit the carried SIGHTING in the nest if it is newer than
-         *     what the nest holds (the nest tracks the latest tank position), then drop it
-         *     and rejoin the wanderers. Only a sighting is ever deposited; the nest forgets
-         *     a stale entry by timeout above, not by a courier erasing it. */
-        uint32_t n = nest_of(m);
-        if (rec_is_sighting(my_c) && my_t > w->nest_rec_time[n]) { w->nest_rec_cell[n] = my_c; w->nest_rec_time[n] = my_t; }
+        /* 3b. Arrive (home): the sighting has been carried to the nest — drop it and
+         *     rejoin the wanderers. Without this, homed mites pile up at the nest, stay
+         *     MM_HOME forever (perpetually nest-tinted), and keep relaying a stale
+         *     record; the empty-stamped-now record propagates "nothing here" like 3. */
         new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER;
       }
-      /* 4. else keep the current record, mode, and destination (still wandering, still in
-       *    transit to a hunt/home cell, or relaying a gone it already holds). */
+      /* 4. else keep the current record, mode, and destination (still wandering, or
+       *    still in transit to a hunt/home cell it has not yet reached). */
     }
 
-    /* resolve the destination from the final mode (a HUNT record is always a plain sighting) */
+    /* resolve the destination from the final mode */
     uint16_t dest;
-    if (mode == MM_HUNT)      dest = rec_cell_of(new_c);          /* the recorded tank cell */
+    if (mode == MM_HUNT)      dest = new_c;                       /* the recorded tank cell */
     else if (mode == MM_HOME) dest = w->nest_cell[nest_of(m)];   /* this mite's nest */
     else                      dest = REC_EMPTY;                   /* wander */
 
@@ -300,24 +276,8 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   uint8_t mode = w->mite_mode[m];
   uint16_t dest = w->mite_dest[m];
   int bi = 0;
-  if (mode == MM_WANDER || w->mite_refrac[m]) {       /* leaving home: wander out even if still flagged HUNT */
-    uint32_t r = xs32(&w->rng);
-    if (nv > 1 && (r % 100u) < (uint32_t)w->wander_bias) {
-      /* slight outward bias: step in the direction that points away from the NEAREST nest, so
-       * a mite that just revived or gave up a jam drifts off the nest instead of re-clumping.
-       * Use the outward VECTOR (nest -> me) and pick the cardinal best aligned with it — max
-       * toroidal distance ties (N/E/S all equal one cell out) and would just bias north. */
-      uint16_t nb = w->nest_cell[0]; int nd = cell_manhattan(mc, nb);
-      for (uint32_t k = 1; k < NEST_COUNT; k++) { int d = cell_manhattan(mc, w->nest_cell[k]); if (d < nd) { nd = d; nb = w->nest_cell[k]; } }
-      int ox = wc_x(mc) - wc_x(nb); if (ox > BIG_W / 2) ox -= BIG_W; if (ox < -BIG_W / 2) ox += BIG_W;
-      int oy = wc_y(mc) - wc_y(nb); if (oy > BIG_H / 2) oy -= BIG_H; if (oy < -BIG_H / 2) oy += BIG_H;
-      int best = -0x7fffffff; bi = 0;
-      for (int i = 0; i < nv; i++) { int sc = CARD_DCX[vd[i]] * ox + CARD_DCY[vd[i]] * oy; if (sc > best) { best = sc; bi = i; } }
-    } else {
-      bi = (int)((r >> 8) % (uint32_t)nv);                          /* otherwise a uniform random step */
-    }
-  } else if (dest == REC_EMPTY || dest == mc) {
-    bi = (int)(xs32(&w->rng) % (uint32_t)nv);                        /* hunter/homer idling at/without a dest */
+  if (mode == MM_WANDER || dest == REC_EMPTY || dest == mc) {
+    bi = (int)(xs32(&w->rng) % (uint32_t)nv);                        /* wander / local idle at the dest */
   } else {
     int slot = find_field(w, dest);
     if (slot >= 0) {                                                 /* navigate the shared route field */
@@ -392,23 +352,7 @@ void mites_step(World* w) {
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                          /* dead: frozen */
     uint32_t mc = w->mite_cell[m];
-    if (w->mite_tgt[m] == mc) {
-      pick_step(w, m, mc, cap);                             /* arrived/at rest -> re-choose */
-      /* jam detector: a hunter/homer that still can't advance (no open, non-full neighbour)
-       * is stuck. After MITE_STUCK_MAX such ticks it gives up and wanders, so a knot of mites
-       * jammed around a nest (revived hunters funnelling out, homers blocked from a full nest
-       * cell) dissolves instead of freezing. A mite making progress, or any wanderer, resets. */
-      if ((w->mite_mode[m] == MM_HUNT || w->mite_mode[m] == MM_HOME) && w->mite_tgt[m] == mc) {
-        if (++w->mite_stuck[m] >= MITE_STUCK_MAX) {
-          w->mite_mode[m] = MM_WANDER; w->mite_dest[m] = REC_EMPTY; w->mite_stuck[m] = 0;
-          w->mite_refrac[m] = MITE_REFRAC_TICKS;      /* leave home before re-engaging */
-        }
-      } else {
-        w->mite_stuck[m] = 0;
-      }
-    } else {
-      w->mite_stuck[m] = 0;                                 /* in transit: making progress */
-    }
+    if (w->mite_tgt[m] == mc) pick_step(w, m, mc, cap);     /* arrived/at rest -> re-choose */
     set_mite_input(w, m);
   }
 }

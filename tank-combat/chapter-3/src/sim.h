@@ -103,8 +103,6 @@ struct World {
   uint16_t mite_cell[N_MITES];   /* current centre world cell, recomputed each tick from position */
   uint16_t mite_tgt [N_MITES];   /* reserved destination cell (== mite_cell at rest); the cap slot it owns */
   uint16_t mite_resp[N_MITES];   /* respawn countdown: 0 = alive; >0 = dead (shot), ticks until it revives at its nest */
-  uint8_t  mite_stuck[N_MITES];  /* consecutive ticks a hunter/homer has been unable to advance (jam detector) */
-  uint8_t  mite_refrac[N_MITES]; /* "leave home" countdown after a jam give-up or a revive: wander out, don't re-engage */
 
   /* the shared knowledge: last-known tank position (a world cell, or REC_EMPTY)
    * + the frame it was stamped. Double-buffered (read rec_buf, write 1-rec_buf,
@@ -121,12 +119,6 @@ struct World {
 
   /* the four nests (home cells), spread across the world; editable on the page */
   uint16_t nest_cell[NEST_COUNT];
-  /* each nest's stored gossip: the latest tank record carried home (cell + timestamp),
-   * REC_EMPTY if it knows nothing. Homing mites overwrite it when they bring NEWER info;
-   * newly revived mites adopt it, so a nest dispatches reinforcements to the last-known
-   * tank position (or wanders them if it's empty). */
-  uint16_t nest_rec_cell[NEST_COUNT];
-  uint32_t nest_rec_time[NEST_COUNT];
 
   /* the shared route-field table: a remaining-distance vector (pg, keyed by edge
    * point, exactly the tank's) per active destination cell. Slots 0..NEST_COUNT-1
@@ -151,11 +143,9 @@ struct World {
   uint8_t  mite_sense;           /* tank-sensing range, in cells (Chebyshev) */
   uint8_t  mite_cap;             /* crowding cap in effect, 1..MITE_CAP */
   uint8_t  mite_phunt;           /* P(hunt) on adopting a newer peer record, percent (0..100); else go home */
-  uint8_t  wander_bias;          /* P(step away from nearest nest) while wandering, percent (0..100); 0 = pure random */
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
   uint16_t fire_period;          /* tank shot interval in ticks (0 = firing off); 30 = 2/sec at 60 ticks/sec */
   uint16_t mite_respawn;         /* ticks a killed mite stays dead before reviving at its nest (300 = 5 s) */
-  uint16_t nest_ttl;             /* ticks a nest remembers a tank sighting before it expires (0 = never); 600 = 10 s */
 };
 
 _Static_assert(GRID_W <= 32, "a screen-grid row must fit in one uint32_t");

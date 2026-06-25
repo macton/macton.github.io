@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (133 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (115 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -40,25 +40,6 @@ the inherited tests still pass and the baked escape table is byte-identical.
   sub-segment, or holds, and re-evaluates next tick. *(tested: the cap and the
   one-per-sub-segment invariant hold across thousands of natural ticks **and** under
   forced convergence of the whole swarm on one cell; and it is binding — cells reach 4.)*
-- **Jam detector.** A **hunting or homing** mite that cannot advance toward its destination
-  for `MITE_STUCK_MAX` (= 16) consecutive ticks **gives up and wanders**, so a cap-deadlocked
-  knot (revived hunters funnelling out of a nest, homers blocked from a full nest cell)
-  dissolves instead of freezing into a permanent blob. Any progress resets the counter, and
-  a mite jammed against a tank re-senses it next tick and resumes — the front holds while
-  dead-ends clear. *(tested: a boxed-in hunter keeps hunting until the patience runs out,
-  then reverts to wander.)*
-- **Outward wander bias.** A wandering mite steps *away from the nearest nest* `wander_bias`%
-  of the time (live tunable, default 60) rather than uniformly at random, so freed/revived
-  mites drift off the nest instead of re-clumping. The away step is chosen by direction (dot
-  with the nest→mite vector), not max distance (which ties and would bias north). A gentle
-  polish on the jam detector, not a replacement. *(tested: a biased wanderer steps strictly
-  further from its nest, in the away direction.)*
-- **Leave-home period.** After a mite gives up a jam OR revives at its nest, it spends
-  `MITE_REFRAC_TICKS` (= 120) as a forced wanderer: it ignores second-hand hunts (won't adopt
-  a peer's sighting) and drifts out, so revived hunters sift off the nest before re-engaging
-  instead of funnelling back into a knot. A directly **sensed** tank overrides immediately, so
-  the front holds. *(tested: a leaving-home mite ignores a peer's sighting and counts down; a
-  sensed tank overrides it.)*
 
 ## The shared record (last-write-wins)
 
@@ -75,45 +56,24 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Behaviour
 
-- **The record is typed.** A record cell is a **sighting** "tank at X" (a plain cell), a
-  **gone** "X is empty" (`X | GONE_FLAG`, the top bit), or **no info** (`REC_EMPTY`). Only
-  sightings and matching gones propagate; no-info never does. *(tested.)*
-- **Sense → sighting + hunt.** A tank within `mite_sense` cells sets the record to a
-  sighting of the tank's cell, stamped this frame, and the mite hunts it. A self-sensed
-  tank is always hunted. *(tested.)*
-- **Adopt → 80/20 hunt/home.** On adopting a newer peer **sighting**, the mite rolls the
-  role die: with probability `mite_phunt` (= 80%) it **hunts** the cell, else it **paths
-  home** to its nest; either way it keeps and relays the sighting. The roll fires **even
-  while already hunting or homing**. *(tested: boundaries `P_HUNT = 0`/`100` exact, default
-  split matches the RNG stream, and a newer sighting interrupts a homing mite.)*
-- **Targeted "gone".** A **gone-of-X** record is adopted **only by a mite that is hunting
-  X** — it then stands down to wander and relays the gone onward. A gone-of-X never touches
-  a mite hunting a *different* cell, so it disperses a stale cluster off X without ever
-  wiping a live sighting elsewhere (the swarm cannot "forget" a tank that has not moved).
-  *(tested: a gone-of-X clears an X-hunter and is ignored by a Y-hunter.)*
+- **Sense → record + hunt.** A tank within `mite_sense` cells sets the record to the
+  tank's cell, stamped this frame, and the mite hunts it. A self-sensed tank is always
+  hunted. *(tested.)*
+- **Adopt → 80/20 hunt/home.** On adopting a newer peer record, the mite rolls the role
+  die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
+  **paths home** to its nest; either way it keeps and relays the record. The roll fires
+  **even while already hunting or homing** — a newer record interrupts and re-rolls.
+  *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
+  RNG stream statistically, and a newer record interrupts a homing mite.)*
 - **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
-  refreshes the sighting (stamp now) if a tank is there; if the tank is **gone** it
-  broadcasts a **gone-of-X** (stamp now) and wanders. *(tested: refresh; the gone-of-X
-  broadcast.)*
-- **Arrive (home).** A homing mite that reaches its nest **deposits its sighting in the
-  nest if it is newer** than the nest's, then reverts to wander. *(tested: it reverts to
-  wander; the deposit promise below.)*
-- **A no-info record means wander.** A mite with no recorded cell wanders.
-
-## Nests as knowledge hubs
-
-- **Each nest stores the latest sighting** (`nest_rec_cell`/`nest_rec_time`). A homing mite
-  that reaches its nest overwrites it **iff the mite's sighting is newer** (newest-wins).
-  Only sightings are deposited — a courier never erases the nest. *(tested: a newer sighting
-  is deposited; an older one is not; an empty courier never erases it.)*
-- **A revived mite adopts its nest's gossip**: it hunts the nest's last-known tank cell,
-  or wanders if the nest knows nothing — so killing the swarm doesn't erase its knowledge;
-  the nest seeds the next wave. *(tested: revive-and-hunt with intel; revive-and-wander
-  without.)*
-- **Nest memory times out.** A nest sighting older than `nest_ttl` (default 600 ticks =
-  10 s; `0` = never) expires — the nest's only forgetting mechanism, so it stops re-seeding
-  hunters at a position no courier has refreshed. *(tested: expires past the TTL; kept
-  within it.)*
+  refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
+  now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
+  *(tested: both refresh and erase.)*
+- **Arrive (home).** A homing mite that reaches its nest **delivers the sighting and
+  reverts to wander** (record erased, stamped now). So a mite carries the nest tint only
+  while in transit — it does not get stuck `MM_HOME` (nest-coloured) at the nest.
+  *(tested: on reaching its nest the mite reverts to wander with its record cleared.)*
+- **An empty record means wander.** A mite with no recorded cell wanders.
 
 ## Nests & shared route fields
 
@@ -129,9 +89,9 @@ the inherited tests still pass and the baked escape table is byte-identical.
   A mite's lookup into the field for a destination returns the same step the tank
   pathing returns for that destination — the field *is* the tank route, keyed by
   destination instead of by tank. *(tested.)*
-- **The field table is sized from a measured peak.** Across representative scenarios the
-  distinct active-destination count peaks at ~22 (≈21 with combat on — the death cry's
-  goals overlap existing sightings), and `N_FIELDS = 64` holds it with headroom; the live
+- **The field table is sized from a measured peak.** In normal play the distinct
+  active-destination count peaks at ~19 (the 15 resident nests plus the few sighting
+  cells the gossip has converged on), and `N_FIELDS = 64` holds it with headroom; the live
   count and peak are shown on the page. If the count ever exceeds `N_FIELDS`, the overflow
   mites steer greedily that tick — **no crash, no cap break**. *(tested: the peak stays
   within `N_FIELDS`; a forced overflow holds the cap and stays deterministic.)*
@@ -179,16 +139,14 @@ the inherited tests still pass and the baked escape table is byte-identical.
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
   that spreads any sighting. *(tested.)*
-- **A dead mite revives near its nest after `mite_respawn` ticks** (default 300 = 5 s),
-  adopting the nest's gossip (hunt the last-known cell, or wander if the nest knows nothing).
-  Revival **respects the crowding cap** (current occupancy + inbound reservations). Because
-  the nest cell sits on the hunt routes and is usually full of passing hunters, revival
-  searches an **expanding ring** around the nest (`MITE_REVIVE_R`, the nest cell first, then
-  outward) for a free `(cell, sub-segment)` slot, so the respawn queue does not jam on the
-  one cell; only if the whole neighbourhood is full does it wait a tick. Every nest sits
-  **off the tanks' start screen (0,0)** so revived mites don't appear under a barrel. *(tested:
-  revival at/next to the nest after the timeout; revival into the neighbourhood when the nest
-  cell is full; the cap holds across thousands of ticks with firing on.)*
+- **A dead mite revives at its nest with its memory cleared, after `mite_respawn` ticks**
+  (default 300 = 5 s). The record is emptied and the mode reset to wander, so it does not
+  resume an old hunt. Revival **respects the crowding cap** (current occupancy + inbound
+  reservations); if the nest cell is full it waits a tick — with one nest per screen the
+  load is spread, so that almost never happens and no neighbourhood-fallback is needed.
+  Every nest sits **off the tanks' start screen (0,0)** so revived mites don't appear under
+  a barrel. *(tested: revival at the nest after the timeout with the record cleared; the cap
+  holds across thousands of ticks with firing on.)*
 
 ## Determinism
 

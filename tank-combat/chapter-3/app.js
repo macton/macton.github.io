@@ -61,7 +61,6 @@ async function main() {
     SUB: wasm.subcell(), STRIDE: wasm.inst_stride(), MAX_INST: wasm.inst_max(),
     NM: wasm.n_mites(), MR: wasm.mite_r(), MCAP: wasm.mite_cap_max(), NWC: wasm.n_world_cells(),
     MEMPTY: wasm.mite_empty(), NEST: wasm.nest_count(), NF: wasm.n_fields(),
-    GONE: 0x8000,   // high bit of a record cell flags a "gone" (X is empty) vs a sighting
   };
   const mem = () => wasm.memory.buffer;
   const view = {
@@ -357,8 +356,8 @@ function mountWidgets(wasm, view, C) {
     updaters.push(({ cam }) => {
       const rc = view.mrecCell(), rt = view.mrecTime(), now = wasm.frame();
       best.fill(-1);
-      for (let m = 0; m < C.NM; m++) { const raw = rc[m]; if (raw === C.MEMPTY || (raw & C.GONE)) continue;
-        if (rt[m] > best[raw]) best[raw] = rt[m]; }   // only sightings light the belief map ("gone" = believed empty)
+      for (let m = 0; m < C.NM; m++) { const cell = rc[m]; if (cell === C.MEMPTY) continue;
+        if (rt[m] > best[cell]) best[cell] = rt[m]; }
       const xy = view.xy(); const tankCell = new Set();
       for (let t = 0; t < C.NT; t++) tankCell.add(((xy[2*t+1] >> 8)) * C.BW + (xy[2*t] >> 8));
       for (let i = 0; i < C.NC; i++) {
@@ -385,10 +384,7 @@ function mountWidgets(wasm, view, C) {
       let h = `<div class="rowm"> #   cell      dir  mode    record</div>`;
       for (let m = 0; m < 8; m++) {
         const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8, dir = mang[m] >> 11;
-        const raw = rc[m], cellof = raw & 0x7FFF;
-        const rec = raw === C.MEMPTY ? "—"
-          : (raw & C.GONE) ? `gone(${cellof % C.BW},${(cellof / C.BW) | 0}) ${now - rt[m]}f`
-          : `(${cellof % C.BW},${(cellof / C.BW) | 0}) ${now - rt[m]}f`;
+        const rec = rc[m] === C.MEMPTY ? "—" : `(${rc[m] % C.BW},${(rc[m] / C.BW) | 0}) ${now - rt[m]}f`;
         h += `<div class="rowm">${String(m).padStart(2)}  (${String(wcx).padStart(2)},${String(wcy).padStart(2)})  ${String(dir).padStart(2)}/32  ${MODE[mmode[m]].padEnd(6)}  ${rec}</div>`;
       }
       body.innerHTML = h;
@@ -402,44 +398,39 @@ function mountWidgets(wasm, view, C) {
     const sense = numField("sensing range (cells)", 0, 6, 1, wasm.mite_sense());
     const cap   = numField(`crowding cap (1..${C.MCAP})`, 1, C.MCAP, 1, wasm.mite_cap());
     const phunt = numField("P(hunt) on adopt (%)", 0, 100, 5, wasm.mite_phunt());
-    const wbias = numField("wander outward bias (%)", 0, 100, 5, wasm.wander_bias());
     const speed = numField("mite speed (sub/tick)", 0, 64, 1, wasm.mite_speed());
     const turn  = numField("mite turn (ang/tick)", 0, 8000, 64, wasm.mite_turn());
     // combat: the page edits human units (shots/sec, seconds); the sim stores ticks
     // (60/sec). fire rate 0 turns the turrets to aim-only (no firing).
     const rateOf = () => { const p = wasm.fire_period(); return p > 0 ? Math.round(600 / p) / 10 : 0; };
     const respOf = () => Math.round(wasm.mite_respawn() / 6) / 10;
-    const ttlOf  = () => Math.round(wasm.nest_ttl() / 6) / 10;
     const fire    = numField("fire rate (shots/sec, 0=off)", 0, 20, 0.5, rateOf());
     const respawn = numField("respawn delay (sec)", 0.5, 120, 0.5, respOf());
-    const nttl    = numField("nest memory (sec, 0=never)", 0, 600, 1, ttlOf());
     const trate   = numField("turret turn (ang/tick)", 64, 8000, 64, wasm.turret_rate());
     const size  = numField("mite radius (subcells)", C.MR, C.MR, 1, C.MR); size.input.disabled = true;
     seed.input.onchange  = () => wasm.set_seed(parseInt(seed.input.value) | 0);
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
     cap.input.onchange   = () => wasm.set_mite_cap(parseInt(cap.input.value) | 0);
     phunt.input.onchange = () => wasm.set_mite_phunt(parseInt(phunt.input.value) | 0);
-    wbias.input.onchange = () => wasm.set_wander_bias(parseInt(wbias.input.value) | 0);
     speed.input.onchange = () => wasm.set_mite_speed(parseInt(speed.input.value) | 0);
     turn.input.onchange  = () => wasm.set_mite_turn(parseInt(turn.input.value) | 0);
     fire.input.onchange    = () => { const r = parseFloat(fire.input.value) || 0; wasm.set_fire_period(r > 0 ? Math.max(1, Math.round(60 / r)) : 0); };
     respawn.input.onchange = () => { const s = parseFloat(respawn.input.value) || 0; wasm.set_mite_respawn(Math.max(1, Math.round(s * 60))); };
-    nttl.input.onchange    = () => { const s = parseFloat(nttl.input.value) || 0; wasm.set_nest_ttl(Math.max(0, Math.round(s * 60))); };
     trate.input.onchange   = () => wasm.set_turret_rate(parseInt(trate.input.value) | 0);
-    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, wbias.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, nttl.wrap, trate.wrap, size.wrap);
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, trate.wrap, size.wrap);
 
-    // nests are structural now: one per screen except the tank start (0,0), placed at each
-    // screen's centre. That's C.NEST of them — too many to expose as x/y fields, so just note it.
-    const nestNote = document.createElement('div');
-    nestNote.style.cssText = 'grid-column:1/-1;opacity:.6;font-size:12px;margin-top:2px';
+    // nests are structural: one per screen except the tank start (0,0), at each screen
+    // centre. That's C.NEST of them — too many to expose as x/y fields, so just note it.
+    const nestNote = document.createElement("div");
+    nestNote.style.cssText = "grid-column:1/-1;opacity:.6;font-size:12px;margin-top:2px";
     nestNote.textContent = `${C.NEST} nests — one per screen except the tank start (0,0), at each screen centre`;
     tc.append(nestNote);
 
     const sync = (f, get) => { if (focused() !== f.input) f.input.value = get(); };
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
-      sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt()); sync(wbias, () => wasm.wander_bias());
+      sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
-      sync(fire, rateOf); sync(respawn, respOf); sync(nttl, ttlOf); sync(trate, () => wasm.turret_rate()); });
+      sync(fire, rateOf); sync(respawn, respOf); sync(trate, () => wasm.turret_rate()); });
   }
   return api;
 }

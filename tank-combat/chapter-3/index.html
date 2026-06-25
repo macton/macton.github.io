@@ -247,35 +247,20 @@
     <h2>The shared knowledge: one cell + one timestamp</h2>
     <p>Here is the heart of the chapter. <em>What is the minimal data the swarm's behaviour
     depends on?</em> Not a map, not a plan — just the <strong>last known tank position</strong>:
-    <strong>one world cell plus the frame it was recorded</strong> (a timestamp). The cell is
-    <strong>typed</strong> (a spare top bit): a <em>sighting</em> “a tank is at X”, a <em>gone</em>
-    “cell X is empty”, or no info. Each mite carries exactly that one small record. There is no
-    shared blackboard and no manager; the swarm's behaviour <em>emerges entirely from copying this
-    record on contact</em>:</p>
+    <strong>one world cell plus the frame it was recorded</strong> (a timestamp). Each mite
+    carries exactly that one small record. There is no shared blackboard and no manager; the
+    swarm's behaviour <em>emerges entirely from copying this record on contact</em>:</p>
     <ul style="color:var(--dim)">
-      <li><strong>Sense.</strong> A tank within range → record a <em>sighting</em>, stamped now, and <strong>hunt</strong> it.</li>
-      <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> qualifying record in
-      your 3×3 — last-write-wins. A <em>sighting</em> qualifies for anyone; a <em>gone-of-X</em>
-      qualifies <strong>only if you are hunting X</strong>. Adopt a sighting → roll the role die:
-      <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest. Adopt a
-      gone-of-X → <strong>stand down to wander</strong> and relay it on.</li>
+      <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and <strong>hunt</strong> it.</li>
+      <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> record among the
+      mites in your 3×3 (including an empty one) — last-write-wins — then roll the role die:
+      <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest (a
+      newer record interrupts and re-rolls; either way you keep relaying it).</li>
       <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
-      refresh it (stamp now); if not, broadcast a <strong>gone-of-X</strong> (stamped now) and wander.</li>
+      refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
+      gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
+      <em>newest</em> record.</li>
     </ul>
-    <p>That “gone” is the fix for an earlier bug where the swarm would <strong>forget a tank that
-    never moved</strong>: an untyped “it's empty” was always the newest record, so it spread to
-    everyone and swept the whole swarm back to green. By <em>typing</em> it, “X is empty” reaches
-    only the mites hunting X — it disperses a stale cluster when a tank really leaves, but can never
-    wipe a live sighting of somewhere else. A moving tank stays tracked, because each new cell is a
-    newer sighting that supersedes the old.</p>
-    <p>The nests are <strong>knowledge hubs</strong>. A mite that makes it home <strong>deposits
-    its sighting in the nest if it is newer</strong> than what the nest holds (only sightings — a
-    courier never erases the nest), and a mite <strong>revived</strong> at the nest <strong>adopts
-    that record</strong>, hunting the last-known tank position (or wandering if the nest knows
-    nothing). So killing the swarm doesn't wipe what it knew: the nest remembers and dispatches the
-    next wave to the front. The nest's one forgetting mechanism is a <strong>timeout</strong>: a
-    sighting older than <code>nest_ttl</code> (default 10&nbsp;s) expires, so it stops re-seeding
-    hunters at a position no scout has refreshed.</p>
     <p>The gossip is made <strong>order-independent</strong> by double-buffering: every mite reads
     last tick's records and writes this tick's, then the buffers swap, so propagation never
     depends on iteration order (ties break on lowest index). Drive a tank into the swarm and
@@ -301,11 +286,11 @@
     <p>Every mite belongs to one of <strong>fifteen nests</strong> (by index, <code>i % 15</code>),
     drawn on the map and used to tint the homing mites. <strong>How big is the table?</strong>
     Not a guess: instrumenting the distinct active-destination count puts the high-water mark at
-    <strong>~19</strong> in normal play — the fifteen resident nests plus the few sighting cells
-    the gossip has converged on — and adversarial tank churn pushes it into the 50s, so
-    <code>N_FIELDS = 64</code> holds it, the same prove/measure/detect discipline the Level-1 byte
-    got, applied to a runtime peak. If the live count ever exceeds the table, those mites steer
-    greedily that tick — a safety net, never a crash. The counters above show the live
+    <strong>~19</strong> — the fifteen resident nests plus the few sighting cells the gossip has
+    converged on — so <code>N_FIELDS = 64</code> holds it with headroom, the same
+    prove/measure/detect discipline the Level-1 byte got, applied to a runtime peak. If the live
+    count ever exceeds the table, those mites steer greedily that tick — a safety net, never a
+    crash. The counters above show the live
     <strong>active / 64</strong> routes and the running <strong>peak</strong>: a thousand movers
     served by a handful of routes is the chapter's payoff. Beside them the four tanks each
     compute their own exact route — same world, the cost matched to the need.</p>
@@ -329,12 +314,11 @@
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
     <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
     so no rule the swarm obeys is broken by combat. There is <strong>one nest per screen except the
-    tanks' start screen</strong> — fifteen homes — so revived mites never pop up under a barrel, and,
-    just as important, the spawn load is <strong>spread across fifteen screens' worth of exits</strong>
-    instead of piling out through one screen's two or three border openings. A single screenful of
-    nests is a Poisson pile-up at those few exits; one home per screen gives each its own openings and
-    roughly N_MITES/15 residents — measured, the worst nest's local crowd drops by a third and the
-    average nest neighbourhood empties by two-thirds.</p>
+    tanks' start screen (0,0)</strong> — fifteen homes — so revived mites never pop up under a barrel,
+    and the spawn load is <strong>spread across fifteen screens' worth of exits</strong> rather than
+    piling out through one screen's two or three border openings (which knotted the swarm at the few
+    nests). Spreading the homes is what lets the revival stay dead simple — revive, wander, re-acquire
+    from the live gossip — with no jam to dissolve.</p>
     <p>The payoff is the feedback loop. Every kill is a <strong>death cry</strong>: each mite within
     <strong>2× sensing range</strong> of the dead one has its record overwritten with the
     <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
@@ -353,7 +337,7 @@
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
     to re-scatter the swarm and tune the rest live (the fifteen nests are fixed, one per screen):</p>
     <div class="fig">
-      <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), wander outward bias, mite speed/turn, fire rate, respawn delay, nest memory, turret turn</p>
+      <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay, turret turn</p>
       <div id="w-mite-tunables"></div>
     </div>
 

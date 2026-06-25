@@ -412,14 +412,13 @@ static void t_mite_gossip(void) {
   check(get_rec_cell(&W, 0) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 0) == 100, "a newer record overwrites an older one on contact");
   check(get_rec_cell(&W, 1) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 1) == 100, "an older record never overwrites a newer one (timestamps monotone)");
 
-  /* absence is not gossiped: a newer EMPTY record does NOT overwrite a peer's sighting */
+  /* a newer EMPTY record is a readable value that propagates */
   sim_init(&W); gossip_setup(&W, 2);
   mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);
   set_rec(&W, 1, REC_EMPTY, 100);
   mites_build_index(&W); mites_records(&W);
-  check(get_rec_cell(&W, 0) == (uint16_t)wcell(20, 20) && get_rec_time(&W, 0) == 50,
-        "a newer EMPTY record does NOT overwrite a sighting (absence is not gossiped)");
+  check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 100, "a newer EMPTY record propagates (overwrites an older cell)");
 }
 
 /* ---- behaviour: sense / hunt / arrive / erase / refresh / 80-20 / interrupt - */
@@ -442,22 +441,8 @@ static void t_mite_behaviour(void) {
   set_rec(&W, 0, (uint16_t)wcell(10, 7), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(10, 7);
   W.frame = 600;
   mites_build_index(&W); mites_records(&W);
-  check(rec_is_gone(get_rec_cell(&W, 0)) && rec_cell_of(get_rec_cell(&W, 0)) == (uint16_t)wcell(10, 7) && get_rec_time(&W, 0) == 600,
-        "reaching the recorded cell with no tank turns the record into a GONE-of-X (stamped now)");
-  check(W.mite_mode[0] == MM_WANDER, "after finding the cell empty it stands down to wander");
-
-  /* a GONE-of-X clears a peer HUNTING X, but never touches a peer hunting a different cell */
-  sim_init(&W); gossip_setup(&W, 3); W.mite_sense = 0;          /* no sensing: pure gossip */
-  mite_reset(&W, 0, 2, 7); mite_reset(&W, 1, 1, 7); mite_reset(&W, 2, 3, 7);  /* 0 sees both 1 and 2 */
-  { uint16_t X = (uint16_t)wcell(40, 40), Y = (uint16_t)wcell(50, 50);
-    set_rec(&W, 0, rec_gone_of(X), 200); W.mite_mode[0] = MM_WANDER;          /* 0 carries GONE-of-X */
-    set_rec(&W, 1, X, 100); W.mite_mode[1] = MM_HUNT; W.mite_dest[1] = X;     /* 1 hunts X (older) */
-    set_rec(&W, 2, Y, 100); W.mite_mode[2] = MM_HUNT; W.mite_dest[2] = Y;     /* 2 hunts Y (older) */
-    mites_build_index(&W); mites_records(&W);
-    check(rec_is_gone(get_rec_cell(&W, 1)) && W.mite_mode[1] == MM_WANDER,
-          "a GONE-of-X is adopted by a mite hunting X -> it stands down");
-    check(get_rec_cell(&W, 2) == Y && W.mite_mode[2] == MM_HUNT,
-          "a GONE-of-X never touches a mite hunting a different cell (no cross-erase = no forgetting)"); }
+  check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 600, "reaching the recorded cell with no tank erases the record (stamped now)");
+  check(W.mite_mode[0] == MM_WANDER, "after erasing, the mite reverts to wander");
 
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */
@@ -508,53 +493,6 @@ static void t_mite_behaviour(void) {
   mites_build_index(&W); mites_records(&W);
   check(W.mite_mode[1] == MM_HUNT && get_rec_cell(&W, 1) == (uint16_t)wcell(40, 40),
         "a newer record interrupts a homing mite and re-rolls (here -> hunt the new cell)");
-
-  /* the jam detector: a hunter that cannot advance for MITE_STUCK_MAX ticks gives up and
-   * wanders (so a knot of jammed mites dissolves instead of freezing forever) */
-  sim_init(&W); gossip_setup(&W, 1);
-  W.grid[7] |= (1u << 9) | (1u << 11);   /* box cell (10,7): force its four neighbours to walls */
-  W.grid[6] |= (1u << 10);               /* (10,6) */
-  W.grid[8] |= (1u << 10);               /* (10,8) */
-  mite_reset(&W, 0, 10, 7);
-  W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(30, 30); W.mite_stuck[0] = 0;
-  int gaveup = 0, before = -1;
-  for (int i = 0; i < MITE_STUCK_MAX + 2; i++) {
-    mites_build_index(&W); mites_step(&W);
-    if (i == MITE_STUCK_MAX - 2) before = (W.mite_mode[0] == MM_HUNT);   /* still hunting just before */
-    if (W.mite_mode[0] == MM_WANDER) { gaveup = 1; break; }
-  }
-  check(before == 1, "a jammed hunter keeps hunting until the patience runs out");
-  check(gaveup, "a hunter jammed for MITE_STUCK_MAX ticks gives up and wanders (knots dissolve)");
-
-  /* wander outward bias: a wanderer biased away from the nest steps AWAY from it, not into the
-   * north tie-break trap (max-distance ties between 3 neighbours used to always pick north) */
-  sim_init(&W); gossip_setup(&W, 1); W.wander_bias = 100;
-  { uint16_t nest = W.nest_cell[0]; int nx = wc_x(nest), ny = wc_y(nest);
-    uint16_t here = (uint16_t)wcell(nx + 3, ny);            /* three cells EAST of nest 0 (open ring row) */
-    mite_reset(&W, 0, nx + 3, ny);
-    W.mite_mode[0] = MM_WANDER; W.mite_dest[0] = REC_EMPTY; W.mite_tgt[0] = here;
-    mites_build_index(&W); mites_step(&W);
-    check(cell_chebyshev(W.mite_tgt[0], nest) > cell_chebyshev(here, nest),
-          "a wander-biased mite steps further from its nest (outward), not toward it");
-    check(W.mite_tgt[0] == (uint16_t)wcell(nx + 4, ny),
-          "the outward step is the away direction (east here), not the north tie-break"); }
-
-  /* leave-home refractory: a freed/revived mite ignores second-hand hunts for a window (so it
-   * drifts off the nest), but a directly-sensed tank still overrides immediately */
-  sim_init(&W); gossip_setup(&W, 2); W.mite_sense = 1;
-  mite_reset(&W, 0, 1, 6); mite_reset(&W, 1, 1, 7);
-  set_rec(&W, 1, (uint16_t)wcell(40, 40), 500); W.mite_mode[1] = MM_HUNT; W.mite_dest[1] = (uint16_t)wcell(40, 40);
-  set_rec(&W, 0, REC_EMPTY, 0); W.mite_mode[0] = MM_WANDER; W.mite_refrac[0] = 5; W.frame = 600;
-  mites_build_index(&W); mites_records(&W);
-  check(W.mite_mode[0] == MM_WANDER && get_rec_cell(&W, 0) == REC_EMPTY && W.mite_refrac[0] == 4,
-        "a leaving-home mite ignores a peer's sighting and counts its window down");
-
-  sim_init(&W); gossip_setup(&W, 1); W.mite_sense = 2;
-  place_tank(&W, 0, 10, 7); mite_reset(&W, 0, 11, 7);
-  W.mite_mode[0] = MM_WANDER; W.mite_refrac[0] = 5; W.frame = 700;
-  mites_build_index(&W); mites_records(&W);
-  check(W.mite_mode[0] == MM_HUNT && W.mite_refrac[0] == 0,
-        "a directly sensed tank overrides the leave-home window");
 }
 
 /* ---- wall safety at MITE_R ----------------------------------------------- */
@@ -809,7 +747,7 @@ static void t_tanks_fire(void) {
   uint16_t nest0 = W.nest_cell[nest_of(0)];
   int revived = 0; for (int i = 0; i < 60 && !revived; i++) { sim_tick(&W); if (!W.mite_resp[0]) revived = 1; }
   check(revived, "a dead mite revives after the respawn timeout");
-  check(cell_chebyshev(W.mite_cell[0], nest0) <= MITE_REVIVE_R, "the revived mite reappears at (or next to) its nest cell");
+  check(W.mite_cell[0] == nest0, "the revived mite reappears at its nest cell");
   check(get_rec_cell(&W, 0) == REC_EMPTY, "a revived mite's memory (its record) is cleared");
   check(W.mite_mode[0] == MM_WANDER, "a revived mite starts wandering (no stale hunt/home)");
 
@@ -826,21 +764,6 @@ static void t_tanks_fire(void) {
   }
   check(maxsegs >= 2, "a nest revives mites into multiple sub-segments in parallel (seg decoupled from nest)");
 
-  /* revival falls back to the nest's NEIGHBOURHOOD when the nest cell is full (the fix for
-   * the respawn jam: hunters camped on the nest cell must not starve revival) */
-  sim_init(&W); gossip_setup(&W, 0); W.fire_period = 0;       /* all mites parked far away */
-  { uint16_t nz = W.nest_cell[0];
-    uint32_t fill[4] = {0, 4, 8, 12};                          /* nest 0, sub-segments 0..3 */
-    for (int k = 0; k < 4; k++) { uint32_t fm = fill[k]; W.mite_resp[fm] = 0; W.mite_tgt[fm] = nz;
-      W.mite_xy[fm] = xy_pack(wc_x(nz) * SUB + SUB/2 + seg_ox(fm), wc_y(nz) * SUB + SUB/2 + seg_oy(fm)); }
-    W.mite_resp[15] = 1;                                       /* mite 15 belongs to nest 0 (15 % NEST_COUNT) — due to revive, its cell full */
-    mites_build_index(&W);
-    int full = (W.mite_cnt[nz] == MITE_CAP);
-    mites_respawn(&W);
-    check(full && W.mite_resp[15] == 0, "a due mite revives even when its nest cell's sub-segment is full");
-    check(W.mite_cell[15] != nz && cell_chebyshev(W.mite_cell[15], nz) <= MITE_REVIVE_R,
-          "it revives into a free slot in the nest's neighbourhood, not the full nest cell"); }
-
   /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and
    * confirm reviving never pushes the nest cell over MITE_CAP */
   sim_init(&W);
@@ -848,67 +771,6 @@ static void t_tanks_fire(void) {
   for (int i = 0; i < 3000; i++) { sim_tick(&W);
     for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (W.mite_cnt[c] > MITE_CAP) breach = 1; }
   check(!breach, "the crowding cap holds across 3000 ticks WITH firing (kills + nest respawns)");
-}
-
-/* ---- nest gossip: mites update the nest; revived mites adopt it ------------ */
-static void t_nest_gossip(void) {
-  printf("nest gossip — mites deposit intel at the nest; revived mites adopt it:\n");
-  uint32_t n = nest_of(0);
-
-  /* a homing mite deposits its (newer) gossip in the nest */
-  sim_init(&W); gossip_setup(&W, 1);
-  uint16_t nest = W.nest_cell[n];
-  mite_reset(&W, 0, wc_x(nest), wc_y(nest));
-  set_rec(&W, 0, (uint16_t)wcell(20, 20), 500); W.mite_mode[0] = MM_HOME; W.mite_dest[0] = nest;
-  W.nest_rec_cell[n] = REC_EMPTY; W.nest_rec_time[n] = 0; W.frame = 600;
-  mites_build_index(&W); mites_records(&W);
-  check(W.nest_rec_cell[n] == (uint16_t)wcell(20, 20) && W.nest_rec_time[n] == 500,
-        "a homing mite deposits its newer gossip in the nest");
-
-  /* older gossip does not overwrite a newer nest record */
-  sim_init(&W); gossip_setup(&W, 1);
-  mite_reset(&W, 0, wc_x(nest), wc_y(nest));
-  set_rec(&W, 0, (uint16_t)wcell(20, 20), 500); W.mite_mode[0] = MM_HOME; W.mite_dest[0] = nest;
-  W.nest_rec_cell[n] = (uint16_t)wcell(30, 30); W.nest_rec_time[n] = 1000; W.frame = 600;
-  mites_build_index(&W); mites_records(&W);
-  check(W.nest_rec_cell[n] == (uint16_t)wcell(30, 30) && W.nest_rec_time[n] == 1000,
-        "older gossip does not overwrite the nest's newer record");
-
-  /* a courier carrying an EMPTY record never erases the nest's sighting (absence isn't deposited) */
-  sim_init(&W); gossip_setup(&W, 1); W.nest_ttl = 0;        /* isolate from the timeout */
-  mite_reset(&W, 0, wc_x(nest), wc_y(nest));
-  set_rec(&W, 0, REC_EMPTY, 2000); W.mite_mode[0] = MM_HOME; W.mite_dest[0] = nest;
-  W.nest_rec_cell[n] = (uint16_t)wcell(30, 30); W.nest_rec_time[n] = 1000; W.frame = 1100;
-  mites_build_index(&W); mites_records(&W);
-  check(W.nest_rec_cell[n] == (uint16_t)wcell(30, 30) && W.nest_rec_time[n] == 1000,
-        "a courier carrying an empty record never erases the nest's sighting");
-
-  /* the nest's memory times out: a sighting older than nest_ttl expires on its own */
-  sim_init(&W); gossip_setup(&W, 1); W.nest_ttl = 600;
-  W.nest_rec_cell[n] = (uint16_t)wcell(40, 40); W.nest_rec_time[n] = 100; W.frame = 800;  /* age 700 > 600 */
-  mites_build_index(&W); mites_records(&W);
-  check(W.nest_rec_cell[n] == REC_EMPTY, "a nest sighting older than nest_ttl expires (the nest forgets a stale tank)");
-  sim_init(&W); gossip_setup(&W, 1); W.nest_ttl = 600;
-  W.nest_rec_cell[n] = (uint16_t)wcell(40, 40); W.nest_rec_time[n] = 500; W.frame = 800;  /* age 300 < 600 */
-  mites_build_index(&W); mites_records(&W);
-  check(W.nest_rec_cell[n] == (uint16_t)wcell(40, 40), "a nest sighting within nest_ttl is kept");
-
-  /* a revived mite adopts the nest's gossip and hunts the last-known tank cell */
-  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
-  W.nest_rec_cell[n] = (uint16_t)wcell(40, 40); W.nest_rec_time[n] = 700;
-  W.mite_resp[0] = 1;                                      /* dead; revives this tick */
-  sim_tick(&W);
-  check(!W.mite_resp[0] && get_rec_cell(&W, 0) == (uint16_t)wcell(40, 40),
-        "a revived mite adopts its nest's gossip");
-  check(W.mite_mode[0] == MM_HUNT, "a revived mite hunts the nest's last-known tank position");
-
-  /* a revived mite at a nest that knows nothing just wanders */
-  sim_init(&W); gossip_setup(&W, 1); W.fire_period = 0;
-  W.nest_rec_cell[n] = REC_EMPTY; W.nest_rec_time[n] = 0;
-  W.mite_resp[0] = 1;
-  sim_tick(&W);
-  check(!W.mite_resp[0] && get_rec_cell(&W, 0) == REC_EMPTY && W.mite_mode[0] == MM_WANDER,
-        "a revived mite at an empty nest just wanders");
 }
 
 int main(void) {
@@ -926,7 +788,6 @@ int main(void) {
   t_mite_behaviour();
   t_mite_nests_fields();
   t_tanks_fire();
-  t_nest_gossip();
   t_mite_wall();
   t_mite_determinism();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
