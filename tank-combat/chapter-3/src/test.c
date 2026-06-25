@@ -705,14 +705,15 @@ static void t_tanks_fire(void) {
    * it SWINGS at a turn rate rather than snapping. Body east, mite due north, mite pinned. */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7);                                            /* body + turret east */
-  mite_reset(&W, 0, 2, 4);                                            /* mite due north */
+  mite_reset(&W, 0, 2, 4);                                            /* mite ~due north (parks a sub-segment off centre) */
   W.fire_period = 0; W.mite_speed = 0;                                /* aim only; pin the mite */
   sim_tick(&W);
   check(W.tank_target[0] == 0, "fire off: the turret still acquires a target in sight");
   check((W.tank_turret[0] >> ANGLE_SHIFT) != CARD_DI[DIR_N], "the turret does not snap instantly — it has a turn rate");
   for (int i = 0; i < 12; i++) sim_tick(&W);                          /* let it swing onto the target */
   check(W.mite_resp[0] == 0, "fire off: no mite is killed");
-  check((W.tank_turret[0] >> ANGLE_SHIFT) == CARD_DI[DIR_N], "the turret swings to aim north at a mite due north");
+  int dN = (int16_t)(W.tank_turret[0] - (uint16_t)((uint32_t)CARD_DI[DIR_N] << ANGLE_SHIFT));
+  check((dN < 0 ? -dN : dN) <= 2048, "the turret swings to ~aim north at a near-north mite (fine aim resolves the sub-segment offset)");
   check((W.tank_ang[0] >> ANGLE_SHIFT) == 0, "the body heading is unchanged (turret aims separately)");
 
   /* targeting picks the mite closest to the turret's CURRENT direction (most likely to
@@ -739,21 +740,21 @@ static void t_tanks_fire(void) {
   check(swung, "fires once the turret has swung onto the target");
 
   /* the turret is FREE the instant a bolt is away — firing no longer locks it (the old beam
-   * pinned the turret to the shot for its whole lifetime). Carve the eastbound lane open so the
-   * bolt keeps travelling, fire it, then a target appears off-axis: the barrel swings onto the
-   * newcomer WHILE the first bolt is still in flight. */
+   * pinned the turret to the shot for its whole lifetime). Fire at a mite, then retire that
+   * target and drop a new one off-axis: the barrel swings onto the newcomer WHILE the first
+   * bolt is still travelling. */
   sim_init(&W); gossip_setup(&W, 2);
-  for (int c = 6; c <= 19; c++) clear_wall(&W, c, 7);                 /* open the lane so the bolt lives a while */
   place_tank(&W, 0, 2, 7);                                            /* turret east */
   mite_reset(&W, 0, 5, 7);                                            /* due east -> fire east at once */
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
   sim_tick(&W);
   check(W.tank_proj_live[0], "a bolt is in flight just after firing");
-  uint16_t east = W.tank_turret[0];
-  mite_reset(&W, 1, 2, 3);                                            /* a new target due north appears */
+  uint16_t fired = W.tank_turret[0];                                  /* the aim it fired along */
+  W.mite_resp[0] = 300;                                               /* retire that target (the bolt flies on) */
+  mite_reset(&W, 1, 2, 3);                                            /* a new target appears to the north */
   int turned_live = 0;
   for (int i = 0; i < 8 && !turned_live; i++) { sim_tick(&W);
-    if (W.tank_proj_live[0] && W.tank_turret[0] != east) turned_live = 1; }
+    if (W.tank_proj_live[0] && W.tank_turret[0] != fired) turned_live = 1; }
   check(turned_live, "the turret swings toward a new target while the bolt is still travelling (no lock)");
 
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites

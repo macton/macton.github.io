@@ -140,8 +140,8 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     int wcx = wrap_wcx(xy_lo(w->tank_xy[t]) >> SUB_SHIFT), wcy = wrap_wcy(xy_hi(w->tank_xy[t]) >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + xy_lo(w->tank_xy[t]) - sox, ly = oy + xy_hi(w->tank_xy[t]) - soy;
-    uint32_t bi = w->tank_ang[t]    >> ANGLE_SHIFT; int32_t bco = dir_cos(bi), bsi = dir_sin(bi);
-    uint32_t ti = w->tank_turret[t] >> ANGLE_SHIFT; int32_t tco = dir_cos(ti), tsi = dir_sin(ti);
+    uint32_t bi = w->tank_ang[t] >> ANGLE_SHIFT; int32_t bco = dir_cos(bi), bsi = dir_sin(bi);
+    int32_t tco = fine_cos(w->tank_turret[t]), tsi = fine_sin(w->tank_turret[t]);  /* barrel at the fine turret angle */
 
     k = push(out, k, lx, ly, 87, 67, bco, bsi, COL_BODY[t]);
     k = push(out, k, lx + ((tco * 87) >> TRIG_SHIFT), ly + ((tsi * 87) >> TRIG_SHIFT), 56, 18, tco, tsi, COL_BARR[t]);
@@ -163,7 +163,7 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     int wcx = wrap_wcx(bx >> SUB_SHIFT), wcy = wrap_wcy(by >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + bx - sox, ly = oy + by - soy;
-    uint32_t di = w->tank_proj_dir[t] >> ANGLE_SHIFT; int32_t co = dir_cos(di), si = dir_sin(di);
+    int32_t co = fine_cos(w->tank_proj_dir[t]), si = fine_sin(w->tank_proj_dir[t]);  /* bolt at the fine turret angle */
     int seg = w->proj_speed; if (seg > beyond) seg = beyond;  /* clip the tail at the barrel tip */
     int half = seg / 2;                                   /* the streak trails back over the drawn segment */
     int mx = lx - ((co * half) >> TRIG_SHIFT), my = ly - ((si * half) >> TRIG_SHIFT);

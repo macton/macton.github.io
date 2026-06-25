@@ -35,6 +35,18 @@ static uint16_t aim_angle(int dx, int dy) {
   return (uint16_t)(bd << ANGLE_SHIFT);
 }
 
+/* The same at the finer 256-step TURRET resolution: the nearest of 256 headings to
+ * (dx,dy), as a Q5.11 angle (low 8 bits zero). The turret aims and fires along this so it
+ * tracks smoothly and points precisely; only target SELECTION still uses aim_angle (32). */
+static uint16_t aim_fine(int dx, int dy) {
+  int best = -2147483647; uint32_t bd = 0;
+  for (uint32_t d = 0; d < N_FINE; d++) {
+    int dot = dx * FINE_COS[d] + dy * FINE_COS[(d - FINE_QUARTER) & (N_FINE - 1)];
+    if (dot > best) { best = dot; bd = d; }
+  }
+  return (uint16_t)(bd << 8);
+}
+
 /* Turn `cur` toward `want` by at most `rate`, the shortest way round, clamping so it
  * never overshoots — the turret's equivalent of the bodies' agent_turn step. */
 static uint16_t turn_toward(uint16_t cur, uint16_t want, int rate) {
@@ -84,8 +96,7 @@ static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
  * head abuts last tick's), so every point on the path is swept exactly once. */
 static void proj_step(World* w, uint32_t t, uint32_t frame) {
   int px = xy_lo(w->tank_proj_xy[t]), py = xy_hi(w->tank_proj_xy[t]);
-  uint32_t pd = w->tank_proj_dir[t] >> ANGLE_SHIFT;
-  int co = dir_cos(pd), si = dir_sin(pd);
+  int co = fine_cos(w->tank_proj_dir[t]), si = fine_sin(w->tank_proj_dir[t]);  /* the bolt flies the fine turret angle */
   uint16_t pt = w->tank_proj_tgt[t];                      /* the aimed mite — killed on arrival regardless of perp */
 
   int step = w->proj_speed;                               /* this tick's reach (subcells, page-tunable) */
@@ -172,7 +183,7 @@ void tanks_fire(World* w) {
       int mx = xy_lo(w->mite_xy[target]), my = xy_hi(w->mite_xy[target]);
       int ddx = mx - tx; if (ddx >  ARENA_W_SUB / 2) ddx -= ARENA_W_SUB; if (ddx < -ARENA_W_SUB / 2) ddx += ARENA_W_SUB;
       int ddy = my - ty; if (ddy >  ARENA_H_SUB / 2) ddy -= ARENA_H_SUB; if (ddy < -ARENA_H_SUB / 2) ddy += ARENA_H_SUB;
-      want = (ddx | ddy) ? aim_angle(ddx, ddy) : w->tank_ang[t];
+      want = (ddx | ddy) ? aim_fine(ddx, ddy) : w->tank_ang[t];
     } else {
       want = w->tank_ang[t];
     }

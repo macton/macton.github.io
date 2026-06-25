@@ -117,9 +117,11 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 - **Each turret aims independently of the body and turns at a finite rate.**
   `tank_turret` is separate from `tank_ang` (movement heading) and swings toward its aim
-  at `turret_rate` per tick — it does not snap. With no target it relaxes toward the body
-  heading. *(tested: the turret aims even with firing off; it does not snap; the body is
-  unaffected.)*
+  at `turret_rate` per tick — it does not snap. The turret aims, fires, and is drawn at a
+  **finer 256-step resolution** (8× the 32 directions the bodies and mites move along), so it
+  tracks smoothly and points precisely; only target *selection* uses the coarse 32. With no
+  target it relaxes toward the body heading. *(tested: the turret aims even with firing off;
+  it does not snap; the body is unaffected.)*
 - **The target is the mite MOST LIKELY TO BE HIT, not the spatially nearest.** Among the
   mites in line of sight (within the search radius), the turret targets the one closest to
   its current direction — the least rotation to bring the barrel on — over the per-cell
@@ -134,7 +136,7 @@ the inherited tests still pass and the baked escape table is byte-identical.
   `fire_period` ticks; default 30 = 2/sec; `0` disables firing, aim only), and the tank's
   previous bolt has expired (one live bolt per tank). The shot is a **travelling projectile**,
   not a hitscan beam: launched from the muzzle along the barrel, each tick it marches forward
-  `proj_speed` subcells (a page tunable; slow default ~2.25 cells/tick), **destroying every mite within `PROJ_HW` of the swept
+  `proj_speed` subcells (a page tunable; slow default 1 cell/tick), **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
   has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin a
   sub-segment-offset mite exactly, the bolt **carries the mite it was aimed at** and kills it

@@ -184,12 +184,15 @@ destruction bursts. Per tank, each tick:
   it), not the spatially nearest. It scans the per-cell index over its search box, takes
   one **line-of-sight** test per cell (an integer Bresenham walk over the wall grid, the
   whole cell in or out), and keeps the smallest bearing change (lowest index breaks ties).
-  The turret then swings toward that bearing at its turn rate.
+  The turret then swings toward that bearing at its turn rate. The turret aims, fires, and is
+  drawn at a **finer 256-step resolution** (8× the 32 directions the bodies and mites move
+  along, via `fine_cos`/`fine_sin`), so it tracks smoothly and points precisely; only target
+  selection uses the coarse 32.
 - **Fire (a bolt).** Once the turret has swung **exactly** onto the target bearing (so the
   bolt leaves straight along the barrel — a line shot can't fire in a cone), the cooldown is
   elapsed (`fire_period`, default 30 ticks = **2/sec**; `0` = aim-only), and the tank's
   previous bolt has expired, launch a **piercing projectile** from the muzzle. The bolt is a
-  travelling shot (`proj_speed`, a page tunable — slow default ~2.25 cells/tick), not a hitscan beam: each tick `proj_step`
+  travelling shot (`proj_speed`, a page tunable — slow default 1 cell/tick), not a hitscan beam: each tick `proj_step`
   marches it along its fixed heading, **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
   has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin an
