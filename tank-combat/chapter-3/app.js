@@ -356,7 +356,7 @@ function mountWidgets(wasm, view, C) {
     updaters.push(({ cam }) => {
       const rc = view.mrecCell(), rt = view.mrecTime(), now = wasm.frame();
       best.fill(-1);
-      for (let m = 0; m < C.NM; m++) { const cell = rc[m]; if (cell === C.MEMPTY) continue;
+      for (let m = 0; m < C.NM; m++) { const cell = rc[m]; if (cell === C.MEMPTY || (cell & 0x8000)) continue;  // skip no-info and GONE-of-X (belief = where a tank IS)
         if (rt[m] > best[cell]) best[cell] = rt[m]; }
       const xy = view.xy(); const tankCell = new Set();
       for (let t = 0; t < C.NT; t++) tankCell.add(((xy[2*t+1] >> 8)) * C.BW + (xy[2*t] >> 8));
@@ -384,7 +384,8 @@ function mountWidgets(wasm, view, C) {
       let h = `<div class="rowm"> #   cell      dir  mode    record</div>`;
       for (let m = 0; m < 8; m++) {
         const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8, dir = mang[m] >> 11;
-        const rec = rc[m] === C.MEMPTY ? "—" : `(${rc[m] % C.BW},${(rc[m] / C.BW) | 0}) ${now - rt[m]}f`;
+        const rcell = rc[m] & 0x7fff, gone = rc[m] !== C.MEMPTY && (rc[m] & 0x8000);  // strip + flag the GONE bit
+        const rec = rc[m] === C.MEMPTY ? "—" : `(${rcell % C.BW},${(rcell / C.BW) | 0})${gone ? "✗" : ""} ${now - rt[m]}f`;
         h += `<div class="rowm">${String(m).padStart(2)}  (${String(wcx).padStart(2)},${String(wcy).padStart(2)})  ${String(dir).padStart(2)}/32  ${MODE[mmode[m]].padEnd(6)}  ${rec}</div>`;
       }
       body.innerHTML = h;

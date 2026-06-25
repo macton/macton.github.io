@@ -154,10 +154,27 @@ static inline uint32_t screen_of(uint32_t sx, uint32_t sy) { return sy * SCREENS
  * one such cell (the last-known tank position); REC_EMPTY is the out-of-range
  * sentinel for "no cell" (4800 cells, so 0xFFFF can never be a real one). */
 #define N_WORLD_CELLS (BIG_W * BIG_H)        /* 4800 */
-#define REC_EMPTY     0xFFFFu                 /* empty record: a readable, propagating value */
+#define REC_EMPTY     0xFFFFu                 /* no-info record (never propagates) */
 static inline uint16_t wc_pack(int32_t wcx, int32_t wcy) { return (uint16_t)(wcy * BIG_W + wcx); }
 static inline int32_t  wc_x(uint32_t c) { return (int32_t)(c % BIG_W); }
 static inline int32_t  wc_y(uint32_t c) { return (int32_t)(c / BIG_W); }
+
+/* ---- the mite record is a world cell plus a TYPE, packed into one uint16 ----
+ * A cell index needs only 13 bits (< 4800), so the top bit carries the type:
+ *   sighting  "a tank is at X"   -> X              (a plain world cell)
+ *   gone      "cell X is empty"  -> X | GONE_FLAG  (a dispersal broadcast)
+ *   no info                      -> REC_EMPTY (0xFFFF)
+ * Why typed: a sighting spreads to anyone (newest-wins). A "gone" is adopted ONLY
+ * by mites already hunting that exact cell — so it clears a stale cluster off X
+ * without ever wiping a live sighting of some OTHER cell. A no-info record never
+ * propagates. (This is the fix for the swarm "forgetting" a tank that never moved:
+ * an untyped, freely-propagating "gone" was always the newest record and swept the
+ * whole swarm back to wander.) */
+#define GONE_FLAG 0x8000u
+static inline int      rec_is_sighting(uint16_t c) { return c != REC_EMPTY && !(c & GONE_FLAG); }
+static inline int      rec_is_gone    (uint16_t c) { return c != REC_EMPTY &&  (c & GONE_FLAG); }
+static inline uint16_t rec_cell_of    (uint16_t c) { return (uint16_t)(c & 0x7FFFu); }
+static inline uint16_t rec_gone_of    (uint16_t c) { return (uint16_t)(c | GONE_FLAG); }
 
 /* toroidal distances between world cells. tor1 is the wrapped 1-D distance on an
  * axis of length n; the swarm seeks on the 4-connected graph (Manhattan), and

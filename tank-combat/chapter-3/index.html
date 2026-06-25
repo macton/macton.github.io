@@ -252,15 +252,22 @@
     swarm's behaviour <em>emerges entirely from copying this record on contact</em>:</p>
     <ul style="color:var(--dim)">
       <li><strong>Sense.</strong> A tank within one cell → record its cell, stamped now, and <strong>hunt</strong> it.</li>
-      <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> record among the
-      mites in your 3×3 (including an empty one) — last-write-wins — then roll the role die:
+      <li><strong>Read a peer.</strong> Otherwise adopt the <em>newest</em> <strong>sighting</strong>
+      among the mites in your 3×3 — last-write-wins — then roll the role die:
       <strong>80% hunt</strong> the cell, <strong>20% carry it home</strong> to your nest (a
       newer record interrupts and re-rolls; either way you keep relaying it).</li>
       <li><strong>Arrive &amp; check.</strong> Reach the recorded cell: if the tank is there,
-      refresh it (stamp now); if not, <strong>erase</strong> it (empty, stamped now) — and “it's
-      gone” propagates back through the swarm by the same rule, because empty-stamped-now is the
-      <em>newest</em> record.</li>
+      refresh it (stamp now); if not, broadcast a <strong>“gone-of-X”</strong> (stamped now) and
+      wander.</li>
     </ul>
+    <p>The record is <strong>typed</strong>: a <em>sighting</em> “a tank is at X”, a <em>gone</em>
+    “cell X is empty”, or <em>no-info</em>. The type is the whole trick to <em>forgetting</em> right.
+    A sighting spreads to anyone; a <strong>gone-of-X is adopted only by a mite already hunting X</strong>
+    (it stands down and relays it onward), and no-info never propagates. So a confirmed-empty cell
+    clears <em>its own</em> hunters without ever wiping a live sighting of some <em>other</em> cell —
+    a stationary tank stays swarmed instead of being forgotten the moment one scout finds an unrelated
+    cell empty. (Earlier, an untyped empty was always the newest record and swept the whole swarm
+    back to wander; typing the record is the one-bit fix.)</p>
     <p>The gossip is made <strong>order-independent</strong> by double-buffering: every mite reads
     last tick's records and writes this tick's, then the buffers swap, so propagation never
     depends on iteration order (ties break on lowest index). Drive a tank into the swarm and

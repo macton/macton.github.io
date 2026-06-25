@@ -135,11 +135,16 @@ static uint32_t tank_cell(const World* w, uint32_t t) {
 
 /* ---- records: the last-write-wins gossip (double-buffered) ----------------- */
 /* Reads the previous-tick record buffer and writes the next, so propagation is
- * order-independent. Decides each mite's mode + destination:
- *   sense a tank  -> record it, HUNT it
- *   adopt a newer peer record -> roll P_HUNT: HUNT the cell, or carry it HOME
- *   arrive at a HUNT cell -> refresh (tank there) or erase + WANDER (gone)
- * A HOME or HUNT mite holds and relays its record; an empty record is WANDER. */
+ * order-independent. Each record is a TYPED cell (see defs.h): a SIGHTING "tank at X",
+ * a GONE "cell X is empty", or no-info. Per mite, in order:
+ *   sense a tank            -> record a SIGHTING, HUNT it
+ *   adopt a newer SIGHTING  -> roll P_HUNT: HUNT the cell, or carry it HOME
+ *   adopt a newer GONE-of-my-target -> stand down (the cell I hunt is confirmed empty)
+ *   arrive at a HUNT cell   -> refresh (tank there) or broadcast GONE-of-X + WANDER (gone)
+ *   arrive home             -> drop the record and rejoin the wanderers
+ * A SIGHTING spreads to anyone (newest-wins). A GONE-of-X is adopted ONLY by mites that
+ * are hunting X, so it disperses a stale cluster off X without ever wiping a live sighting
+ * of another cell — the swarm no longer "forgets" a tank that is still sitting there. */
 void mites_records(World* w) {
   uint32_t cur = w->rec_buf, nxt = cur ^ 1u;
   const uint16_t* rc_in = w->mite_rec_cell[cur];
@@ -178,30 +183,35 @@ void mites_records(World* w) {
         for (uint8_t s = 0; s < MITE_CAP; s++) {
           uint32_t p = w->mite_list[nc * MITE_CAP + s];
           if (p == REC_EMPTY || p == m) continue;
+          uint16_t pc = rc_in[p];
+          if (pc == REC_EMPTY) continue;                   /* no-info never propagates */
+          if (rec_is_gone(pc) && !(rec_is_sighting(my_c) && rec_cell_of(my_c) == rec_cell_of(pc)))
+            continue;                                       /* a GONE-of-X is only for X's hunters */
           uint32_t pt = rt_in[p];
           if (pt <= my_t) continue;
           if (!found || pt > best_pt || (pt == best_pt && p < best_pp)) {
-            found = 1; best_pt = pt; best_pc = rc_in[p]; best_pp = p;
+            found = 1; best_pt = pt; best_pc = pc; best_pp = p;
           }
         }
       }
       if (found) {
         new_c = best_pc; new_t = best_pt;                    /* adopt + relay the newer record */
-        if (new_c == REC_EMPTY) mode = MM_WANDER;            /* nowhere to hunt -> wander */
+        if (rec_is_gone(new_c)) mode = MM_WANDER;            /* my target is confirmed gone: stand down + relay */
         else mode = (xs32(&w->rng) % 100u) < (uint32_t)w->mite_phunt ? MM_HUNT : MM_HOME;
-      } else if (mode == MM_HUNT && my_c != REC_EMPTY && cell_chebyshev(mc, my_c) <= 1) {
-        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh
-         *    (stamp now, keep hunting); gone -> erase (empty, stamp now) + wander.
-         *    The empty-stamped-now record is newest, so "gone" propagates back. */
+      } else if (mode == MM_HUNT && rec_is_sighting(my_c) && cell_chebyshev(mc, my_c) <= 1) {
+        /* 3. Arrive (hunt): reached the recorded cell. Tank there -> refresh (stamp now,
+         *    keep hunting). Gone -> broadcast a GONE-of-X (stamped now) and wander; only the
+         *    other mites hunting X adopt it, so the stale cluster clears off X while
+         *    sightings of every other cell are left untouched. */
         int tank_here = 0;
         for (uint32_t t = 0; t < N_TANKS; t++) if (tank_cell(w, t) == my_c) { tank_here = 1; break; }
         if (tank_here) { new_c = my_c; new_t = frame; }
-        else { new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER; }
+        else { new_c = rec_gone_of(my_c); new_t = frame; mode = MM_WANDER; }
       } else if (mode == MM_HOME && mc == w->nest_cell[nest_of(m)]) {
-        /* 3b. Arrive (home): the sighting has been carried to the nest — drop it and
-         *     rejoin the wanderers. Without this, homed mites pile up at the nest, stay
-         *     MM_HOME forever (perpetually nest-tinted), and keep relaying a stale
-         *     record; the empty-stamped-now record propagates "nothing here" like 3. */
+        /* 3b. Arrive (home): the sighting has been carried to the nest — drop it (to no-info,
+         *     which no longer propagates) and rejoin the wanderers. Without this, homed mites
+         *     pile up at the nest, stay MM_HOME forever (perpetually nest-tinted), and keep
+         *     relaying a stale record. */
         new_c = REC_EMPTY; new_t = frame; mode = MM_WANDER;
       }
       /* 4. else keep the current record, mode, and destination (still wandering, or
@@ -210,7 +220,7 @@ void mites_records(World* w) {
 
     /* resolve the destination from the final mode */
     uint16_t dest;
-    if (mode == MM_HUNT)      dest = new_c;                       /* the recorded tank cell */
+    if (mode == MM_HUNT)      dest = rec_cell_of(new_c);          /* the recorded tank cell */
     else if (mode == MM_HOME) dest = w->nest_cell[nest_of(m)];   /* this mite's nest */
     else                      dest = REC_EMPTY;                   /* wander */
 
