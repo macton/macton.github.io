@@ -141,6 +141,25 @@ though 1000 mites move. So a fixed table of `N_FIELDS` fields, keyed by destinat
 - **Overflow → greedy fallback.** If the live count ever exceeds `N_FIELDS`, those
   mites steer greedily (toroidal distance) that tick — no crash, no cap break (tested).
 
+### Flocking — the fallback step (`mites.c`)
+
+The step itself splits on one question: *is the mite cleanly pathing?* If it is hunting
+or homing **and** the route field's preferred next sub-segment is free, it takes that —
+the field step, as before. In **every other case** — the preferred sub-segment is
+blocked, or the mite is wandering — it does **basic flocking** instead of the old
+random/greedy fallback: it samples the live mites in its 3×3 (the same per-cell index),
+and votes a cardinal from the three boids rules — **cohesion** (toward them),
+**separation** (off the ones within a cell), and **alignment** (their heading) — then
+takes the best **cap-free** cardinal; a mite with no neighbours falls back to a random
+wander step. It is all integer and deterministic (no new RNG draws when neighbours
+exist). Weights are `FLOCK_{COH,SEP,ALI}` (= 1/2/4): **alignment-dominant**, because
+strong cohesion just re-bunches — at 1/2/4 the swarm **flows in streams**. Two effects
+fall out, measured over a 4-tank camp vs the plain random/greedy fallback: blocked
+hunters **flow with the swarm around a jam instead of stalling**, so **kills rise
+~145→175 per 1k ticks**, and the **mean nest crowd drops** (~9.7→7.9 within 2 cells)
+while alive stays ~945 and the cap holds. The worst single nest ticks up slightly
+(~19.8→21.7) — cohesion's cost — which the light `COH` keeps small.
+
 ### Determinism
 
 All randomness — every wander direction and every hunt/home roll — comes from a
@@ -286,7 +305,7 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **115 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **116 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
 sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
@@ -316,7 +335,7 @@ with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (115 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (116 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

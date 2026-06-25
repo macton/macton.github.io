@@ -282,6 +282,12 @@ static void mite_reset(World* w, uint32_t m, int wcx, int wcy) {
   w->mite_mode[m] = MM_WANDER;
   w->mite_cell[m] = wc_pack(wcx, wcy); w->mite_tgt[m] = w->mite_cell[m];
 }
+/* open a single world cell (clear its wall bit) — to carve an unambiguous test pocket */
+static void clear_wall(World* w, int wx, int wy) {
+  wx = wrap_wcx(wx); wy = wrap_wcy(wy);
+  uint32_t scr = (uint32_t)((wy / GRID_H) * SCREENS_X + wx / GRID_W);
+  w->grid[scr * GRID_H + (uint32_t)(wy % GRID_H)] &= ~(1u << (uint32_t)(wx % GRID_W));
+}
 /* a controlled gossip stage: park all tanks and mites [keep,N) far away on open
  * ring cells (so only mites [0,keep) interact), and clear every record. */
 static void gossip_setup(World* w, int keep) {
@@ -443,6 +449,21 @@ static void t_mite_behaviour(void) {
   mites_build_index(&W); mites_records(&W);
   check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 600, "reaching the recorded cell with no tank erases the record (stamped now)");
   check(W.mite_mode[0] == MM_WANDER, "after erasing, the mite reverts to wander");
+
+  /* flocking: a wandering mite with neighbours steers WITH them (alignment-dominant). Park
+   * the pool far away, carve an open pocket in screen (2,2), and surround the wanderer's
+   * EAST with three east-heading neighbours (segs 1/2/3, leaving the wanderer's seg 0 free
+   * there) — it should step east, matching/joining them rather than stepping at random. */
+  sim_init(&W); gossip_setup(&W, 0); W.mite_sense = 0;
+  { int bx = 50, by = 40;                                       /* interior of screen (2,2), far from the parked pool */
+    for (int dx = -1; dx <= 2; dx++) for (int dy = -1; dy <= 1; dy++) clear_wall(&W, bx + dx, by + dy);
+    mite_reset(&W, 0, bx, by);                                  /* the wanderer (seg 0), MM_WANDER, at rest */
+    uint32_t nb[3] = { 4, 8, 12 };                              /* segs 1,2,3 -> coexist in the east cell, seg 0 free */
+    for (int k = 0; k < 3; k++) { mite_reset(&W, nb[k], bx + 1, by);
+      W.mite_ang[nb[k]] = (uint16_t)((uint32_t)CARD_DI[DIR_E] << ANGLE_SHIFT); }   /* all heading east */
+    mites_build_index(&W); mites_step(&W);
+    check(W.mite_tgt[0] == (uint16_t)wc_pack(bx + 1, by),
+          "a wandering mite flocks with its neighbours (steps east toward/with them), not at random"); }
 
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */

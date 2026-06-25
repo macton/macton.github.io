@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (115 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (116 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -102,6 +102,15 @@ the inherited tests still pass and the baked escape table is byte-identical.
   `MITE_R`. A mite's footprint **never overlaps a wall** across a run. *(tested.)*
 - **Mites do not collide with tanks or with each other** — crowding is the cap (a
   decision-level rule), not physics. The cap gates the actual step in every mode.
+- **Flocking is the fallback step.** A pathing (hunt/home) mite whose **preferred** route
+  sub-segment is free takes it — the route-field step, as before. In **every other case**
+  (the preferred sub-segment blocked, or the mite wandering) it does **basic flocking**:
+  it samples the live mites in its 3×3 neighbourhood and votes a cardinal from cohesion
+  (toward them), separation (off the close ones), and alignment (their heading — the
+  dominant weight, so the swarm flows in streams), then takes the best **cap-free** one;
+  utterly alone, it falls back to a random wander step. It is integer + deterministic and
+  never breaks the cap. *(tested: a wanderer with east-heading neighbours steps east with
+  them, not at random; the cap + determinism hold with flocking on.)*
 
 ## Combat (the tanks shoot the swarm)
 

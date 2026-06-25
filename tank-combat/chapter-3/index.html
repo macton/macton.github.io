@@ -294,6 +294,17 @@
     <strong>active / 64</strong> routes and the running <strong>peak</strong>: a thousand movers
     served by a handful of routes is the chapter's payoff. Beside them the four tanks each
     compute their own exact route — same world, the cost matched to the need.</p>
+    <p>The step itself asks one question: <em>is the mite cleanly pathing?</em> If it is hunting or
+    homing <strong>and</strong> the route field's preferred next sub-segment is open, it takes it —
+    the field step. In <strong>any other case</strong> — that sub-segment blocked, or the mite
+    wandering — it <strong>flocks</strong>: it samples the mites in its 3×3 (the same per-cell index)
+    and votes a cardinal from the three classic rules — <strong>cohesion</strong> toward them,
+    <strong>separation</strong> off the close ones, <strong>alignment</strong> to their heading — then
+    takes the best cap-free one. It is the same data (the index) read one more way, and it costs no new
+    state. With alignment weighted highest the swarm <strong>flows in streams</strong> rather than
+    clumping; and because a blocked hunter now <em>flows with the crowd around a jam</em> instead of
+    stalling against it, the swarm presses tanks harder (measured: kills up ~20%, the average nest
+    less crowded) while the cap still holds every tick.</p>
 
     <h2>The tanks shoot back: one transform, the same index</h2>
     <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it
