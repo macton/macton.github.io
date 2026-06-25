@@ -150,10 +150,11 @@
     <span class="swatch" style="background:#e6926e"></span><span class="swatch" style="background:#dae66e"></span><span class="swatch" style="background:#6ee692"></span><span class="swatch" style="background:#6eaae6"></span><span class="swatch" style="background:#e66eda"></span> homing (briefly, in its nest’s colour — one per screen) ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
     Each tank’s <b>turret</b> turns at its own rate onto the mite it can most easily hit — the one
-    closest to where the barrel already points — and, once aligned, fires a <b>laser</b>
-    (<span class="swatch" style="background:#ff6040"></span> beam) that reaches to the nearest wall and
-    <b>destroys every mite along the line</b> (<span class="swatch" style="background:#fff0be"></span>
-    burst). Destroyed mites revive (memory wiped) at their nest after a few seconds, and each one’s
+    closest to where the barrel already points — and, once aligned, fires a <b>piercing bolt</b>
+    (<span class="swatch" style="background:#ff6040"></span> projectile) that travels out, <b>destroying
+    every mite it passes through</b> until it hits a wall (<span class="swatch" style="background:#fff0be"></span>
+    burst). Firing doesn’t pin the turret — it’s free to swing onto the next target while the bolt flies.
+    Destroyed mites revive (memory wiped) at their nest after a few seconds, and each one’s
     <b>death cry</b> tells nearby mites where the shot came from, so the swarm turns on its attackers.
   </div>
 
@@ -237,8 +238,8 @@
     quarter-cell off the cell centre. The rule is <strong>at most one mite per (cell,
     sub-segment)</strong>: a mite steps into a cell only if its own sub-segment there is free
     (so still at most 4 per cell), else it picks another open neighbour, or holds. This spreads
-    the swarm out <em>inside</em> cells instead of stacking it on the centre — and makes it a bit
-    harder to mow a whole line down with one beam. It is enforced <em>deterministically</em> by
+    the swarm out <em>inside</em> cells instead of stacking it on the centre — and lets mites a
+    sub-segment off a bolt's line dodge it. It is enforced <em>deterministically</em> by
     processing mites in index order against a per-cell <strong>bitmask</strong> of reserved
     sub-segments — current occupants plus the moves already committed this tick — so the
     <em>n</em>-th mite sees the earlier ones' reservations (chapter 1's “test only the leading
@@ -306,16 +307,6 @@
     clumping; and because a blocked hunter now <em>flows with the crowd around a jam</em> instead of
     stalling against it, the swarm presses tanks harder (measured: kills up ~20%, the average nest
     less crowded) while the cap still holds every tick.</p>
-    <p>The same fallback is where the swarm learns to <strong>fear the laser</strong>. A <em>live beam
-    repels every mite near it</em> — hunter included. A mite within range of a firing barrel <strong>drops
-    its path and flees</strong>: it falls into the flock branch, where a <strong>repulsion</strong> vote
-    perpendicular off the beam (strongest at the line) carries it clear, and it <strong>goes back to
-    hunting once the beam blinks out</strong> — its target never changed, only the one step. The catch is
-    that the mites packed around a firing tank are almost all <em>hunters</em> charging the same target, so
-    the repulsion has to be <strong>weighted heavily</strong> to beat that pull — too gentle and they just
-    churn at the edge. Tuned up, watch a tank fire into the knot: the swarm <strong>parts along the
-    sightline</strong> (measured: ~40% fewer mites in the beam's reach) and closes again behind it.</p>
-
     <h2>The tanks shoot back: one transform, the same index</h2>
     <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it
     reuses the structures already here rather than adding new ones. Each tank's <strong>turret aims
@@ -325,13 +316,14 @@
     per-cell mite index over its search box, takes one <strong>line-of-sight</strong> test per cell
     (an integer Bresenham walk over the wall grid), and tracks the smallest bearing change. The turret
     swings onto that target and, once exactly on it (and the cooldown elapsed), fires at a fixed rate
-    (default <strong>2 shots/sec</strong>). The shot is a <strong>thin laser</strong>: the same Bresenham
-    walk, now run <em>outward from the tank</em> until it meets a wall, destroying mites whose position
-    lies within a narrow band of the beam line — again just reading the per-cell index. Because mites
-    sit in sub-segments off the cell centre, the ones <strong>on</strong> the line die and the ones
-    <strong>off</strong> it <strong>dodge</strong> (the aimed target always dies). The
-    beam is drawn for ~0.2 s — and while it is live the <strong>turret is locked</strong> to its firing
-    direction (a shot commits the aim) — and each destroyed mite leaves a small expanding <strong>burst</strong>.
+    (default <strong>2 shots/sec</strong>). The shot is a <strong>travelling, piercing bolt</strong> — not a
+    hitscan beam: launched from the muzzle, it marches a few cells per tick, destroying mites whose position
+    lies within a narrow band of its path and <strong>piercing on through them</strong> — again just reading
+    the per-cell index — until it meets a wall. Because mites sit in sub-segments off the cell centre, the
+    ones <strong>on</strong> the line die and the ones <strong>off</strong> it <strong>dodge</strong> (the bolt
+    carries the mite it was aimed at, so the locked turret still reliably drops its target). Firing
+    <strong>no longer pins the turret</strong> — the instant the bolt is away the barrel can swing onto the
+    next target while the shot is still travelling — and each destroyed mite leaves a small expanding <strong>burst</strong>.
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
     <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
     so no rule the swarm obeys is broken by combat. There is <strong>one nest per screen except the
@@ -343,7 +335,7 @@
     <p>The payoff is the feedback loop. Every kill is a <strong>death cry</strong>: each mite within
     <strong>2× sensing range</strong> of the dead one has its record overwritten with the
     <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
-    laser that mows a line doesn't thin the swarm quietly, it <strong>broadcasts the shooter's position</strong> into
+    bolt that mows a line doesn't thin the swarm quietly, it <strong>broadcasts the shooter's position</strong> into
     the very same gossip that spreads any sighting, and the survivors converge on the attacker. It
     writes through the ordinary record buffer and the ordinary route fields; the belief field above
     lights up around a tank that is firing. And it is <strong>deterministic</strong> — firing draws
@@ -372,7 +364,7 @@
     allocation, the simulation separated from rendering and wasm so the swarm, the gossip, the
     cap, and the route table are all tested natively with no browser or GPU. The render scales
     with what's <em>visible</em>, not with the population. And when the tanks shoot back, combat
-    leans on what's <strong>already here</strong> — aiming and the laser both just walk the per-cell
+    leans on what's <strong>already here</strong> — aiming and the bolt both just walk the per-cell
     index, the death cry writes the existing record buffer, respawn obeys the existing cap; the only
     addition is a small fixed ring of cosmetic destruction bursts — the proof that the layout, not the
     feature list, is what the volume bought.</p>

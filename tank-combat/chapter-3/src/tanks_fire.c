@@ -73,41 +73,63 @@ static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
   }
 }
 
-/* Fire the laser: a thin ray from the tank along the turret heading. March it cell by
- * cell (the LOS Bresenham, extended) until a wall; in each cell it crosses, destroy the
- * live mites whose ACTUAL position lies within BEAM_HW of the beam line (perpendicular
- * distance). Because mites now sit in sub-segments a quarter-cell off centre, a thin beam
- * misses the ones off the line — they dodge. Returns the last open cell (the beam end). */
-static uint16_t laser_sweep(World* w, int tx, int ty, int tcx, int tcy, int co, int si,
-                            uint16_t tcell, uint32_t frame) {
-  int bx = tcx + ((co * LASER_MAX) >> TRIG_SHIFT);        /* a far point along the beam */
-  int by = tcy + ((si * LASER_MAX) >> TRIG_SHIFT);
-  int dx = bx - tcx, dy = by - tcy;
-  int adx = iabs(dx), ady = iabs(dy), sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
-  int x = tcx, y = tcy, err = adx - ady;
-  uint16_t endc = (uint16_t)wc_pack(wrap_wcx(tcx), wrap_wcy(tcy));
-  for (int g = 0; g < LASER_MAX + 2; g++) {
-    int e2 = 2 * err;
-    if (e2 > -ady) { err -= ady; x += sx; }
-    if (e2 <  adx) { err += adx; y += sy; }
-    int wx = wrap_wcx(x), wy = wrap_wcy(y);
-    if (cell_is_wall(w->grid, wx, wy)) break;              /* the beam stops at the wall */
-    endc = (uint16_t)wc_pack(wx, wy);
-    uint32_t c = (uint32_t)endc;
+/* Advance tank t's live bolt one tick: march it up to PROJ_SPEED subcells along its fixed
+ * heading and, in every cell of that swept segment, destroy the live mites whose ACTUAL
+ * position lies within PROJ_HW of the bolt's line (perpendicular distance) AND within this
+ * tick's forward window (along in [0, step]). It PIERCES — a kill never stops it — so a
+ * single bolt mows a whole line. It stops, and the bolt expires (live = 0), at the first
+ * wall in the segment or once it has flown PROJ_RANGE cells in total. Because mites sit in
+ * sub-segments a quarter-cell off centre, a thin bolt misses the ones off the line — they
+ * dodge. The kill window tiles contiguously tick to tick (this tick's [0,step] from the new
+ * head abuts last tick's), so every point on the path is swept exactly once. */
+static void proj_step(World* w, uint32_t t, uint32_t frame) {
+  int px = xy_lo(w->tank_proj_xy[t]), py = xy_hi(w->tank_proj_xy[t]);
+  uint32_t pd = w->tank_proj_dir[t] >> ANGLE_SHIFT;
+  int co = dir_cos(pd), si = dir_sin(pd);
+  uint16_t pt = w->tank_proj_tgt[t];                      /* the aimed mite — killed on arrival regardless of perp */
+
+  int step = PROJ_SPEED;                                   /* this tick's reach (subcells) */
+  int rng_left = (int)PROJ_RANGE * SUB - (int)w->tank_proj_dist[t];
+  if (step > rng_left) step = rng_left;                    /* the last partial step before it expires */
+
+  /* the firing tank's CURRENT cell — what a kill teaches the nearby swarm (the death cry) */
+  int tcx = wrap_wcx(xy_lo(w->tank_xy[t]) >> SUB_SHIFT), tcy = wrap_wcy(xy_hi(w->tank_xy[t]) >> SUB_SHIFT);
+  uint16_t tcell = (uint16_t)wc_pack(tcx, tcy);
+
+  int ex = px + ((co * step) >> TRIG_SHIFT), ey = py + ((si * step) >> TRIG_SHIFT);   /* segment end */
+  int scx = px >> SUB_SHIFT, scy = py >> SUB_SHIFT;        /* start cell (extended coords) */
+  int ecx = ex >> SUB_SHIFT, ecy = ey >> SUB_SHIFT;        /* end cell */
+  int dcx = ecx - scx, dcy = ecy - scy;
+  int adx = iabs(dcx), ady = iabs(dcy), sx = dcx < 0 ? -1 : 1, sy = dcy < 0 ? -1 : 1;
+  int cx = scx, cy = scy, err = adx - ady, hitwall = 0;
+
+  for (int g = 0; g <= adx + ady; g++) {                   /* every cell on the segment, start..end */
+    int wx = wrap_wcx(cx), wy = wrap_wcy(cy);
+    if (cell_is_wall(w->grid, wx, wy)) { hitwall = 1; break; }   /* the bolt stops at the wall */
+    uint32_t c = (uint32_t)wc_pack(wx, wy);
     if (w->mite_cnt[c]) {
       for (uint8_t s = 0; s < MITE_CAP; s++) {
         uint32_t p = w->mite_list[c * MITE_CAP + s];
         if (p == REC_EMPTY || w->mite_resp[p]) continue;   /* empty / already destroyed */
-        int vx = xy_lo(w->mite_xy[p]) - tx; if (vx >  ARENA_W_SUB / 2) vx -= ARENA_W_SUB; if (vx < -ARENA_W_SUB / 2) vx += ARENA_W_SUB;
-        int vy = xy_hi(w->mite_xy[p]) - ty; if (vy >  ARENA_H_SUB / 2) vy -= ARENA_H_SUB; if (vy < -ARENA_H_SUB / 2) vy += ARENA_H_SUB;
-        int along = (vx * co + vy * si) >> TRIG_SHIFT;      /* distance along the beam */
+        int vx = xy_lo(w->mite_xy[p]) - px; if (vx >  ARENA_W_SUB / 2) vx -= ARENA_W_SUB; if (vx < -ARENA_W_SUB / 2) vx += ARENA_W_SUB;
+        int vy = xy_hi(w->mite_xy[p]) - py; if (vy >  ARENA_H_SUB / 2) vy -= ARENA_H_SUB; if (vy < -ARENA_H_SUB / 2) vy += ARENA_H_SUB;
+        int along = (vx * co + vy * si) >> TRIG_SHIFT;      /* distance along the bolt's heading */
         int perp  = (vx * si - vy * co) >> TRIG_SHIFT; if (perp < 0) perp = -perp;
-        if (along >= -SUB && perp <= BEAM_HW) kill_mite(w, p, tcell, frame);
+        /* mow everything within the thin half-width; the aimed mite (in a cell on the bolt's path)
+         * dies whatever its sub-segment offset, so a locked turret reliably kills what it shot at. */
+        if (along >= 0 && along <= step && (perp <= PROJ_HW || p == pt)) kill_mite(w, p, tcell, frame);
       }
     }
-    if (x == bx && y == by) break;
+    if (cx == ecx && cy == ecy) break;
+    int e2 = 2 * err;
+    if (e2 > -ady) { err -= ady; cx += sx; }
+    if (e2 <  adx) { err += adx; cy += sy; }
   }
-  return endc;
+
+  if (hitwall) { w->tank_proj_live[t] = 0; return; }       /* spent against the wall */
+  w->tank_proj_xy[t]   = xy_pack(wrap_x(ex), wrap_y(ey));  /* advance the head (torus-wrapped) */
+  w->tank_proj_dist[t] = (uint16_t)(w->tank_proj_dist[t] + step);
+  if (w->tank_proj_dist[t] >= PROJ_RANGE * SUB) w->tank_proj_live[t] = 0;  /* flew its full range */
 }
 
 void tanks_fire(World* w) {
@@ -118,6 +140,10 @@ void tanks_fire(World* w) {
   for (uint32_t i = 0; i < N_FX; i++) if (w->fx_t[i]) w->fx_t[i]--;   /* age the bursts */
 
   for (uint32_t t = 0; t < N_TANKS; t++) {
+    /* a bolt already in flight pierces on this tick (and may expire at a wall / its range),
+     * independent of where the turret now points — firing does not pin the bolt to the aim. */
+    if (w->tank_proj_live[t]) proj_step(w, t, frame);
+
     int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
     int tcx = wrap_wcx(tx >> SUB_SHIFT), tcy = wrap_wcy(ty >> SUB_SHIFT);
     uint16_t turret = w->tank_turret[t];
@@ -150,25 +176,25 @@ void tanks_fire(World* w) {
     } else {
       want = w->tank_ang[t];
     }
-    /* swing the turret toward the desired aim at its turn rate — but NOT while a beam is
-     * live: a shot locks the turret to its firing direction for the laser's lifetime, so
-     * the beam holds steady and the aim is committed for the duration of the shot. */
-    if (w->tank_tracer[t] == 0) w->tank_turret[t] = turn_toward(turret, want, rate);
+    /* swing the turret toward the desired aim at its turn rate — ALWAYS, even with a bolt in
+     * flight: firing no longer locks the turret, so the moment a shot is away the barrel is
+     * free to line up the next target while the bolt is still travelling. */
+    w->tank_turret[t] = turn_toward(turret, want, rate);
 
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
-    if (w->tank_tracer[t]   > 0) w->tank_tracer[t]--;
 
-    /* fire only once the barrel has swung EXACTLY onto the target bearing (so the beam
-     * runs precisely along the barrel — a line shot can't be a cone) and the cooldown is
-     * ready (period 0 = off). The shot is a LASER: a beam along the barrel that destroys
-     * every mite in its path until it meets a wall. */
-    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0) {
-      uint32_t bd = w->tank_turret[t] >> ANGLE_SHIFT;            /* beam = barrel heading */
-      uint16_t tcell = (uint16_t)wc_pack(tcx, tcy);
-      w->tank_shot_cell[t] = laser_sweep(w, tx, ty, tcx, tcy, dir_cos(bd), dir_sin(bd), tcell, frame);
-      if (!w->mite_resp[target]) kill_mite(w, target, tcell, frame);  /* the aimed mite always dies */
+    /* fire only once the barrel has swung EXACTLY onto the target bearing (so the bolt leaves
+     * straight along the barrel), the cooldown is ready (period 0 = off), and our previous bolt
+     * has expired (at most one in flight at a time). The shot is a PROJECTILE: a piercing bolt
+     * launched from the muzzle that mows the line ahead until it hits a wall (proj_step flies it). */
+    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want
+        && w->tank_cooldown[t] == 0 && !w->tank_proj_live[t]) {
+      w->tank_proj_xy[t]   = w->tank_xy[t];          /* spawn at the tank, heading along the barrel */
+      w->tank_proj_dir[t]  = w->tank_turret[t];
+      w->tank_proj_dist[t] = 0;
+      w->tank_proj_tgt[t]  = (uint16_t)target;        /* the bolt carries its target for a sure kill */
+      w->tank_proj_live[t] = 1;
       w->tank_cooldown[t]  = (uint16_t)period;
-      w->tank_tracer[t]    = LASER_TICKS;                        /* draw the beam ~0.1 s */
     }
   }
 }

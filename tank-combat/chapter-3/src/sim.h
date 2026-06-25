@@ -49,15 +49,21 @@ struct World {
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
 
   /* ---- per-tank turret/firing (the body heading drives movement; the turret
-   *      aims independently and fires a laser that mows down the line) --------- */
+   *      aims independently and fires a projectile bolt that pierces the swarm). The
+   *      turret is freed the moment a bolt is fired, so it tracks the next target while
+   *      that bolt is still in flight — at most one live bolt per tank. ------------- */
   uint16_t tank_turret  [N_TANKS];  /* turret aim angle (Q5.11), separate from the body heading */
   uint16_t tank_cooldown[N_TANKS];  /* ticks until the next shot (0 = ready) */
   uint16_t tank_target  [N_TANKS];  /* targeted mite index, or TGT_NONE */
-  uint16_t tank_shot_cell[N_TANKS]; /* world cell where the last beam ended (wall hit), for drawing */
-  uint8_t  tank_tracer  [N_TANKS];  /* ticks the fired beam is still drawn (LASER_TICKS at fire) */
+  uint32_t tank_proj_xy [N_TANKS];  /* live bolt position, packed subcells x|y<<16 (valid when live) */
+  uint16_t tank_proj_dir[N_TANKS];  /* the bolt's travel heading (Q5.11), fixed at fire */
+  uint16_t tank_proj_dist[N_TANKS]; /* subcells flown so far (expires at PROJ_RANGE*SUB) */
+  uint16_t tank_proj_tgt[N_TANKS];  /* the mite this bolt was aimed at — a guaranteed kill on arrival,
+                                     * since the 32-dir aim can't pin an off-centre mite exactly (else TGT_NONE) */
+  uint8_t  tank_proj_live[N_TANKS]; /* 1 while a bolt is in flight, else 0 (slot free to fire) */
 
-  /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite the
-   *      laser destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
+  /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite a
+   *      bolt destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
    *      drawn by render; deterministic (no RNG), so it never perturbs the swarm. ----- */
   uint32_t fx_xy[N_FX];   /* burst position (packed subcells, the mite's last position) */
   uint16_t fx_t [N_FX];   /* ticks remaining (0 = inactive); set to FX_DURATION on spawn */

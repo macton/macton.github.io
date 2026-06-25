@@ -57,7 +57,8 @@ static void place_tank(World* w, uint32_t t, int wcx, int wcy) {
   /* match sim's place(): body east, turret resting east, no target/cooldown — so the
    * turret-turn-rate combat tests start from a known aim. */
   w->tank_turret[t] = 0; w->tank_cooldown[t] = 0; w->tank_target[t] = TGT_NONE;
-  w->tank_tracer[t] = 0; w->tank_shot_cell[t] = 0;
+  w->tank_proj_live[t] = 0; w->tank_proj_xy[t] = 0; w->tank_proj_dir[t] = 0;
+  w->tank_proj_dist[t] = 0; w->tank_proj_tgt[t] = TGT_NONE;
 }
 /* drive tank `t` (UNSELECTED, so it follows its own path) to a destination */
 static void run_to_dest(World* w, uint32_t t, int wcx, int wcy, int maxticks,
@@ -330,7 +331,10 @@ static uint32_t tank_combat_hash(World* w) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     h = (h ^ w->tank_turret[t]) * 16777619u;
     h = (h ^ w->tank_cooldown[t]) * 16777619u;
-    h = (h ^ ((uint32_t)w->tank_target[t] | ((uint32_t)w->tank_shot_cell[t] << 16))) * 16777619u;
+    h = (h ^ ((uint32_t)w->tank_target[t] | ((uint32_t)w->tank_proj_live[t] << 16))) * 16777619u;
+    h = (h ^ w->tank_proj_xy[t]) * 16777619u;
+    h = (h ^ ((uint32_t)w->tank_proj_dir[t] | ((uint32_t)w->tank_proj_dist[t] << 16))) * 16777619u;
+    h = (h ^ w->tank_proj_tgt[t]) * 16777619u;
   }
   return h;
 }
@@ -464,21 +468,6 @@ static void t_mite_behaviour(void) {
     mites_build_index(&W); mites_step(&W);
     check(W.mite_tgt[0] == (uint16_t)wc_pack(bx + 1, by),
           "a wandering mite flocks with its neighbours (steps east toward/with them), not at random"); }
-
-  /* laser repulsion: a lone flocking mite beside a LIVE beam flees perpendicular to it. Tank
-   * fires east; the mite sits one cell NORTH of the beam line, three cells along it -> steps north. */
-  sim_init(&W); gossip_setup(&W, 0); W.mite_sense = 0;
-  { int tx = 5, ty = 33;                                       /* tank cell; beam runs east */
-    place_tank(&W, 0, tx, ty);
-    W.tank_turret[0]    = (uint16_t)((uint32_t)CARD_DI[DIR_E] << ANGLE_SHIFT);  /* aim east */
-    W.tank_tracer[0]    = LASER_TICKS;                         /* beam is live */
-    W.tank_shot_cell[0] = (uint16_t)wc_pack(tx + 10, ty);      /* beam ends 10 cells east */
-    int bx = tx + 3, by = ty - 1;                              /* lone mite: along the beam, one cell north of the line */
-    for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) clear_wall(&W, bx + dx, by + dy);
-    mite_reset(&W, 0, bx, by);                                 /* MM_WANDER, no neighbours */
-    mites_build_index(&W); mites_step(&W);
-    check(W.mite_tgt[0] == (uint16_t)wc_pack(bx, by - 1),
-          "a flocking mite beside a live laser flees perpendicular off the beam (steps north)"); }
 
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */
@@ -658,44 +647,51 @@ static void t_mite_nests_fields(void) {
 
 /* ---- combat: the tanks shoot the swarm ----------------------------------- */
 static void t_tanks_fire(void) {
-  printf("combat — laser aim/line-kill/stop-at-wall, death cry, nest respawn:\n");
+  printf("combat — bolt aim/pierce/stop-at-wall, freed turret, death cry, nest respawn:\n");
 
-  /* a tank lasers the mite it can hit: the target is destroyed, a burst is spawned */
+  /* a tank fires a piercing BOLT at the mite it can hit: it launches the moment the aim is on
+   * target, then travels to the mite and destroys it (the kill is NOT instant — the bolt has to
+   * arrive), spawning a burst. Pin the mite under the bolt's line so it flies straight in. */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
-  W.fire_period = 30; W.mite_respawn = 300;
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
   sim_tick(&W);
   check(W.tank_target[0] == 0, "the turret acquires the mite in line of sight");
-  check(W.mite_resp[0] > 0, "the laser destroys the targeted mite");
-  check(W.tank_cooldown[0] > 0, "the tank goes on cooldown after firing");
+  check(W.tank_cooldown[0] > 0, "the tank goes on cooldown the moment it fires");
+  check(W.tank_proj_live[0], "a bolt is launched (in flight just after firing)");
+  int hit = 0; for (int i = 0; i < 6 && !hit; i++) { sim_tick(&W); if (W.mite_resp[0]) hit = 1; }
+  check(hit, "the travelling bolt reaches and destroys the targeted mite");
   int anyfx = 0; for (uint32_t i = 0; i < N_FX; i++) if (W.fx_t[i]) anyfx = 1;
   check(anyfx, "a destruction burst is spawned for the destroyed mite");
   sim_tick(&W);   /* the next index rebuild drops the corpse */
   check(W.mite_cnt[wcell(5, 7)] == 0, "a dead mite leaves the per-cell index (not drawn, not targetable)");
 
-  /* the laser is a thin LINE: mites on the beam die, mites off it (spread into other
-   * sub-segments) survive. Drive build_index + tanks_fire directly with hand-placed
-   * positions so the test isn't perturbed by movement/snap this tick. */
+  /* the bolt is a thin LINE that PIERCES: it destroys every mite on its line — it does NOT stop
+   * on the first — while mites off the line (spread into other sub-segments) survive. Drive
+   * build_index then repeated tanks_fire with hand-placed positions (no movement to perturb it)
+   * and let the bolt fly the length of the row. */
   sim_init(&W); gossip_setup(&W, 3);
-  place_tank(&W, 0, 1, 7);                                /* turret east, beam along row-7 centre */
+  place_tank(&W, 0, 1, 7);                                /* turret east, bolt along row-7 centre */
   mite_reset(&W, 0, 4, 7); mite_reset(&W, 1, 6, 7); mite_reset(&W, 2, 5, 7);
   W.mite_xy[0] = xy_pack(4 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line (perp 0) */
-  W.mite_xy[1] = xy_pack(6 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line */
-  W.mite_xy[2] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2 + 96);   /* off the line (perp 96 > BEAM_HW) */
+  W.mite_xy[1] = xy_pack(6 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line, BEYOND mite 0 */
+  W.mite_xy[2] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2 + 96);   /* off the line (perp 96 > PROJ_HW) */
   W.fire_period = 30; W.mite_respawn = 300;
-  mites_build_index(&W); tanks_fire(&W);
-  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0, "the laser destroys mites on its line");
-  check(W.mite_resp[2] == 0, "a mite off the beam line survives — the thin beam misses it (the spread dodges)");
+  mites_build_index(&W);
+  for (int i = 0; i < 12; i++) tanks_fire(&W);            /* fire, then fly the bolt down the row */
+  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0, "the bolt pierces the first mite and destroys the next on its line");
+  check(W.mite_resp[2] == 0, "a mite off the bolt's line survives — the thin bolt misses it (the spread dodges)");
 
-  /* the beam stops at a wall: a collinear mite beyond the wall survives */
+  /* the bolt stops at a wall: a collinear mite beyond the wall survives */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 1, 7);
   mite_reset(&W, 0, 5, 7);  W.mite_xy[0] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2);   /* before the block (col 8) */
   mite_reset(&W, 1, 13, 7); W.mite_xy[1] = xy_pack(13 * SUB + SUB / 2, 7 * SUB + SUB / 2);  /* beyond it (cols 8..11 walls) */
   W.fire_period = 30; W.mite_respawn = 300;
-  mites_build_index(&W); tanks_fire(&W);
-  check(W.mite_resp[0] > 0, "the laser destroys the mite before the wall");
-  check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the beam stops at the wall)");
+  mites_build_index(&W);
+  for (int i = 0; i < 10; i++) tanks_fire(&W);
+  check(W.mite_resp[0] > 0, "the bolt destroys the mite before the wall");
+  check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the bolt stops at the wall)");
 
   /* line of sight is required: a mite behind the central wall block is NOT targeted */
   sim_init(&W); gossip_setup(&W, 1);
@@ -738,35 +734,37 @@ static void t_tanks_fire(void) {
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;         /* pin the mite */
   sim_tick(&W);
   check(W.tank_target[0] == 0, "acquires the off-axis target");
-  check(W.mite_resp[0] == 0, "does not fire on tick 1 — the turret must swing on first (turn rate gates firing)");
+  check(W.mite_resp[0] == 0 && !W.tank_proj_live[0], "does not fire on tick 1 — the turret must swing on first (turn rate gates firing)");
   int swung = 0; for (int i = 0; i < 20 && !swung; i++) { sim_tick(&W); if (W.mite_resp[0]) swung = 1; }
   check(swung, "fires once the turret has swung onto the target");
 
-  /* the turret is LOCKED while the laser is live: it cannot turn toward a new target
-   * until the beam fades, then it is free again. */
+  /* the turret is FREE the instant a bolt is away — firing no longer locks it (the old beam
+   * pinned the turret to the shot for its whole lifetime). Carve the eastbound lane open so the
+   * bolt keeps travelling, fire it, then a target appears off-axis: the barrel swings onto the
+   * newcomer WHILE the first bolt is still in flight. */
   sim_init(&W); gossip_setup(&W, 2);
+  for (int c = 6; c <= 19; c++) clear_wall(&W, c, 7);                 /* open the lane so the bolt lives a while */
   place_tank(&W, 0, 2, 7);                                            /* turret east */
   mite_reset(&W, 0, 5, 7);                                            /* due east -> fire east at once */
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
   sim_tick(&W);
-  check(W.tank_tracer[0] > 0, "the beam is live just after firing");
-  uint16_t locked = W.tank_turret[0];
-  mite_reset(&W, 1, 2, 4);                                            /* a target due north now appears */
-  int held = 1;
-  for (int i = 0; i < LASER_TICKS - 1; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) held = 0; }
-  check(held && W.tank_turret[0] == locked, "the turret cannot turn while the laser is active");
-  int resumed = 0;
-  for (int i = 0; i < 30 && !resumed; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) resumed = 1; }
-  check(resumed, "once the beam fades the turret is free to turn again");
+  check(W.tank_proj_live[0], "a bolt is in flight just after firing");
+  uint16_t east = W.tank_turret[0];
+  mite_reset(&W, 1, 2, 3);                                            /* a new target due north appears */
+  int turned_live = 0;
+  for (int i = 0; i < 8 && !turned_live; i++) { sim_tick(&W);
+    if (W.tank_proj_live[0] && W.tank_turret[0] != east) turned_live = 1; }
+  check(turned_live, "the turret swings toward a new target while the bolt is still travelling (no lock)");
 
-  /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it */
+  /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
+   * so the bolt connects, and step until it lands. */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 2, 7);
   mite_reset(&W, 0, 5, 7);                                /* the target (closest, lowest index) */
   mite_reset(&W, 1, 5, 8);                                /* a peer within 2x sensing range (=4) */
-  W.mite_sense = 2; W.fire_period = 30; W.mite_respawn = 300;
-  sim_tick(&W);
-  check(W.mite_resp[0] > 0, "the closest in-sight mite is the one shot");
+  W.mite_sense = 2; W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
+  int cry = 0; for (int i = 0; i < 6 && !cry; i++) { sim_tick(&W); if (W.mite_resp[0]) cry = 1; }
+  check(cry, "the closest in-sight mite is the one the bolt destroys");
   check(get_rec_cell(&W, 1) == (uint16_t)wcell(2, 7), "death cry: a nearby mite learns the firing tank's cell");
   check(W.mite_mode[1] == MM_HUNT && W.mite_dest[1] == (uint16_t)wcell(2, 7),
         "death cry: the nearby mite turns to hunt the attacker");
@@ -774,8 +772,8 @@ static void t_tanks_fire(void) {
   /* respawn: a killed mite revives at its nest after the timeout, once (cap permitting) */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
-  W.fire_period = 30; W.mite_respawn = 10;
-  int died = 0; for (int i = 0; i < 5 && !died; i++) { sim_tick(&W); if (W.mite_resp[0]) died = 1; }
+  W.fire_period = 30; W.mite_respawn = 10; W.mite_speed = 0;   /* pin so the bolt connects */
+  int died = 0; for (int i = 0; i < 6 && !died; i++) { sim_tick(&W); if (W.mite_resp[0]) died = 1; }
   check(died, "the mite dies when shot (short respawn set)");
   /* move the tank far away so the mite isn't instantly re-killed the moment it
    * revives at its nest (a tank camping a nest legitimately suppresses it). */

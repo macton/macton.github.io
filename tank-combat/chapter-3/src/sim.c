@@ -12,7 +12,9 @@ static void place(World* w, uint32_t t, uint32_t wcx, uint32_t wcy, uint32_t di)
   w->tank_ang[t] = (uint16_t)(di << ANGLE_SHIFT);
   w->tank_in[t] = 0; w->tank_vxy[t] = 0; w->tank_hit[t] = 0;
   w->tank_turret[t] = w->tank_ang[t]; w->tank_cooldown[t] = 0;
-  w->tank_target[t] = TGT_NONE; w->tank_shot_cell[t] = 0; w->tank_tracer[t] = 0;
+  w->tank_target[t] = TGT_NONE;
+  w->tank_proj_live[t] = 0; w->tank_proj_xy[t] = 0; w->tank_proj_dir[t] = 0;
+  w->tank_proj_dist[t] = 0; w->tank_proj_tgt[t] = TGT_NONE;
 }
 
 void sim_init(World* w) {

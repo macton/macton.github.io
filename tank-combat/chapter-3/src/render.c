@@ -33,8 +33,8 @@ static const uint32_t COL_NEST[NEST_COUNT] = {
   RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
   RGBA(110, 170, 230, 255), RGBA(110, 122, 230, 255), RGBA(146, 110, 230, 255), RGBA(194, 110, 230, 255),
   RGBA(230, 110, 218, 255), RGBA(230, 110, 170, 255), RGBA(230, 110, 122, 255) };
-static const uint32_t COL_LASER_GLOW = RGBA(255,  96,  64, 255);   /* the beam's wide outer glow */
-static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 255);   /* its thin bright core */
+static const uint32_t COL_BOLT_GLOW = RGBA(255,  96,  64, 255);   /* the bolt's hot trailing streak */
+static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright leading head */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
 
 /* a destruction burst's colour by age: a bright flash darkening toward the arena
@@ -134,8 +134,8 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     k = push(out, k, lx, ly, 118, 100, 16384, 0, w->tstate[t] == TS_MANUAL ? COL_MANUAL : COL_AUTOPATH);
   }
   /* tank bodies + barrels: the BODY faces its movement heading (tank_ang); the
-   * BARREL faces the turret (tank_turret), which aims independently. A live shot is a
-   * LASER — a glow + bright core from the muzzle to where the beam met a wall. */
+   * BARREL faces the turret (tank_turret), which aims independently. The shot itself is a
+   * separate travelling bolt (drawn below), so the barrel is free to swing off the shot. */
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int wcx = wrap_wcx(xy_lo(w->tank_xy[t]) >> SUB_SHIFT), wcy = wrap_wcy(xy_hi(w->tank_xy[t]) >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
@@ -143,27 +143,28 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     uint32_t bi = w->tank_ang[t]    >> ANGLE_SHIFT; int32_t bco = dir_cos(bi), bsi = dir_sin(bi);
     uint32_t ti = w->tank_turret[t] >> ANGLE_SHIFT; int32_t tco = dir_cos(ti), tsi = dir_sin(ti);
 
-    /* beam: project the (toroidal) muzzle->endpoint vector onto the turret dir for its
-     * length, then a quad centred on the half-way point — a wide glow, a thin core. */
-    if (w->tank_tracer[t]) {
-      int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
-      int scx = wc_x(w->tank_shot_cell[t]) * SUB + SUB / 2, scy = wc_y(w->tank_shot_cell[t]) * SUB + SUB / 2;
-      int ddx = scx - tx; if (ddx >  ARENA_W_SUB / 2) ddx -= ARENA_W_SUB; if (ddx < -ARENA_W_SUB / 2) ddx += ARENA_W_SUB;
-      int ddy = scy - ty; if (ddy >  ARENA_H_SUB / 2) ddy -= ARENA_H_SUB; if (ddy < -ARENA_H_SUB / 2) ddy += ARENA_H_SUB;
-      int len = (ddx * tco + ddy * tsi) >> TRIG_SHIFT;     /* ~distance along the turret to the wall */
-      if (len > 0) {
-        int half = len / 2;
-        int mx = lx + ((tco * half) >> TRIG_SHIFT), my = ly + ((tsi * half) >> TRIG_SHIFT);
-        k = push(out, k, mx, my, half, 16, tco, tsi, COL_LASER_GLOW);   /* outer glow */
-        k = push(out, k, mx, my, half,  5, tco, tsi, COL_LASER_CORE);   /* bright core */
-      }
-    }
-
     k = push(out, k, lx, ly, 87, 67, bco, bsi, COL_BODY[t]);
     k = push(out, k, lx + ((tco * 87) >> TRIG_SHIFT), ly + ((tsi * 87) >> TRIG_SHIFT), 56, 18, tco, tsi, COL_BARR[t]);
   }
 
-  /* destruction bursts on top: expanding, darkening diamonds where the laser killed a
+  /* the piercing bolts in flight on THIS screen: a hot streak covering the segment the bolt
+   * swept this tick (so it reads as a fast travelling shot, not a dot) capped by a bright head.
+   * Each is keyed to the screen the bolt's HEAD is on (it travels away from its firing tank,
+   * onto other screens), like the bursts below. */
+  for (uint32_t t = 0; t < N_TANKS; t++) {
+    if (!w->tank_proj_live[t]) continue;
+    int bx = xy_lo(w->tank_proj_xy[t]), by = xy_hi(w->tank_proj_xy[t]);
+    int wcx = wrap_wcx(bx >> SUB_SHIFT), wcy = wrap_wcy(by >> SUB_SHIFT);
+    if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
+    int lx = ox + bx - sox, ly = oy + by - soy;
+    uint32_t di = w->tank_proj_dir[t] >> ANGLE_SHIFT; int32_t co = dir_cos(di), si = dir_sin(di);
+    int half = PROJ_SPEED / 2;                              /* the streak trails back over the tick's travel */
+    int mx = lx - ((co * half) >> TRIG_SHIFT), my = ly - ((si * half) >> TRIG_SHIFT);
+    k = push(out, k, mx, my, half, 12, co, si, COL_BOLT_GLOW);   /* trailing glow streak */
+    k = push(out, k, lx, ly, 24,    9, co, si, COL_BOLT_CORE);   /* bright leading head */
+  }
+
+  /* destruction bursts on top: expanding, darkening diamonds where a bolt destroyed a
    * mite — only those whose position is on this screen (cost scales with what's shown). */
   for (uint32_t i = 0; i < N_FX; i++) {
     if (!w->fx_t[i]) continue;

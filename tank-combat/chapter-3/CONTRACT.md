@@ -113,16 +113,6 @@ the inherited tests still pass and the baked escape table is byte-identical.
   utterly alone, it falls back to a random wander step. It is integer + deterministic and
   never breaks the cap. *(tested: a wanderer with east-heading neighbours steps east with
   them, not at random; the cap + determinism hold with flocking on.)*
-- **A live laser repels every mite near it.** A mite — hunter or not — within
-  `REPEL_RANGE` of a live beam **drops its path and flees**: it falls into the flocking
-  branch, where a **repulsion** vote (strongest at the line, falling to 0 at `REPEL_RANGE`,
-  weighted to override the hunt-drive) steers it perpendicular **away** from the beam. It
-  **resumes hunting once the beam fades** (~`LASER_TICKS`) — its mode and destination are
-  untouched, only the step changes. So the swarm opens a real gap along a firing tank's line
-  of sight (measured: ~40% fewer mites within the beam's reach) and closes again behind it.
-  Deterministic; the cap still holds. *(tested: a mite beside a live beam steps perpendicular
-  off it.)*
-
 ## Combat (the tanks shoot the swarm)
 
 - **Each turret aims independently of the body and turns at a finite rate.**
@@ -138,23 +128,26 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Line of sight is required.** A mite is targetable only if an integer Bresenham walk
   from the tank cell to the mite cell crosses no wall. *(tested: a mite behind a wall is
   not targeted.)*
-- **Fire is a fixed-rate, exactly-aimed laser.** The tank fires only once the turret has
-  swung **exactly** onto the target bearing (so the beam runs precisely along the barrel —
-  a line shot is never a cone, so the turn rate gates firing) and the cooldown is elapsed,
-  every `fire_period` ticks (default 30 = 2/sec; `0` disables firing, aim only). The shot
-  is a **laser**: a thin ray marched from the tank along the barrel until it meets a wall
-  (length capped at `LASER_MAX`), destroying mites whose position lies within `BEAM_HW` of
-  the beam line. Because mites sit in sub-segments a quarter-cell off centre, mites **on**
-  the line die and mites **off** it dodge — the aimed target is always destroyed. The beam
-  is drawn for `LASER_TICKS` (~0.2 s), during which the **turret is locked** to its firing
-  direction (it cannot turn toward another target until the beam fades) — a shot commits
-  the aim. Each destroyed mite is marked dead and leaves the per-cell index next rebuild —
-  a corpse is not drawn (on the map either), gossiped, or targeted — and spawns a cosmetic
-  destruction burst. *(tested: the laser destroys the target + a burst; it kills mites on
-  its line and **misses ones off it**; it stops at a wall (a collinear mite beyond
-  survives); the cooldown; the corpse leaving the index; an off-axis target not shot until
-  the turret swings on; the turret holds while the beam is live and turns again once it
-  fades.)*
+- **Fire is a fixed-rate, exactly-aimed piercing bolt.** The tank fires only once the turret
+  has swung **exactly** onto the target bearing (so the bolt leaves straight along the barrel —
+  a line shot is never a cone, so the turn rate gates firing), the cooldown is elapsed (every
+  `fire_period` ticks; default 30 = 2/sec; `0` disables firing, aim only), and the tank's
+  previous bolt has expired (one live bolt per tank). The shot is a **travelling projectile**,
+  not a hitscan beam: launched from the muzzle along the barrel, each tick it marches forward
+  `PROJ_SPEED` subcells (~3 cells/tick), **destroying every mite within `PROJ_HW` of the swept
+  segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
+  has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin a
+  sub-segment-offset mite exactly, the bolt **carries the mite it was aimed at** and kills it
+  for sure when it reaches that mite's cell — so a locked turret reliably drops what it shot at,
+  while the thin half-width means other mites a sub-segment **off** the line dodge. Firing
+  **does not lock the turret**: the instant the bolt is away the barrel is free to swing onto
+  the next target while the shot is still travelling. Each destroyed mite is marked dead and
+  leaves the per-cell index next rebuild — a corpse is not drawn (on the map either), gossiped,
+  or targeted — and spawns a cosmetic destruction burst. *(tested: a bolt travels to the target
+  and destroys it + a burst; it **pierces** the first mite on its line and destroys the next;
+  it **misses ones off it**; it stops at a wall (a collinear mite beyond survives); the
+  cooldown; the corpse leaving the index; an off-axis target not shot until the turret swings
+  on; the turret swings onto a new target while the bolt is still in flight.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip
@@ -188,11 +181,12 @@ the inherited tests still pass and the baked escape table is byte-identical.
   the mites share a few fields keyed by destination. A mite stuck where no field route
   exists (overflow, or a sealed goal) falls back to greedy and relies on the
   wander/erase rules and the swarm's collective coverage.
-- **The laser is hitscan, and only mites take damage.** The beam is an instant line to
-  the nearest wall, not a travelling projectile; tanks fire but are not damaged by the
-  swarm (tank health/score is not promised here). A turret parked facing a nest
-  legitimately suppresses it — a revived mite in the beam's path is destroyed again.
-  Destruction bursts are cosmetic only (no gameplay effect).
+- **The bolt travels, and only mites take damage.** The shot is a travelling projectile that
+  pierces the swarm and stops at a wall (not a full physics body — it doesn't bounce, block,
+  or collide with tanks); tanks fire but are not damaged by the swarm (tank health/score is
+  not promised here). A turret parked facing a nest legitimately suppresses it — a revived
+  mite in a bolt's path is destroyed again. Destruction bursts are cosmetic only (no gameplay
+  effect).
 - **The viewport is presentation only** (inherited): following, sliding, the picker,
   and which mites are drawn never change the simulation.
 
