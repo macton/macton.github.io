@@ -185,11 +185,12 @@ async function main() {
   let userZoom = 1.0, useAssets = false;
   let cam3d = { sx: 1, sy: 1, ox: 0, oy: 0 };
   const WALL_SU = C.SUB * C.IZ;                       // a wall's screen-height, for vertical headroom
+  const VIEW_SPAN = 1.7;                              // fit ~1.7 screens, so the connected neighbours show
   function viewWrite(panx, pany) {
     const cx = C.GW * C.SUB / 2 + panx, cy = C.GH * C.SUB / 2 + pany;
     const isx = (cx - cy) * C.IX, isy = (cx + cy) * C.IY;            // iso of the camera centre (wz=0)
-    const fullW = (C.GW + C.GH) * C.SUB * C.IX, fullH = (C.GW + C.GH) * C.SUB * C.IY + WALL_SU;
-    const S = Math.min(canvas.width * 0.92 / fullW, canvas.height * 0.80 / fullH) * userZoom;
+    const fullW = (C.GW + C.GH) * C.SUB * C.IX * VIEW_SPAN, fullH = ((C.GW + C.GH) * C.SUB * C.IY + WALL_SU) * VIEW_SPAN;
+    const S = Math.min(canvas.width * 0.96 / fullW, canvas.height * 0.92 / fullH) * userZoom;
     const sclX = S * 2 / canvas.width, sclY = -S * 2 / canvas.height;
     const offX = -isx * sclX, offY = -isy * sclY;
     cam3d = { sx: sclX, sy: sclY, ox: offX, oy: offY };
@@ -203,7 +204,9 @@ async function main() {
   let pickerOpen = false, manualView = false, lastSel = 255;
   function startSlide(toSx, toSy, dx, dy) {
     if (dx === 0 && dy === 0) { wasm.set_camera(toSx, toSy); return; }
-    wasm.set_slide(toSx, toSy, dx, dy); slide = { dx, dy, toSx, toSy, t0: performance.now() / 1000 };
+    // the connected 3x3 already holds the neighbour we're panning to, so the slide is
+    // purely a host-side pan of the camera uniform; set_camera re-anchors at the end.
+    slide = { dx, dy, toSx, toSy, t0: performance.now() / 1000 };
   }
   function setPicker(open) {
     pickerOpen = open;
@@ -212,23 +215,40 @@ async function main() {
   }
   function gotoScreen(sx, sy) { const c = CAM(); startSlide(sx, sy, sdir(c.sx, sx, C.SX), sdir(c.sy, sy, C.SY)); manualView = true; setPicker(false); }
 
-  // canvas click: invert the iso projection (on the ground plane) to a world cell.
-  // A tank cell -> cycle its state; else set the auto-path tank's destination.
-  function clickCell(e) {
+  // invert the iso projection (on the ground plane) to a world cell under the cursor,
+  // spanning the connected 3x3 neighbourhood (so you can click a neighbour screen too);
+  // null if outside it. The camera is the only thing between pixels and the cell.
+  function cellAt(e) {
     const r = canvas.getBoundingClientRect();
     const ndcx = (e.clientX - r.left) / r.width * 2 - 1, ndcy = -((e.clientY - r.top) / r.height * 2 - 1);
     const sx = (ndcx - cam3d.ox) / cam3d.sx, sy = (ndcy - cam3d.oy) / cam3d.sy;   // screen units
     const a = sx / C.IX, b = sy / C.IY;                                           // wz = 0 plane
     const lcx = Math.floor(((a + b) / 2) / C.SUB), lcy = Math.floor(((b - a) / 2) / C.SUB);
-    if (lcx < 0 || lcx >= C.GW || lcy < 0 || lcy >= C.GH) return;
-    const cam = CAM(); const wcx = cam.sx * C.GW + lcx, wcy = cam.sy * C.GH + lcy;
+    if (lcx < -C.GW || lcx >= 2 * C.GW || lcy < -C.GH || lcy >= 2 * C.GH) return null;
+    const cam = CAM();
+    return { wcx: ((cam.sx * C.GW + lcx) % C.BW + C.BW) % C.BW, wcy: ((cam.sy * C.GH + lcy) % C.BH + C.BH) % C.BH };
+  }
+  // click: a tank cell -> cycle its state; else set the auto-path tank's destination.
+  function clickCell(e) {
+    const c = cellAt(e); if (!c) return;
     const xy = view.xy();
     for (let t = 0; t < C.NT; t++)
-      if ((xy[2 * t] >> 8) === wcx && (xy[2 * t + 1] >> 8) === wcy) { wasm.cycle_tank(t); manualView = false; return; }
+      if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) { wasm.cycle_tank(t); manualView = false; return; }
     const sel = wasm.selected();
-    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) { wasm.set_dest(sel, wcx, wcy); manualView = false; }
+    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) { wasm.set_dest(sel, c.wcx, c.wcy); manualView = false; }
   }
   canvas.addEventListener("click", clickCell);
+
+  // hover highlight: track the cursor's world cell (render-only), poking the wasm only
+  // when it changes so the rebuild is occasional, not per-mouse-event.
+  let hoverKey = -1;
+  function hoverAt(e) {
+    const c = cellAt(e), key = c ? c.wcy * C.BW + c.wcx : -1;
+    if (key === hoverKey) return; hoverKey = key;
+    if (c) wasm.set_hover(c.wcx, c.wcy); else wasm.set_hover(C.BW, C.BH);   // out-of-range clears
+  }
+  canvas.addEventListener("mousemove", hoverAt);
+  canvas.addEventListener("mouseleave", () => { hoverKey = -1; wasm.set_hover(C.BW, C.BH); });
 
   document.getElementById("camlabel").addEventListener("click", () => setPicker(!pickerOpen));
   const arrowStep = (dx, dy) => { const c = CAM(); gotoScreen((c.sx + dx + C.SX) % C.SX, (c.sy + dy + C.SY) % C.SY); };

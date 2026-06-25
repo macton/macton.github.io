@@ -5,24 +5,35 @@
  * screen position and never writes the sim. Instances are grouped by kind so the
  * host draws one range per kind (binding the placeholder cube, or a baked mesh).
  *
- * It reads exactly chapter 3's inputs — tank_xy/ang/turret, mite_xy/ang/mode/resp,
- * the wall grid, the nests, the tracer/FX ring — and gains only the third
- * dimension (a height per kind) and the kind grouping. No new sim state. */
+ * The view is the CONNECTED 3x3 neighbourhood around the viewport screen — that
+ * screen plus its eight toroidal neighbours, sitting adjacent across the seam — so
+ * the world reads as one space; cost still scales with visibility (9 of 16 screens,
+ * and only the mites on them), not the whole world or the pool. It also emits the
+ * render-only interaction overlays (hover cell, the selected tank's state ring, its
+ * destination beacon, the routed path), all derived from the sim or the host's one
+ * hover cell — none of it feeds back into the model. */
 #include "render.h"
 #include "iso.h"
 #include "dirtab.h"
 #include "collide.h"
+#include "edge_paths.h"
 
 #define RGBA(r, g, b, a) \
   ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24))
 
 static const uint32_t COL_FLOOR = RGBA(44, 48, 58, 255);
 static const uint32_t COL_WALL  = RGBA(96, 102, 120, 255);
-/* per-tank identity colours: hull/turret, and the darker barrel */
+/* per-tank identity colours: hull/turret, the darker barrel, and the lighter path */
 static const uint32_t COL_BODY[N_TANKS] = {
   RGBA(242, 158, 41, 255), RGBA(77, 179, 230, 255), RGBA(120, 205, 120, 255), RGBA(196, 140, 235, 255) };
 static const uint32_t COL_BARR[N_TANKS] = {
   RGBA(150, 98, 26, 255), RGBA(48, 110, 142, 255), RGBA(74, 127, 74, 255), RGBA(121, 86, 145, 255) };
+static const uint32_t COL_PATH[N_TANKS] = {   /* a lighter, translucent shade of the body colour */
+  RGBA(255, 205, 120, 205), RGBA(150, 215, 250, 205), RGBA(180, 240, 180, 205), RGBA(225, 190, 250, 205) };
+/* the selected tank's state ring (UNSELECTED draws none), and the cursor highlight */
+static const uint32_t COL_AUTOPATH = RGBA(120, 235, 140, 255);
+static const uint32_t COL_MANUAL   = RGBA(245, 225,  90, 255);
+static const uint32_t COL_HOVER    = RGBA(255, 255, 255, 140);   /* translucent cursor cell */
 
 /* a mite's tint shows its CURRENT role (re-derived every tick, never stale):
  * idle teal (wander) -> hunting red (hot, fading cold as the sighting ages) ->
@@ -30,8 +41,7 @@ static const uint32_t COL_BARR[N_TANKS] = {
 static const uint32_t COL_MITE_IDLE      = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT  = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD = RGBA(150,  64,  74, 255);
-/* the nests (one per screen but the tank start), a hue wheel so adjacent screens
- * read as different colours (matches NESTC in app.js) */
+/* the nests (one per screen but the tank start), a hue wheel (matches NESTC in app.js) */
 static const uint32_t COL_NEST[NEST_COUNT] = {
   RGBA(230, 146, 110, 255), RGBA(230, 194, 110, 255), RGBA(218, 230, 110, 255), RGBA(170, 230, 110, 255),
   RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
@@ -43,7 +53,8 @@ static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 235);   /* thin brigh
 
 /* per-kind heights + footprints, in subcells (render-only — z lives nowhere in the
  * sim). A floor is a thin slab on the ground; a wall is a full-height cube; tanks
- * and mites sit on the floor; a nest is a tall pylon. */
+ * and mites sit on the floor; a nest is a tall pylon; the overlays sit just above
+ * the floor (a hair, to avoid z-fighting) or rise as a beacon. */
 #define FLOOR_H    (SUB / 8)        /* 32: a thin slab */
 #define WALL_H     SUB              /* 256: a full-height cube */
 #define MITE_H     (SUB / 3)        /* ~85 */
@@ -60,6 +71,16 @@ static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 235);   /* thin brigh
 #define HULL_HY    67
 #define TURRET_HALF 42
 #define BARREL_HW  16               /* barrel half-width */
+/* interaction overlays */
+#define TILE_LIFT  6                /* lift overlay tiles above the floor (no z-fight) */
+#define RING_H     (SUB / 7)        /* the selected tank's state ring (a low bright base) */
+#define RING_HALF  130              /* clearly larger than the hull footprint */
+#define MARK_HALF  34               /* the state spike rising above the tank (diamond section) */
+#define MARK_H     (SUB + SUB / 5)  /* ~300: tall enough to spot above the swarm */
+#define DEST_H     (2 * SUB)        /* a tall destination beacon */
+#define DEST_HALF  26
+#define PATH_HALF  (SUB / 2 - 22)   /* a routed-path tile, inset from the cell */
+#define HOVER_HALF (SUB / 2 - 6)    /* the cursor-cell highlight, near cell-sized */
 
 static uint32_t burst_colour(int age) {     /* bright flash -> fully transparent over its life */
   int n = FX_DURATION - 1; if (n < 1) n = 1; if (age > n) age = n;
@@ -99,13 +120,17 @@ static int local_of(uint32_t screen, int ox, int oy, int px, int py, int* lx, in
   *lx = ox + px - sox; *ly = oy + py - soy;
   return 1;
 }
+/* a world cell's centre on `screen` (for cell-keyed overlays) */
+static int cell_local(uint32_t screen, int ox, int oy, uint32_t cell, int* lx, int* ly) {
+  return local_of(screen, ox, oy, wc_x(cell) * SUB + SUB / 2, wc_y(cell) * SUB + SUB / 2, lx, ly);
+}
 
 /* ---- per-kind emitters: each appends its kind's instances for one screen ----- */
 
 static uint32_t emit_terrain(const World* w, Inst* out, uint32_t k, int want_wall,
                              uint32_t screen, int ox, int oy) {
-  for (int lcy = -1; lcy <= GRID_H; lcy++)            /* a one-cell margin so far-edge */
-    for (int lcx = -1; lcx <= GRID_W; lcx++) {        /* walls don't pop in late */
+  for (int lcy = 0; lcy < GRID_H; lcy++)              /* no margin: the neighbour screens */
+    for (int lcx = 0; lcx < GRID_W; lcx++) {          /* already fill what a margin would */
       int wall = screen_wall(w, screen, lcx, lcy);
       if (wall != want_wall) continue;
       int cx = ox + lcx * SUB + SUB / 2, cy = oy + lcy * SUB + SUB / 2;
@@ -117,10 +142,26 @@ static uint32_t emit_terrain(const World* w, Inst* out, uint32_t k, int want_wal
 
 static uint32_t emit_nests(const World* w, Inst* out, uint32_t k, uint32_t screen, int ox, int oy) {
   for (uint32_t n = 0; n < NEST_COUNT; n++) {
-    int nwx = wc_x(w->nest_cell[n]), nwy = wc_y(w->nest_cell[n]);
     int lx, ly;
-    if (!local_of(screen, ox, oy, nwx * SUB + SUB / 2, nwy * SUB + SUB / 2, &lx, &ly)) continue;
+    if (!cell_local(screen, ox, oy, w->nest_cell[n], &lx, &ly)) continue;
     k = push(out, k, lx, ly, NEST_H / 2, NEST_HALF, NEST_HALF, NEST_H / 2, 16384, 0, COL_NEST[n]);
+  }
+  return k;
+}
+
+/* the selected tank's selection highlight — green for AUTOPATH, yellow for MANUAL.
+ * UNSELECTED tanks draw none, so this IS the mode indicator: a bright base ring under
+ * the tank PLUS a floating diamond marker hovering above it, so the selection (and
+ * which mode) reads clearly from anywhere in the connected view. */
+static uint32_t emit_rings(const World* w, Inst* out, uint32_t k, uint32_t screen, int ox, int oy) {
+  for (uint32_t t = 0; t < N_TANKS; t++) {
+    if (w->tstate[t] == TS_UNSELECTED) continue;
+    int lx, ly;
+    if (!local_of(screen, ox, oy, xy_lo(w->tank_xy[t]), xy_hi(w->tank_xy[t]), &lx, &ly)) continue;
+    uint32_t col = w->tstate[t] == TS_MANUAL ? COL_MANUAL : COL_AUTOPATH;
+    k = push(out, k, lx, ly, FLOOR_H + RING_H / 2, RING_HALF, RING_HALF, RING_H / 2, 16384, 0, col);
+    int mz = FLOOR_H + HULL_H + TURRET_H + MARK_H / 2 + 20;               /* a tall diamond spike above */
+    k = push(out, k, lx, ly, mz, MARK_HALF, MARK_HALF, MARK_H / 2, 11585, 11585, col);
   }
   return k;
 }
@@ -152,10 +193,24 @@ static uint32_t emit_tank_part(const World* w, Inst* out, uint32_t k, int part,
       k = push(out, k, lx, ly, FLOOR_H + HULL_H + TURRET_H / 2, TURRET_HALF, TURRET_HALF, TURRET_H / 2,
                tco, tsi, COL_BODY[t]);
     else { /* K_BARREL: a thin box reaching out from the turret along its aim */
-      int off = HULL_HX;   /* push the barrel's centre out past the hull front */
+      int off = HULL_HX;
       int bx = lx + ((tco * off) >> TRIG_SHIFT), by = ly + ((tsi * off) >> TRIG_SHIFT);
       k = push(out, k, bx, by, FLOOR_H + HULL_H, 56, BARREL_HW, BARREL_H / 2, tco, tsi, COL_BARR[t]);
     }
+  }
+  return k;
+}
+
+/* a destination beacon — a tall bright box at a tank's destination cell, in the
+ * tank's colour, so the place you sent it to is obvious. */
+static uint32_t emit_dest(const World* w, Inst* out, uint32_t k, uint32_t screen, int ox, int oy) {
+  for (uint32_t t = 0; t < N_TANKS; t++) {
+    if (!w->phas[t]) continue;
+    uint32_t cell = wc_pack((int32_t)(w->pdest_screen[t] % SCREENS_X) * GRID_W + (w->pdest_cell[t] % GRID_W),
+                            (int32_t)(w->pdest_screen[t] / SCREENS_X) * GRID_H + (w->pdest_cell[t] / GRID_W));
+    int lx, ly;
+    if (!cell_local(screen, ox, oy, cell, &lx, &ly)) continue;
+    k = push(out, k, lx, ly, FLOOR_H + DEST_H / 2, DEST_HALF, DEST_HALF, DEST_H / 2, 16384, 0, COL_BODY[t]);
   }
   return k;
 }
@@ -191,9 +246,43 @@ static uint32_t emit_fx(const World* w, Inst* out, uint32_t k, uint32_t screen, 
   return k;
 }
 
+/* the routed paths: a translucent tile on each cell a routing tank will cross,
+ * read straight out of the same path tables the tank follows (path_trace). Collected
+ * once (capped at PATH_MAX) so the per-screen emit just places the visible ones. */
+static uint16_t g_trace[BIG_W * BIG_H];
+static uint16_t g_path_cell[PATH_MAX];
+static uint32_t g_path_col[PATH_MAX];
+static uint32_t g_path_n;
+static void collect_paths(const World* w) {
+  g_path_n = 0;
+  for (uint32_t t = 0; t < N_TANKS; t++) {
+    if (!w->phas[t] || w->pstatus[t] != PS_ROUTING) continue;
+    uint32_t n = path_trace(w, t, g_trace, BIG_W * BIG_H);
+    for (uint32_t i = 0; i < n && g_path_n < PATH_MAX; i++) {
+      g_path_cell[g_path_n] = g_trace[i]; g_path_col[g_path_n] = COL_PATH[t]; g_path_n++;
+    }
+  }
+}
+static uint32_t emit_path(Inst* out, uint32_t k, uint32_t screen, int ox, int oy) {
+  for (uint32_t i = 0; i < g_path_n; i++) {
+    int lx, ly;
+    if (!cell_local(screen, ox, oy, g_path_cell[i], &lx, &ly)) continue;
+    k = push(out, k, lx, ly, FLOOR_H + TILE_LIFT, PATH_HALF, PATH_HALF, 3, 16384, 0, g_path_col[i]);
+  }
+  return k;
+}
+
+/* the cursor-cell highlight: one bright translucent tile on the hovered world cell */
+static uint32_t emit_hover(Inst* out, uint32_t k, uint32_t hover_cell, uint32_t screen, int ox, int oy) {
+  if (hover_cell == REC_EMPTY) return k;
+  int lx, ly;
+  if (!cell_local(screen, ox, oy, hover_cell, &lx, &ly)) return k;
+  return push(out, k, lx, ly, FLOOR_H + TILE_LIFT + 1, HOVER_HALF, HOVER_HALF, 4, 16384, 0, COL_HOVER);
+}
+
 /* painter-sort the translucent range back-to-front (ascending iso_depth, so the
- * farthest blends first). Few FX are ever visible, so a simple insertion sort over
- * the small range is cheaper than any structure. */
+ * farthest blends first). Few translucent instances are visible, so a simple
+ * insertion sort over the small range is cheaper than any structure. */
 static void sort_translucent(Inst* a, uint32_t n) {
   for (uint32_t i = 1; i < n; i++) {
     Inst v = a[i]; int32_t vk = iso_depth(v.wx, v.wy, v.wz);
@@ -204,27 +293,36 @@ static void sort_translucent(Inst* a, uint32_t n) {
 }
 
 uint32_t build_view(const World* w, Inst* out, DrawList* dl,
-                    uint32_t cam_sx, uint32_t cam_sy,
-                    int sliding, uint32_t to_sx, uint32_t to_sy, int dx, int dy) {
-  struct { uint32_t screen; int ox, oy; } S[2];
-  int ns = 1;
-  S[0].screen = cam_sy * SCREENS_X + cam_sx; S[0].ox = 0; S[0].oy = 0;
-  if (sliding) {
-    S[1].screen = to_sy * SCREENS_X + to_sx;
-    S[1].ox = dx * GRID_W * SUB; S[1].oy = dy * GRID_H * SUB; ns = 2;
-  }
+                    uint32_t cam_sx, uint32_t cam_sy, uint32_t hover_cell) {
+  /* the connected 3x3 neighbourhood, anchored at the camera screen (local origin);
+   * each neighbour sits one screen-width away, adjacent across the toroidal seam. */
+  struct { uint32_t screen; int ox, oy; } S[VIS_SCREENS];
+  int ns = 0;
+  for (int dy = -1; dy <= 1; dy++)
+    for (int dx = -1; dx <= 1; dx++) {
+      uint32_t sx = (uint32_t)wrap_wcx((int32_t)cam_sx + dx + SCREENS_X) % SCREENS_X;
+      uint32_t sy = (uint32_t)wrap_wcy((int32_t)cam_sy + dy + SCREENS_Y) % SCREENS_Y;
+      S[ns].screen = sy * SCREENS_X + sx;
+      S[ns].ox = dx * GRID_W * SUB; S[ns].oy = dy * GRID_H * SUB; ns++;
+    }
+
+  collect_paths(w);
 
   uint32_t k = 0, base;
   base = k; for (int s = 0; s < ns; s++) k = emit_terrain(w, out, k, 0, S[s].screen, S[s].ox, S[s].oy); dl->opaque[K_FLOOR]  = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_terrain(w, out, k, 1, S[s].screen, S[s].ox, S[s].oy); dl->opaque[K_WALL]   = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_nests(w, out, k, S[s].screen, S[s].ox, S[s].oy);       dl->opaque[K_NEST]   = k - base;
+  base = k; for (int s = 0; s < ns; s++) k = emit_rings(w, out, k, S[s].screen, S[s].ox, S[s].oy);       dl->opaque[K_RING]   = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_mites(w, out, k, S[s].screen, S[s].ox, S[s].oy);       dl->opaque[K_MITE]   = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_tank_part(w, out, k, K_HULL,   S[s].screen, S[s].ox, S[s].oy); dl->opaque[K_HULL]   = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_tank_part(w, out, k, K_TURRET, S[s].screen, S[s].ox, S[s].oy); dl->opaque[K_TURRET] = k - base;
   base = k; for (int s = 0; s < ns; s++) k = emit_tank_part(w, out, k, K_BARREL, S[s].screen, S[s].ox, S[s].oy); dl->opaque[K_BARREL] = k - base;
+  base = k; for (int s = 0; s < ns; s++) k = emit_dest(w, out, k, S[s].screen, S[s].ox, S[s].oy);        dl->opaque[K_DEST]   = k - base;
 
   uint32_t opaque_end = k;
   for (int s = 0; s < ns; s++) k = emit_fx(w, out, k, S[s].screen, S[s].ox, S[s].oy);
+  for (int s = 0; s < ns; s++) k = emit_path(out, k, S[s].screen, S[s].ox, S[s].oy);
+  for (int s = 0; s < ns; s++) k = emit_hover(out, k, hover_cell, S[s].screen, S[s].ox, S[s].oy);
   dl->translucent = k - opaque_end;
   sort_translucent(out + opaque_end, dl->translucent);
   return k;

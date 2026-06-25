@@ -154,10 +154,12 @@
   </div>
   <div id="status">loading…</div>
   <div id="help">
-    The main view is <b>isometric 3-D</b>; the minimap below stays <b>top-down</b> — the same data
-    drawn two ways. The <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
-    <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (tap a cell to send it there) →
-    <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (drive it: W/S/A/D or the pad) →
+    The main view is <b>isometric 3-D</b> and shows the focused screen <b>connected to its
+    neighbours</b> (zoom out to see more); the minimap below stays <b>top-down</b> — the same
+    data drawn two ways. <b>Hover</b> a cell to highlight it. The <b>mites</b> run themselves.
+    <b>Tap a tank</b> to cycle it:
+    <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
+    <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (a yellow spike; drive it: W/S/A/D or the pad) →
     unselected. Drive a tank through the swarm and watch a sighting spread — 80%
     <b>hunt</b> it while 20% carry it <b>home</b> to a nest:
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
@@ -209,12 +211,20 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     which is exactly what isometric means. Crucially, <a href="src/render.c">render.c</a> does
     <strong>not</strong> bake screen positions — it emits world placements, and the shader projects
     them. So the iso basis, the zoom, and the follow offset all live in the <strong>view
-    uniform</strong>: the camera is a uniform, not a rebuild. Panning, following, the slide, and
-    the screen picker stay <strong>presentation-only</strong> and never change a placement — a
-    fact the native test pins (<code>iso_project</code> is linear, so a pan is a constant offset).
-    The minimap below is the same idea taken literally: the <strong>same sim data drawn two ways
-    at once</strong> — isometric above, top-down here. The top-down map's job is legibility, so it
-    is <em>not</em> iso-skewed.</p>
+    uniform</strong>: the camera is a uniform, not a rebuild. Panning, following, and the screen
+    picker stay <strong>presentation-only</strong> and never change a placement — a fact the native
+    test pins (<code>iso_project</code> is linear, so a pan is a constant offset). The view shows
+    the focused screen <strong>connected to its eight neighbours</strong> (a 3×3 of the toroidal
+    world, adjacent across the seam) so it reads as one space — yet still emits only those nine
+    screens and the units on them, not the 4800-cell world. The minimap below is the same idea
+    taken literally: the <strong>same sim data drawn two ways at once</strong> — isometric above,
+    top-down here. The top-down map's job is legibility, so it is <em>not</em> iso-skewed.</p>
+    <p class="note">Clicking is unchanged from chapter 2 — tap a tank to cycle it, tap a cell to
+    send the auto-path tank there — but the iso view makes it legible with <strong>render-only</strong>
+    overlays: a <strong>hover</strong> highlight on the cell under the cursor, the selected tank's
+    <strong>mode</strong> (a ring + a tall spike, green for auto-path, yellow for manual), a
+    <strong>destination</strong> beacon, and the <strong>routed path</strong> drawn cell by cell
+    from the same tables the tank follows. None of it touches the simulation.</p>
     <div class="fig">
       <p class="cap">the 4×4 world, TOP-DOWN · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is the iso viewport · click a screen to view it</p>
       <div id="w-minimap"></div>
@@ -257,8 +267,8 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     The frequency-of-change spectrum is the whole story here — the <strong>assets load once</strong>,
     the world <strong>geometry rebuilds on a wall edit</strong> (rare), the <strong>projection runs
     every frame</strong> (constant), and the renderer <strong>scales with what is visible</strong>,
-    not with the 4800-cell world or the 1000-strong pool (only the viewport screen's cells, plus a
-    one-cell margin, and the units on them, are ever emitted — the test pins it).</p>
+    not with the 4800-cell world or the 1000-strong pool (only the connected 3×3 neighbourhood — nine
+    of the sixteen screens — and the units on them are ever emitted: the test pins it).</p>
 
     <h2>The simulation does not know it is drawn</h2>
     <p>Everything below this line is the <strong>model the view reads</strong> — and it is frozen,

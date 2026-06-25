@@ -20,13 +20,15 @@ cd "$(dirname "$0")"
 #   combat state (per-tank turret/cooldown/target + mite_resp[1000]) ~= 2 KB
 #   trace scratch, World scalars, 128 KB stack
 # CHAPTER 4 changes only the RENDER half's memory, and the sim is untouched:
-#   instance buffer  20-byte 3-D Inst * INST_MAX (~2050)   ~= 41 KB  (was 43 KB of
-#                                          16-byte quads; the 3-D box is +4 bytes
-#                                          but one block/cell replaces wall+path strips)
+#   instance buffer  20-byte 3-D Inst * INST_MAX (~4400)   ~= 88 KB  (the view is the
+#                                          connected 3x3 neighbourhood — 9 screens of
+#                                          terrain + their mites/tanks/FX + the
+#                                          interaction overlays; one block per cell)
 #   baked meshes (src/mesh_data.c, 162 verts * 8 bytes)    ~= 1.3 KB (loaded once)
-# The DEPTH buffer is a viewport-sized GPU texture, NOT wasm linear memory. The high-
-# water mark is unchanged from chapter 3 (~1.04 MiB), so the linear memory stays 2 MiB
-# (32 pages, ~1.8x headroom). Still all static, integer, allocation-free.
+# The DEPTH buffer is a viewport-sized GPU texture, NOT wasm linear memory. The sim's
+# high-water mark is unchanged from chapter 3 (~1.04 MiB), and the bigger instance
+# buffer is still tiny against it, so the linear memory stays 2 MiB (32 pages). Still
+# all static, integer, allocation-free.
 clang \
   --target=wasm32 \
   -nostdlib \

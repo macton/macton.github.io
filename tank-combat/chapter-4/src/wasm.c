@@ -30,17 +30,15 @@ static Inst     g_inst[INST_MAX];
 static DrawList g_dl;
 static uint32_t g_inst_count;
 static uint8_t  g_cam_sx, g_cam_sy;
-static uint8_t  g_slide_active, g_to_sx, g_to_sy;
-static int8_t   g_dx, g_dy;
+static uint16_t g_hover = REC_EMPTY;    /* the world cell under the cursor (render-only), or none */
 
 static void rebuild(void) {
-  g_inst_count = build_view(&g_world, g_inst, &g_dl, g_cam_sx, g_cam_sy,
-                            g_slide_active, g_to_sx, g_to_sy, g_dx, g_dy);
+  g_inst_count = build_view(&g_world, g_inst, &g_dl, g_cam_sx, g_cam_sy, g_hover);
 }
 
 EXPORT(init) void init(void) {
   sim_init(&g_world);
-  g_cam_sx = 0; g_cam_sy = 0; g_slide_active = 0;
+  g_cam_sx = 0; g_cam_sy = 0; g_hover = REC_EMPTY;
   rebuild();
 }
 EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_count; }
@@ -50,16 +48,18 @@ EXPORT(cycle_tank)  void cycle_tank(uint32_t tank) { sim_cycle_tank(&g_world, ta
 EXPORT(set_dest)    void set_dest(uint32_t tank, uint32_t wcx, uint32_t wcy) { sim_set_dest(&g_world, tank, wcx, wcy); rebuild(); }
 EXPORT(toggle_wall) void toggle_wall(uint32_t wcx, uint32_t wcy) { sim_toggle_wall(&g_world, wcx, wcy); rebuild(); }
 
-/* camera + slide (the host computes follow / picker; the wasm just builds it) */
+/* camera: the host computes the follow / picker; the wasm builds the 3x3 view it
+ * names. (No slide state: the connected neighbourhood already holds the adjacent
+ * screens, so the host just pans the camera uniform and re-anchors here.) */
 EXPORT(set_camera) void set_camera(uint32_t sx, uint32_t sy) {
   g_cam_sx = (uint8_t)(sx % SCREENS_X); g_cam_sy = (uint8_t)(sy % SCREENS_Y);
-  g_slide_active = 0; rebuild();
+  rebuild();
 }
-EXPORT(set_slide) void set_slide(uint32_t to_sx, uint32_t to_sy, int32_t dx, int32_t dy) {
-  g_to_sx = (uint8_t)(to_sx % SCREENS_X); g_to_sy = (uint8_t)(to_sy % SCREENS_Y);
-  g_dx = (int8_t)dx; g_dy = (int8_t)dy; g_slide_active = 1; rebuild();
+/* the cursor-cell highlight (render-only). wcx>=BIG_W clears it (REC_EMPTY). */
+EXPORT(set_hover) void set_hover(uint32_t wcx, uint32_t wcy) {
+  g_hover = (wcx < BIG_W && wcy < BIG_H) ? wc_pack((int32_t)wcx, (int32_t)wcy) : REC_EMPTY;
+  rebuild();
 }
-EXPORT(clear_slide) void clear_slide(void) { g_slide_active = 0; rebuild(); }
 
 /* ---- the swarm: re-seed / nest mutators, live pointers, scalars, tunables -- */
 EXPORT(set_seed) void set_seed(uint32_t seed) { sim_set_seed(&g_world, seed); rebuild(); }

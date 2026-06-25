@@ -900,28 +900,47 @@ static void t_camera_is_a_uniform(void) {
 
   sim_init(&W);
   DrawList da, db;
-  uint32_t na = build_view(&W, g_a, &da, 2, 1, 0, 0, 0, 0, 0);
-  uint32_t nb = build_view(&W, g_b, &db, 2, 1, 0, 0, 0, 0, 0);
+  uint32_t na = build_view(&W, g_a, &da, 2, 1, REC_EMPTY);
+  uint32_t nb = build_view(&W, g_b, &db, 2, 1, REC_EMPTY);
   int same = (na == nb);
   for (uint32_t i = 0; i < na && same; i++) if (memcmp(&g_a[i], &g_b[i], sizeof(Inst))) same = 0;
   check(same, "the same camera rebuilds byte-identical placements (render.c bakes no screen position)");
 }
 
 static void t_render_visibility(void) {
-  printf("render scales with what is VISIBLE, not the world or the pool:\n");
+  printf("render scales with what is VISIBLE (the 3x3 neighbourhood), not the world or the pool:\n");
   sim_init(&W);
   DrawList dl;
-  uint32_t n = build_view(&W, g_a, &dl, 0, 0, 0, 0, 0, 0, 0);   /* viewport on screen (0,0), no slide */
+  uint32_t n = build_view(&W, g_a, &dl, 1, 1, REC_EMPTY);     /* viewport on screen (1,1) */
   uint32_t terrain = dl.opaque[K_FLOOR] + dl.opaque[K_WALL];
-  check(terrain == (uint32_t)VIS_CELLS, "terrain is exactly one block per visible cell (+ a one-cell margin)");
-  check(terrain < N_WORLD_CELLS, "terrain instances are far fewer than the 4800-cell world");
-  check(dl.opaque[K_MITE] < N_MITES, "only the mites the camera shows are emitted (<< the 1000-strong pool)");
-  check(dl.opaque[K_MITE] > 0, "the viewport screen does show some of the swarm");
+  check(terrain == (uint32_t)(VIS_SCREENS * N_CELLS), "terrain is one block per cell of the connected 3x3 (9 screens)");
+  check(terrain < N_WORLD_CELLS, "terrain instances are fewer than the 4800-cell world (9 of 16 screens)");
+  check(dl.opaque[K_MITE] < N_MITES, "only the mites on the visible screens are emitted (<< the 1000-strong pool)");
+  check(dl.opaque[K_MITE] > 0, "the visible neighbourhood does show some of the swarm");
   check(n <= INST_MAX, "the total instance count stays within the capacity bound");
-  /* a SLIDE shows two screens, so the count roughly doubles but stays bounded */
-  uint32_t n2 = build_view(&W, g_b, &dl, 0, 0, 1, 1, 0, 1, 0);
-  check(dl.opaque[K_FLOOR] + dl.opaque[K_WALL] == (uint32_t)(2 * VIS_CELLS), "a slide emits two screens' terrain, still per-visible-cell");
-  check(n2 <= INST_MAX, "the two-screen slide still fits the capacity bound");
+}
+
+static void t_render_overlays(void) {
+  printf("interaction overlays are render-only (derived from the sim + one host hover cell):\n");
+  sim_init(&W);
+  DrawList d0; build_view(&W, g_a, &d0, 0, 0, REC_EMPTY);
+  check(d0.opaque[K_RING] == 0, "no tank selected => no selection ring");
+  check(d0.opaque[K_DEST] == 0, "no destination => no beacon");
+  uint32_t base = d0.translucent;                              /* no FX/path/hover at frame 0 */
+
+  DrawList dh; build_view(&W, g_a, &dh, 0, 0, wc_pack(5, 5));  /* a hover cell on the viewport screen */
+  check(dh.translucent == base + 1, "a hover cell on a visible screen emits exactly one highlight tile");
+  DrawList dho; build_view(&W, g_a, &dho, 0, 0, wc_pack(40, 30)); /* screen (2,2): outside the 3x3 of (0,0) */
+  check(dho.translucent == base, "a hover cell outside the visible neighbourhood emits no tile");
+
+  sim_cycle_tank(&W, 0);                 /* tank0 -> AUTOPATH (selected) */
+  sim_set_dest(&W, 0, 12, 9);            /* a reachable cell on screen (0,0) */
+  for (int i = 0; i < 3; i++) sim_tick(&W);   /* let pstatus become ROUTING so the path traces */
+  DrawList dr; uint32_t n = build_view(&W, g_a, &dr, 0, 0, REC_EMPTY);
+  check(dr.opaque[K_RING] == 2, "the selected tank shows its highlight (a base ring + a floating marker)");
+  check(dr.opaque[K_DEST] == 1, "its destination shows a beacon");
+  check(dr.translucent > 0, "the routed path is drawn (path tiles in the translucent pass)");
+  check(n <= INST_MAX, "with overlays the instance count still fits the cap");
 }
 
 int main(void) {
@@ -947,6 +966,7 @@ int main(void) {
   t_depth_monotonic();
   t_camera_is_a_uniform();
   t_render_visibility();
+  t_render_overlays();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
 }

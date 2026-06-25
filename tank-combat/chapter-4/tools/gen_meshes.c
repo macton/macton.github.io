@@ -92,7 +92,7 @@ int main(void) {
   /* the kind->mesh binding for the asset pass, keyed by the real enum so it can't
    * drift from render.h. The placeholder pass binds M_CUBE for every kind. */
   printf("const uint8_t MESH_FOR_KIND[K_OPAQUE_COUNT] = {\n");
-  printf("  [K_FLOOR]=M_CUBE, [K_WALL]=M_CUBE, [K_NEST]=M_PYLON, [K_MITE]=M_PYRAMID,\n");
-  printf("  [K_HULL]=M_HULL, [K_TURRET]=M_TURRET, [K_BARREL]=M_CUBE };\n");
+  printf("  [K_FLOOR]=M_CUBE, [K_WALL]=M_CUBE, [K_NEST]=M_PYLON, [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID,\n");
+  printf("  [K_HULL]=M_HULL, [K_TURRET]=M_TURRET, [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");
   return 0;
 }

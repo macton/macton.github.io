@@ -24,9 +24,17 @@
  * low-poly mesh in the asset pass). Same instances, different mesh: late-bound art.
  *
  * The whole view is rebuilt every frame (the follow camera, the swarm, and the FX
- * all move), but only for what the camera SHOWS — the viewport screen's cells plus
- * a one-cell margin, and the tanks/mites/nests/FX on those cells — so the cost
- * scales with VISIBILITY, not with the 4800-cell world or the 1000-strong pool. */
+ * all move), but only for what the camera SHOWS — the viewport screen AND its eight
+ * toroidal neighbours (a connected 3x3 neighbourhood), and the tanks/mites/nests/FX
+ * on those screens — so the cost scales with VISIBILITY (9 of the 16 screens), not
+ * with the 4800-cell world or the 1000-strong pool. The neighbours sit adjacent
+ * across the toroidal seam so the world reads as one connected space; the host's
+ * follow camera pans within the neighbourhood and re-anchors as it crosses a screen.
+ *
+ * It also emits render-only INTERACTION overlays — a hover-cell highlight, the
+ * selected tank's state ring, its destination beacon, and the routed path tiles —
+ * all derived from the sim (or, for the cursor, from one host-set hover cell); none
+ * of it feeds back into the model. */
 #ifndef TANK_RENDER_H
 #define TANK_RENDER_H
 
@@ -36,12 +44,12 @@ typedef struct { int16_t wx, wy, wz, hz, hx, hy, co, si; uint32_t rgba; } Inst;
 
 /* mesh kinds — the slot a draw call binds its mesh by. The opaque kinds emit
  * first, in this order, each as a contiguous instance range (z-buffered, flat
- * face-shaded). The translucent FX kinds emit last, into ONE range drawn after the
+ * face-shaded). The translucent kinds emit last, into ONE range drawn after the
  * opaque pass (depth-test on, depth-write off, alpha-blended, painter-sorted). */
 enum {
-  K_FLOOR = 0, K_WALL, K_NEST, K_MITE, K_HULL, K_TURRET, K_BARREL, /* opaque */
-  K_OPAQUE_COUNT,            /* opaque kinds are [0, K_OPAQUE_COUNT) */
-  K_LASER = K_OPAQUE_COUNT, K_BURST,   /* translucent (both drawn as cubes) */
+  K_FLOOR = 0, K_WALL, K_NEST, K_RING, K_MITE, K_HULL, K_TURRET, K_BARREL, K_DEST, /* opaque */
+  K_OPAQUE_COUNT,                    /* opaque kinds are [0, K_OPAQUE_COUNT) */
+  K_LASER = K_OPAQUE_COUNT, K_BURST, K_PATH, K_HOVER,   /* translucent (all drawn as cubes) */
   K_COUNT
 };
 
@@ -53,22 +61,25 @@ typedef struct {
   uint32_t translucent;
 } DrawList;
 
-/* Capacity per built view: up to two screens (viewport + the one sliding in) of
- * terrain (one block per visible cell, with a one-cell margin) + nests, plus the
- * mites/tanks/FX the camera shows. A mite/burst is on exactly one screen, so at
- * most N_MITES + N_FX of those are ever visible across the (<=2) built screens, and
- * each tank contributes a hull + turret + barrel (+ a 2-box laser). Render scales
- * with what's shown, capped by the pools. */
-#define VIS_CELLS ((GRID_W + 2) * (GRID_H + 2))   /* a screen's cells + a one-cell margin */
-#define INST_MAX  (2 * (VIS_CELLS + NEST_COUNT) + N_MITES + N_TANKS * 3 + N_FX + N_TANKS * 2)
+/* Capacity per built view: the 3x3 neighbourhood's terrain (one block per cell) +
+ * its nests, plus the mites/tanks/FX on those screens and the interaction overlays.
+ * A mite/burst is on exactly one screen, so at most N_MITES + N_FX of those are
+ * visible across the <=9 screens; each tank contributes a hull+turret+barrel (+ a
+ * 2-box laser, a state ring, a destination beacon); the path is capped. Render
+ * scales with what's shown, capped by the pools. */
+#define VIS_SCREENS 9                    /* the camera screen + its 8 toroidal neighbours */
+#define PATH_MAX    400                  /* path tiles across all routing tanks (capped) */
+#define INST_MAX (VIS_SCREENS * N_CELLS + N_MITES + NEST_COUNT + N_TANKS * 3 \
+                  + N_TANKS /*rings*/ + N_TANKS /*dest beacons*/ \
+                  + N_FX + N_TANKS * 2 /*laser*/ + PATH_MAX + 1 /*hover*/)
 
-/* Build the whole view into out[0..) (grouped by kind) and fill `dl`. Emits the
- * viewport screen (cam_sx,cam_sy) in a camera-local subcell frame; if `sliding`,
- * also the `to` screen offset by (dx,dy) screen-widths (dx,dy in {-1,0,1}), so the
- * two screens sit adjacent across the toroidal seam and the host slides the camera
- * uniform between them. Returns the total instance count. */
+/* Build the whole view into out[0..) (grouped by kind) and fill `dl`. Emits the 3x3
+ * neighbourhood around the viewport screen (cam_sx,cam_sy) in a camera-local subcell
+ * frame anchored at that screen, the neighbours offset by one screen-width each
+ * (adjacent across the toroidal seam); the host pans the camera uniform within it.
+ * `hover_cell` is the world cell under the cursor (REC_EMPTY for none). Returns the
+ * total instance count. */
 uint32_t build_view(const World* w, Inst* out, DrawList* dl,
-                    uint32_t cam_sx, uint32_t cam_sy,
-                    int sliding, uint32_t to_sx, uint32_t to_sy, int dx, int dy);
+                    uint32_t cam_sx, uint32_t cam_sy, uint32_t hover_cell);
 
 #endif
