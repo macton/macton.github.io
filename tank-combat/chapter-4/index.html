@@ -27,8 +27,24 @@
     border-radius: 6px; padding: 2px 7px;
   }
 
+  /* camera toolbar above the view */
+  #toolbar { max-width: 720px; margin: 12px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+             padding: 6px 9px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+  #toolbar button { flex: 0 0 auto; padding: 4px 9px; background: #2b2f3a; color: var(--fg); border: 1px solid #3a3f4c;
+                    border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; line-height: 1.2; }
+  #toolbar button:hover { background: #353a47; }
+  #toolbar .tbsep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+  #toolbar .tblabel { color: var(--dim); }
+  #toolbar #camlabel { color: var(--acc); }
+  .followbtn { font-weight: 700; min-width: 30px; text-align: center; }
+  .followbtn.t0 { border-color: #f29e29; color: #f5c277; }
+  .followbtn.t1 { border-color: #4db3e6; color: #8fd2f2; }
+  .followbtn.t2 { border-color: #78cd78; color: #a6e0a6; }
+  .followbtn.t3 { border-color: #c48ceb; color: #d8b6f3; }
+  #toolbar .followbtn.active, #toolbar #freecam.active { background: var(--acc); color: #161616; border-color: var(--acc); }
+
   /* the game */
-  #map { position: relative; width: 100%; max-width: 720px; margin: 12px auto 0;
+  #map { position: relative; width: 100%; max-width: 720px; margin: 8px auto 0;
          aspect-ratio: 20 / 15; background: #1a1c22; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   #gpu { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none;
          user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
@@ -54,9 +70,7 @@
   .scrollbtn.sd { bottom: 8px; left: 50%; transform: translateX(-50%); }
   .scrollbtn.sl { left: 8px; top: 50%; transform: translateY(-50%); }
   .scrollbtn.sr { right: 8px; top: 50%; transform: translateY(-50%); }
-  #camlabel { position: absolute; top: 8px; right: 8px; z-index: 5; font: inherit; font-size: 12px; color: var(--acc);
-              background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
-  #camlabel:hover { border-color: var(--acc); }
+  /* #camlabel (the screen badge) now lives in #toolbar, styled by the toolbar rules */
   /* screen picker overlay (a 4x4 map of the world) */
   #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
             gap: 6px; padding: 44px; background: #0c0e12ee; align-content: center; }
@@ -139,9 +153,18 @@
     picture does. The view is a projection you can replace wholesale.</p>
   </header>
 
+  <div id="toolbar">
+    <button id="camlabel" title="pick a screen">screen 0,0 ▾</button>
+    <span class="tbsep"></span>
+    <span class="tblabel">follow</span>
+    <button class="followbtn t0" data-tank="0" title="follow tank 1 (orange)">1</button>
+    <button class="followbtn t1" data-tank="1" title="follow tank 2 (blue)">2</button>
+    <button class="followbtn t2" data-tank="2" title="follow tank 3 (green)">3</button>
+    <button class="followbtn t3" data-tank="3" title="follow tank 4 (purple)">4</button>
+    <button id="freecam" title="free camera — stop following">◎ free</button>
+  </div>
   <div id="map">
     <canvas id="gpu" draggable="false"></canvas>
-    <button id="camlabel">screen 0,0 ▾</button>
     <div id="picker"></div>
     <button class="scrollbtn su" title="up">▲</button>
     <button class="scrollbtn sd" title="down">▼</button>
@@ -160,7 +183,8 @@
     The main view is <b>top-down perspective 3-D</b> and shows the <b>whole 4×4 world</b> as one
     connected map; the minimap below stays <b>flat top-down</b> — the same data drawn two ways. <b>Drag</b> to
     pan, <b>shift- or right-drag</b> (or a <b>two-finger drag</b>) to <b>orbit &amp; tilt</b>, <b>pinch</b> or
-    <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b> sliders above are live. The
+    <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b> sliders above are live;
+    the <b>toolbar</b> follow-cams a tank or returns to <b>free</b> view, and <b>F</b> frames the selected tank. The
     <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (a yellow spike; drive it: W/S/A/D or the pad) →
@@ -342,11 +366,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.25-194205"></script>
+  <script src="version.js?v=2026.06.25-203128"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.25-194205");</script>
+  <script type="module">import("./app.js?v=2026.06.25-203128");</script>
 </body>
 </html>

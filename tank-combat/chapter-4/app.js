@@ -220,7 +220,7 @@ async function main() {
   // north). viewWrite writes the MVP and remembers its inverse so a pixel can be cast
   // back onto the ground. Nothing here touches the simulation.
   let useAssets = false;
-  let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false;
+  let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1;
   let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
   const DEG = Math.PI / 180;
@@ -380,7 +380,12 @@ async function main() {
     const c = cellAt(clientX, clientY); if (!c) return;
     const xy = view.xy();
     for (let t = 0; t < C.NT; t++)
-      if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) { wasm.cycle_tank(t); follow = true; return; }
+      if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) {
+        wasm.cycle_tank(t);
+        if (view.tstate()[t] !== 0) { followTank = t; follow = true; }   // now selected -> follow it
+        else { follow = false; followTank = -1; }                        // cycled to unselected -> free
+        return;
+      }
     const sel = wasm.selected();
     if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) wasm.set_dest(sel, c.wcx, c.wcy);
   }
@@ -391,6 +396,18 @@ async function main() {
   document.querySelector(".scrollbtn.sd").onclick = () => arrowStep(0, 1);
   document.querySelector(".scrollbtn.sl").onclick = () => arrowStep(-1, 0);
   document.querySelector(".scrollbtn.sr").onclick = () => arrowStep(1, 0);
+
+  // toolbar camera buttons: per-tank follow-cam + a free-view button
+  for (const b of document.querySelectorAll(".followbtn"))
+    b.onclick = () => { followTank = +b.dataset.tank; follow = true; };
+  const freeBtn = document.getElementById("freecam");
+  if (freeBtn) freeBtn.onclick = () => { follow = false; followTank = -1; };
+  function updateCamUI() {
+    const onTank = follow && followTank >= 0;
+    for (const b of document.querySelectorAll(".followbtn"))
+      b.classList.toggle("active", onTank && +b.dataset.tank === followTank);
+    if (freeBtn) freeBtn.classList.toggle("active", !onTank);
+  }
 
   // render-only controls (presentation): low-poly art toggle + a camera zoom slider
   const aT = document.getElementById("assetsToggle"); if (aT) aT.onchange = () => { useAssets = aT.checked; };
@@ -408,6 +425,20 @@ async function main() {
   }
   syncViewUI();   // set the pitch slider's fov-dependent max + initial readouts
 
+  // 'f' frames the selected tank in the free camera (centre + a comfortable zoom; stays free)
+  const FRAME_ZOOM = 6;
+  function frameSelected() {
+    const sel = wasm.selected(); if (sel === 255) return;
+    const xy = view.xy();
+    camX = xy[2 * sel]; camY = xy[2 * sel + 1];
+    zoom = Math.max(zoom, FRAME_ZOOM); follow = false; followTank = -1;
+    clampCam(); if (zR) zR.value = zoom.toFixed(2);
+  }
+  addEventListener("keydown", (e) => {
+    if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.code === "KeyF") { frameSelected(); e.preventDefault(); }
+  });
+
   buildTouchPad(document.getElementById("map"));
   const dbg = mountWidgets(wasm, view, C);
   const pickerMap = makeMiniMap(document.getElementById("picker"), gotoScreen, R);
@@ -421,7 +452,7 @@ async function main() {
   const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
   dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; };
   dbg.onReset = () => {
-    wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false;
+    wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; followTank = -1;
     yaw = 0; pitch = PITCH0; fov = FOV0; syncViewUI(); setPicker(false);
   };
 
@@ -439,9 +470,9 @@ async function main() {
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
 
-    // follow the selected tank (until you pan/zoom/pick) — snap on the toroidal wrap
-    if (follow && sel !== 255) {
-      const xy = view.xy(), tx = xy[2 * sel], ty = xy[2 * sel + 1];
+    // follow-cam: track the chosen tank (until you pan/zoom/rotate) — snap on the toroidal wrap
+    if (follow && followTank >= 0) {
+      const xy = view.xy(), tx = xy[2 * followTank], ty = xy[2 * followTank + 1];
       const dxw = tx - camX, dyw = ty - camY;
       camX = Math.abs(dxw) > C.BW * C.SUB / 2 ? tx : camX + dxw * 0.12;
       camY = Math.abs(dyw) > C.BH * C.SUB / 2 ? ty : camY + dyw * 0.12;
@@ -479,6 +510,7 @@ async function main() {
     articleMap.update(camIdx);
     if (pickerOpen) pickerMap.update(camIdx);
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
+    updateCamUI();
     dbg.update({ fps, dt, updMs, instCount: n, cam });
     requestAnimationFrame(frame);
   }

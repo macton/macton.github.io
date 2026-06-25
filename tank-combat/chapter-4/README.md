@@ -29,10 +29,11 @@ Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge). Th
 view is **top-down perspective 3-D**; the minimap stays **flat top-down** — the same data drawn two
 ways at once. The four tanks are still yours: **tap a tank** to cycle it *auto-path*
 (tap a cell to route it there) → *manual* (`W`/`S`/`A`/`D` or the pad) → *unselected*.
-**Render-only** controls sit under the canvas (clearly labelled presentation): a
-**low-poly art** toggle (placeholder cubes ↔ baked meshes) and **zoom / pitch / fov**
-sliders. Drag to pan; **shift-, right-, or two-finger-drag** to **orbit and tilt**;
-pinch or scroll to zoom.
+**Render-only** controls wrap the canvas (clearly labelled presentation): a **low-poly
+art** toggle (placeholder cubes ↔ baked meshes) and **zoom / pitch / fov** sliders below,
+and a **toolbar** above with the screen badge, a **per-tank follow-cam** button, and a
+**free**-view button; **F** frames the selected tank. Drag to pan; **shift-, right-, or
+two-finger-drag** to **orbit and tilt**; pinch or scroll to zoom.
 
 ## The thesis, stated as a test
 
