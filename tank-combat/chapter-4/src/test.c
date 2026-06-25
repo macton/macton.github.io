@@ -6,9 +6,9 @@
  *
  * CHAPTER 4 adds the render half's tests (no GPU needed — render.c is plain C over
  * the World): the chapter's THESIS, that the sim is byte-identical to chapter 3 (a
- * golden state-hash); the dimetric projection + the monotone depth key; that the
- * camera is a pure offset; and that render scales with VISIBILITY, not the world or
- * the pool.
+ * golden state-hash); the translucent depth key; that the camera is a host-side
+ * uniform (the same view rebuilds identical bytes); and that render scales with
+ * VISIBILITY, not the world or the pool.
  *
  * Build & run: ./test.sh */
 
@@ -20,7 +20,7 @@
 #include "mites.h"
 #include "tanks_fire.h"
 #include "render.h"
-#include "iso.h"
+#include "view.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -855,56 +855,33 @@ static void t_sim_is_chapter3(void) {
   check(sim_state_hash(&W2) == h, "the scripted run is itself reproducible");
 }
 
-static void t_projection(void) {
-  printf("projection — the dimetric 2:1 transform, a pure function:\n");
-  IsoPt o = iso_project(0, 0, 0);
-  check(o.sx == 0 && o.sy == 0, "the local origin projects to (0,0)");
-  IsoPt px = iso_project(SUB, 0, 0), py = iso_project(0, SUB, 0);
-  check(px.sx == -py.sx && px.sy == py.sy, "a +x and a +y cell step mirror in screenX, agree in screenY");
-  check(px.sx == 2 * px.sy, "the projection is dimetric 2:1 (screenX : screenY for a unit step)");
-  IsoPt pz = iso_project(0, 0, SUB);
-  check(pz.sx == 0 && pz.sy == -SUB * ISO_Z, "height lifts screenY by ISO_Z/subcell and leaves screenX");
-  IsoPt c = iso_project(3 * SUB, 1 * SUB, 0);   /* a known cell -> a known screen offset */
-  check(c.sx == (3 - 1) * SUB * ISO_X && c.sy == (3 + 1) * SUB * ISO_Y, "a known cell maps to its known screen offset");
-}
-
-static void t_depth_monotonic(void) {
-  printf("depth — the painter's key is monotone along the view diagonal:\n");
-  int se = 1, up = 1, nw = 1;
+static void t_depth_key(void) {
+  printf("translucent depth key — nearer the top-down, south-leaning camera == larger:\n");
+  int south = 1, up = 1, flatx = 1;
   for (int wx = 0; wx < 5 * SUB; wx += SUB)
     for (int wy = 0; wy < 5 * SUB; wy += SUB) {
-      int32_t d = iso_depth(wx, wy, 0);
-      if (iso_depth(wx + SUB, wy, 0) <= d) se = 0;     /* east is nearer */
-      if (iso_depth(wx, wy + SUB, 0) <= d) se = 0;     /* south is nearer */
-      if (iso_depth(wx, wy, SUB)     <= d) up = 0;     /* taller is nearer */
-      if (iso_depth(wx - SUB, wy - SUB, 0) >= d) nw = 0; /* north-west is farther */
+      int32_t d = view_depth_key(wx, wy, 0);
+      if (view_depth_key(wx, wy + SUB, 0) <= d) south = 0;    /* south is nearer the camera */
+      if (view_depth_key(wx, wy, SUB)     <= d) up = 0;       /* taller is nearer the camera */
+      if (view_depth_key(wx + SUB, wy, 0) != d) flatx = 0;    /* the camera tilts only in y/z */
     }
-  check(se, "stepping south or east strictly INCREASES the depth key (nearer)");
-  check(up, "raising height strictly increases the depth key");
-  check(nw, "a north-west neighbour never sorts in front of a south-east one");
+  check(south, "stepping south (+y) strictly increases the depth key");
+  check(up, "raising height (+z) strictly increases the depth key");
+  check(flatx, "moving east/west (x) leaves the depth key unchanged (no x tilt)");
 }
 
 static Inst g_a[INST_MAX], g_b[INST_MAX];   /* file-static: too big for the stack */
-static void t_camera_is_a_uniform(void) {
-  printf("the camera is a uniform — a pan is a pure offset, distorting nothing:\n");
-  /* iso_project is linear, so translating a placement (panning the camera) just adds
-   * a constant screen offset to EVERY point — which is why the camera can be one
-   * uniform applied after the projection, not a rebuild of the placements. */
-  int linear = 1;
-  for (int i = 0; i < 8; i++) {
-    int wx = i * 137 % 2000, wy = i * 271 % 2000, wz = i * 53 % 400, dx = i * 91 % 900, dy = i * 60 % 900;
-    IsoPt p = iso_project(wx + dx, wy + dy, wz), base = iso_project(wx, wy, wz), off = iso_project(dx, dy, 0);
-    if (p.sx != base.sx + off.sx || p.sy != base.sy + off.sy) linear = 0;
-  }
-  check(linear, "iso_project is linear: a camera pan adds a constant offset to every placement");
-
+static void t_render_deterministic(void) {
+  printf("the camera is a uniform — render.c emits world placements, not screen positions:\n");
+  /* the projection is now a host-side perspective matrix (a uniform), so a pan/zoom
+   * never re-bakes a placement: the same visible box rebuilds the identical bytes. */
   sim_init(&W);
   DrawList da, db;
   uint32_t na = build_view(&W, g_a, &da, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);
   uint32_t nb = build_view(&W, g_b, &db, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);
   int same = (na == nb);
   for (uint32_t i = 0; i < na && same; i++) if (memcmp(&g_a[i], &g_b[i], sizeof(Inst))) same = 0;
-  check(same, "the same view rebuilds byte-identical placements (render.c bakes no screen position)");
+  check(same, "the same view rebuilds byte-identical placements (the projection is a host uniform)");
 }
 
 static void t_render_visibility(void) {
@@ -963,11 +940,10 @@ int main(void) {
   t_tanks_fire();
   t_mite_wall();
   t_mite_determinism();
-  /* chapter 4 — the render half (no GPU): the thesis, the projection, the camera */
+  /* chapter 4 — the render half (no GPU): the thesis, the depth key, the camera */
   t_sim_is_chapter3();
-  t_projection();
-  t_depth_monotonic();
-  t_camera_is_a_uniform();
+  t_depth_key();
+  t_render_deterministic();
   t_render_visibility();
   t_render_overlays();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

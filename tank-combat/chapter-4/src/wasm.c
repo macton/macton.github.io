@@ -14,13 +14,12 @@
  * Pointers expose every table for the live debug widgets. The whole view is
  * rebuilt each frame (build_view); inst_count is the instance count to draw.
  *
- * CHAPTER 4 adds RENDER exports only — the draw list (per-kind counts), the iso
- * basis (so the shader reads one source of truth), and the baked meshes — leaving
- * every simulation export byte-identical to chapter 3. */
+ * CHAPTER 4 adds RENDER exports only — the draw list (per-kind counts) and the baked
+ * meshes; the projection is host-side (a perspective MVP), so no basis is exported —
+ * leaving every simulation export byte-identical to chapter 3. */
 
 #include "sim.h"
 #include "render.h"
-#include "iso.h"
 #include "mesh_data.h"
 
 #define EXPORT(name) __attribute__((export_name(#name)))
@@ -140,13 +139,8 @@ EXPORT(frame)       uint32_t frame(void)       { return g_world.frame; }
 EXPORT(k_opaque_count)    uint32_t k_opaque_count(void)            { return K_OPAQUE_COUNT; }
 EXPORT(draw_opaque)       uint32_t draw_opaque(uint32_t kind)      { return kind < K_OPAQUE_COUNT ? g_dl.opaque[kind] : 0; }
 EXPORT(draw_translucent)  uint32_t draw_translucent(void)          { return g_dl.translucent; }
-
-/* the dimetric iso basis + depth range — the projection's source of truth, fed to
- * the shader's view uniform so the host and the GPU agree on one transform. */
-EXPORT(iso_x)          uint32_t iso_x(void)          { return ISO_X; }
-EXPORT(iso_y)          uint32_t iso_y(void)          { return ISO_Y; }
-EXPORT(iso_z)          uint32_t iso_z(void)          { return ISO_Z; }
-EXPORT(iso_depth_span) uint32_t iso_depth_span(void) { return ISO_DEPTH_SPAN; }
+/* the projection is now a host-side perspective MVP matrix (see app.js); the wasm
+ * exports no projection basis — it just emits the world placements the host views. */
 
 /* the baked low-poly meshes (loaded once at startup, instanced every frame) */
 EXPORT(mesh_data_ptr)   const int8_t* mesh_data_ptr(void)      { return MESH_VERT; }

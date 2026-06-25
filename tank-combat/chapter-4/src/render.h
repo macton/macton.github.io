@@ -2,10 +2,10 @@
  * boundary is a file, not a convention. Reads the simulation's World and produces
  * the instance buffer + a tiny draw list; the simulation never depends on this.
  *
- * CHAPTER 4 — the view becomes ISOMETRIC 3-D, and NOTHING in the sim changes. The
+ * CHAPTER 4 — the view becomes TOP-DOWN PERSPECTIVE 3-D, and NOTHING in the sim changes. The
  * renderer keeps chapter 3's instance-per-thing model but now emits a 3-D WORLD
- * PLACEMENT per instance and lets the vertex shader do the dimetric projection
- * (see iso.h). render.c does NOT bake screen positions — it emits placements; the
+ * PLACEMENT per instance and lets the vertex shader do the projection
+ * (a perspective MVP). render.c does NOT bake screen positions — it emits placements; the
  * shader projects them, so the camera stays a uniform, not a rebuild.
  *
  * One instance is a box: a centre, a half-extent, a facing (rotation about the

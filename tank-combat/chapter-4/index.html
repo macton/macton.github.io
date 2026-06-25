@@ -133,9 +133,9 @@
   <header>
     <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 4</div>
     <h1>The View</h1>
-    <p class="sub">The same world, the same tanks, the same thousand mites — redrawn as an
-    <b>isometric 3-D</b> scene. The simulation does not change by a single byte; only the picture
-    does. The view is a projection you can replace wholesale.</p>
+    <p class="sub">The same world, the same tanks, the same thousand mites — redrawn as a
+    <b>top-down perspective 3-D</b> scene. The simulation does not change by a single byte; only the
+    picture does. The view is a projection you can replace wholesale.</p>
   </header>
 
   <div id="map">
@@ -154,8 +154,8 @@
   </div>
   <div id="status">loading…</div>
   <div id="help">
-    The main view is <b>isometric 3-D</b> and shows the <b>whole 4×4 world</b> as one connected
-    map; the minimap below stays <b>top-down</b> — the same data drawn two ways. <b>Drag</b> to
+    The main view is <b>top-down perspective 3-D</b> and shows the <b>whole 4×4 world</b> as one
+    connected map; the minimap below stays <b>flat top-down</b> — the same data drawn two ways. <b>Drag</b> to
     pan, <b>pinch</b> or <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The
     <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
@@ -179,14 +179,14 @@
     Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a 4×4 toroidal grid of
     screens with self-routing tanks; chapter 3 added <strong>a thousand mites</strong> that gossip
     and swarm. Chapter 4 changes <strong>nothing about the simulation</strong> and
-    <strong>everything about the picture</strong>: the same world, redrawn <strong>isometric
-    3-D</strong>. As before, every structure below is <em>live</em> — it reads the running game's
-    memory directly.</p>
+    <strong>everything about the picture</strong>: the same world, redrawn in <strong>top-down
+    perspective 3-D</strong>. As before, every structure below is <em>live</em> — it reads the running
+    game's memory directly.</p>
 
     <p>The lesson is what chapters 1–3 earned: a strict <strong>simulation / render split with a
     one-way dependency</strong>. The renderer reads the simulation; the simulation never reads the
-    renderer. Chapter 4 is the proof. We replace the top-down 2-D view with a full isometric 3-D
-    one — new projection, depth, shading, camera, and art — and do it <strong>without editing a
+    renderer. Chapter 4 is the proof. We replace the flat 2-D view with a full top-down perspective
+    3-D one — new projection, depth, shading, camera, and art — and do it <strong>without editing a
     single line of the simulation</strong>. <code>sim.c</code>, <code>mites.c</code>,
     <code>tanks_fire.c</code>, the per-cell index, the gossip, the route fields, the RNG — all
     <strong>byte-for-byte identical to chapter 3</strong>. Only the render half changes:
@@ -202,33 +202,32 @@
     <strong>3-D world placement</strong> — a cell <code>(wx, wy)</code> in subcells, a
     render-only <strong>height <code>wz</code></strong> (the simulation has no z), a
     <strong>facing</strong> (the body / turret angle the sim already stores), and a
-    <strong>tint</strong> — and lets the <strong>vertex shader</strong> do the projection:</p>
-    <div class="fig"><p class="cap">the only new math — a pure function, computed per vertex on the GPU</p>
-    <pre class="mono" style="margin:0;color:#c7ccd4;overflow:auto">screenX = (wx - wy) * ISO_X
-screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// ISO_X : ISO_Y = 2 : 1 (dimetric)</span></pre></div>
-    <p>It is the classic <strong>dimetric 2:1</strong> ratio, so tiles read as the familiar
-    game-isometric diamond; it is <strong>orthographic</strong> (no perspective foreshortening),
-    which is exactly what isometric means. Crucially, <a href="src/render.c">render.c</a> does
-    <strong>not</strong> bake screen positions — it emits world placements, and the shader projects
-    them. So the iso basis, the zoom, and the follow offset all live in the <strong>view
-    uniform</strong>: the camera is a uniform, not a rebuild. Dragging to pan, pinching/scrolling
-    to zoom, and following a tank stay <strong>presentation-only</strong> and never change a
-    placement — a fact the native test pins (<code>iso_project</code> is linear, so a pan is a
-    constant offset). The whole <strong>4×4 world is one connected map</strong> (placements are
-    world positions, so all sixteen screens sit in their natural layout); the free camera shows any
-    part, and the host hands the renderer the <strong>visible box</strong> so it emits only the
-    cells and units in view — the whole world when zoomed out, a handful of cells when zoomed in,
-    never the 4800-cell world or the 1000-strong pool wholesale. The minimap below is the same idea
-    taken literally: the <strong>same sim data drawn two ways at once</strong> — isometric above,
-    top-down here. The top-down map's job is legibility, so it is <em>not</em> iso-skewed.</p>
+    <strong>tint</strong> — and lets the <strong>vertex shader</strong> project it with a
+    <strong>top-down perspective camera</strong>, tilted a little off straight-down:</p>
+    <div class="fig"><p class="cap">the projection is a host-built model-view-projection matrix; the shader just applies it</p>
+    <pre class="mono" style="margin:0;color:#c7ccd4;overflow:auto">clip = mvp * vec4(world, 1)      <span style="color:var(--dim)">// mvp = perspective · lookAt(eye, target) · scale</span></pre></div>
+    <p>The camera looks down on the world from above and slightly to the south, so you see the
+    <strong>tops</strong> of things and a sliver of their near faces, and the
+    <strong>perspective</strong> gives real depth — near walls larger than far ones. Crucially,
+    <a href="src/render.c">render.c</a> does <strong>not</strong> bake screen positions — it emits
+    world placements, and the matrix (the view <strong>uniform</strong>) transforms them. So
+    dragging to pan, pinching/scrolling to zoom, and following a tank are all just a different
+    matrix: the camera is a uniform, not a rebuild — a fact the native test pins (the same view
+    rebuilds the identical bytes). The whole <strong>4×4 world is one connected map</strong>
+    (placements are world positions, so all sixteen screens sit in their natural layout); the free
+    camera shows any part, and the host hands the renderer the <strong>visible box</strong> (its
+    four screen corners cast back onto the ground) so it emits only the cells and units in view —
+    the whole world when zoomed out, a handful of cells when zoomed in, never the 4800-cell world
+    or the 1000-strong pool wholesale. The minimap below is the same idea taken literally: the
+    <strong>same sim data drawn two ways at once</strong> — perspective above, flat top-down here.</p>
     <p class="note">Clicking is unchanged from chapter 2 — tap a tank to cycle it, tap a cell to
-    send the auto-path tank there — but the iso view makes it legible with <strong>render-only</strong>
+    send the auto-path tank there — but the 3-D view makes it legible with <strong>render-only</strong>
     overlays: a <strong>hover</strong> highlight on the cell under the cursor, the selected tank's
     <strong>mode</strong> (a ring + a tall spike, green for auto-path, yellow for manual), a
     <strong>destination</strong> beacon, and the <strong>routed path</strong> drawn cell by cell
     from the same tables the tank follows. None of it touches the simulation.</p>
     <div class="fig">
-      <p class="cap">the 4×4 world, TOP-DOWN · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is the iso viewport · click a screen to view it</p>
+      <p class="cap">the 4×4 world, TOP-DOWN · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is where the camera looks · click a screen to jump there</p>
       <div id="w-minimap"></div>
       <div id="w-stats" style="margin-top:10px"></div>
       <div id="w-controls" style="margin-top:8px"></div>
@@ -236,25 +235,25 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
 
     <h2>Depth — a z-buffer, and a painter's key for the glow</h2>
     <p>Opaque geometry — terrain, tanks, mites, nests — draws with a <strong>depth buffer</strong>
-    (new render state, a texture in the pass; chapter 3 had none). Each projected vertex carries a
-    depth <code>wx + wy + wz</code> mapped into the z-buffer, and the GPU resolves occlusion — no
-    per-instance CPU sort. That key is <strong>monotone along the view diagonal</strong>: a thing
-    one cell north-west can never sort in front of a thing one cell south-east, and a taller block
-    occludes correctly (the test asserts it). The <strong>translucent</strong> FX — the laser glow
-    and the destruction bursts — draw in a <strong>second pass after</strong> the opaque one, with
-    depth-test on but depth-write off, <strong>painter-sorted back-to-front</strong> by the same
-    <code>wx + wy + wz</code> so the blending is ordered.</p>
+    (new render state, a texture in the pass; chapter 3 had none). The <strong>perspective matrix
+    writes real depth</strong> (<code>clip.z/w</code>), so the GPU resolves occlusion — no
+    per-instance CPU sort — and a taller, nearer block correctly hides what's behind it. The
+    <strong>translucent</strong> FX — the laser glow and the destruction bursts — draw in a
+    <strong>second pass after</strong> the opaque one, with depth-test on but depth-write off,
+    <strong>painter-sorted back-to-front</strong> by a small key: since the camera leans south and
+    looks down, &ldquo;nearer&rdquo; grows with <code>+y</code> (south) and <code>+z</code> (height),
+    which is enough to order the few, ground-level FX that ever overlap (the test pins it).</p>
 
     <h2>Flat shading — a 3-D scene from primitives, no art required</h2>
     <p>The picture reads as 3-D before any asset, from <strong>flat per-face shading</strong>: one
     directional light, each face tinted by <code>dot(faceNormal, light)</code> over a small ambient
     floor. For an axis-aligned block that is three brightnesses — <strong>top brightest, the two
-    visible sides darker</strong> — which is exactly the cue that reads &ldquo;isometric block.&rdquo;
+    visible sides darker</strong> — which is exactly the cue that reads &ldquo;a raised 3-D block.&rdquo;
     It is computed in the shader from the face normal: no normal texture, no per-vertex lighting,
     cheap enough to run for every visible instance every frame. The whole first pass is built from a
     <strong>single unit cube</strong>, instanced, projected, depth-tested, flat-shaded — a thin slab
     for an open floor, a full-height cube for a wall, a body/turret/barrel for a tank, a tiny cube
-    per mite, a tall pylon per nest. It is genuinely isometric 3-D, just primitive — and it is
+    per mite, a tall pylon per nest. It is genuinely 3-D, just primitive — and it is
     shippable on its own.</p>
 
     <h2>Assets are late-bound data</h2>
@@ -278,8 +277,8 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     byte-for-byte, from chapter 3. Height, mesh id, the light, the camera, and the depth texture
     are all render-side; <strong>none of them appears in the <code>World</code></strong>. The
     widgets are the same live windows into the running memory, shown here as raw bytes and as a
-    top-down grid beside the isometric scene the GPU draws from the very same numbers. Tap a tank on
-    the iso map, or cycle it here:</p>
+    top-down grid beside the perspective scene the GPU draws from the very same numbers. Tap a tank in
+    the scene, or cycle it here:</p>
     <div class="fig">
       <p class="cap">per-tank data · state, destination, status — tap a tank on the map, or “cycle state” here</p>
       <div id="w-tanks"></div>
@@ -296,7 +295,7 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     </div>
     <p>The gossip still works the same way: drive a tank into the swarm and watch the belief field
     <strong>diffuse outward</strong> from a sighting and <strong>dissolve</strong> as the record
-    ages — the iso view tints the same mites red/teal/nest-colour from the same modes.</p>
+    ages — the 3-D view tints the same mites red/teal/nest-colour from the same modes.</p>
     <div class="fig">
       <p class="cap">the belief field on the current screen · a cell is tinted where mites believe a tank is — bright = a fresh sighting, fading as the record ages</p>
       <div id="w-belief"></div>
@@ -314,7 +313,7 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     </div>
 
     <h2>What this bought us</h2>
-    <p>A wholesale new view — dimetric projection, a z-buffer, flat shading, a follow camera, and
+    <p>A wholesale new view — a top-down perspective projection, a z-buffer, flat shading, a free camera, and
     late-bound low-poly art — over a simulation that <strong>did not move</strong>. The projection
     is a pure function in the shader; the camera is a uniform; depth is the GPU's z-buffer for the
     opaque pass and the painter's key <code>x+y+z</code> for the translucent one; the art is a
@@ -325,7 +324,7 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     wholesale.</strong></p>
 
     <p class="note">Source for this chapter:
-    <a href="src/iso.h">iso.h</a> ·
+    <a href="src/view.h">view.h</a> ·
     <a href="src/render.c">render.c</a> ·
     <a href="src/render.h">render.h</a> ·
     <a href="tools/gen_meshes.c">gen_meshes.c</a> ·

@@ -1,7 +1,7 @@
-/* render.c — chapter 4: read the frozen World, emit 3-D world placements for an
- * ISOMETRIC view. Every instance is a box (centre + half-extent + facing + tint) at
+/* render.c — chapter 4: read the frozen World, emit 3-D world placements for a
+ * TOP-DOWN PERSPECTIVE view. Every instance is a box (centre + half-extent + facing + tint) at
  * its WORLD position (anchor = the world origin), so all sixteen screens form one
- * connected map; the vertex shader projects it (iso.h) and resolves occlusion with a
+ * connected map; the vertex shader projects it (a perspective MVP) and resolves occlusion with a
  * z-buffer. This file emits PLACEMENTS only — it never bakes a screen position and
  * never writes the sim. Instances are grouped by kind so the host draws one range per
  * kind (binding the placeholder cube, or a baked mesh).
@@ -13,7 +13,7 @@
  * selected tank's state mark, its destination beacon, the routed path), all derived
  * from the sim or the host's one hover cell — none of it feeds back into the model. */
 #include "render.h"
-#include "iso.h"
+#include "view.h"
 #include "dirtab.h"
 #include "collide.h"
 #include "edge_paths.h"
@@ -268,14 +268,14 @@ static uint32_t emit_hover(Inst* out, uint32_t k, uint32_t hover_cell, const Box
   return push(out, k, px, py, FLOOR_H + TILE_LIFT + 1, HOVER_HALF, HOVER_HALF, 4, 16384, 0, COL_HOVER);
 }
 
-/* painter-sort the translucent range back-to-front (ascending iso_depth, so the
+/* painter-sort the translucent range back-to-front (ascending view_depth_key, so the
  * farthest blends first). Few translucent instances are visible, so a simple
  * insertion sort over the small range is cheaper than any structure. */
 static void sort_translucent(Inst* a, uint32_t n) {
   for (uint32_t i = 1; i < n; i++) {
-    Inst v = a[i]; int32_t vk = iso_depth(v.wx, v.wy, v.wz);
+    Inst v = a[i]; int32_t vk = view_depth_key(v.wx, v.wy, v.wz);
     uint32_t j = i;
-    while (j > 0 && iso_depth(a[j - 1].wx, a[j - 1].wy, a[j - 1].wz) > vk) { a[j] = a[j - 1]; j--; }
+    while (j > 0 && view_depth_key(a[j - 1].wx, a[j - 1].wy, a[j - 1].wz) > vk) { a[j] = a[j - 1]; j--; }
     a[j] = v;
   }
 }

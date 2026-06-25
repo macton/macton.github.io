@@ -1,10 +1,11 @@
-// tank-combat chapter 4 — host: ISOMETRIC WebGPU renderer + input + swarm debug panel.
+// tank-combat chapter 4 — host: TOP-DOWN PERSPECTIVE WebGPU renderer + input + swarm debug panel.
 //
 // The simulation is BYTE-IDENTICAL to chapter 3 (game.wasm), integer fixed point,
 // and does not know it is being drawn. Chapter 4 changes only the picture: the host
-// reads the sim, uploads the packed 3-D instance buffer, and draws it ISOMETRIC —
-// the dimetric projection, the z-buffer, and the flat face-shading all live in the
-// shader; the camera is a uniform. render.c emits WORLD PLACEMENTS grouped by kind;
+// reads the sim, uploads the packed 3-D instance buffer, and draws it in TOP-DOWN
+// PERSPECTIVE — the projection (a model-view-projection matrix), the z-buffer, and the
+// flat face-shading all live in the shader; the camera is a uniform. render.c emits
+// WORLD PLACEMENTS grouped by kind;
 // the host draws one range per kind, binding the placeholder cube or (toggle) a
 // baked low-poly mesh — same instances, late-bound art.
 //
@@ -14,14 +15,14 @@
 
 const TICK_DT = 1 / 60;
 
-// View uniform: a = (scaleX, scaleY, offsetX, offsetY) maps screen units -> clip;
-// b = (isoX, isoY, isoZ, depthSpan) is the dimetric basis (read from wasm, one
-// source of truth) + the depth-key range. The vertex shader scales each baked mesh
-// vertex by the instance's half-extents, rotates it by the facing about the
-// vertical axis, projects it dimetric-2:1, and writes (wx+wy+wz) into the z-buffer;
-// the opaque pass flat-shades by the face normal, the translucent pass blends.
+// View uniform: a single 4x4 model-view-projection matrix (mvp), built host-side each
+// frame from a top-down perspective camera (lookAt + perspective) and uploaded as the
+// one source of truth for the projection. The vertex shader scales each baked mesh
+// vertex by the instance's half-extents, rotates it by the facing about the vertical
+// axis, then projects it with the mvp — clip.z/w is the real depth written to the
+// z-buffer; the opaque pass flat-shades by the face normal, the translucent pass blends.
 const WGSL = `
-struct View { a: vec4f, b: vec4f };
+struct View { mvp: mat4x4f };                                  // the model-view-projection (subcells -> clip)
 @group(0) @binding(0) var<uniform> view: View;
 struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(1) nrm: vec3f };
 
@@ -35,23 +36,61 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(
   let c = f32(rot.x) * (1.0 / 16384.0); let s = f32(rot.y) * (1.0 / 16384.0);
   let rx = local.x * c - local.y * s; let ry = local.x * s + local.y * c;
   let world = vec3f(f32(wxy.x) + rx, f32(wxy.y) + ry, f32(wzhz.x) + local.z);
-  let ix = view.b.x; let iy = view.b.y; let iz = view.b.z;
-  let sx = (world.x - world.y) * ix;                           // dimetric 2:1 projection
-  let sy = (world.x + world.y) * iy - world.z * iz;
-  let depth = clamp((view.b.w - (world.x + world.y + world.z)) / view.b.w, 0.0, 1.0);
   var o: VOut;
-  o.pos = vec4f(sx * view.a.x + view.a.z, sy * view.a.y + view.a.w, depth, 1.0);
+  o.pos = view.mvp * vec4f(world, 1.0);                        // top-down perspective; depth is clip.z/w
   let nx = mnrm.x * c - mnrm.y * s; let ny = mnrm.x * s + mnrm.y * c;
-  o.nrm = vec3f(nx, ny, mnrm.z); o.col = color;
+  o.nrm = vec3f(nx, ny, mnrm.z); o.col = color;                // world-space normal, for lighting
   return o;
 }
-const LIGHT = vec3f(0.30, 0.50, 0.80);                         // one directional light, from above
+const LIGHT = vec3f(0.32, 0.46, 0.78);                         // one directional light, from above
 @fragment fn fs_shade(i: VOut) -> @location(0) vec4f {          // opaque: flat per-face shading
   let d = clamp(dot(normalize(i.nrm), normalize(LIGHT)), 0.0, 1.0);
-  return vec4f(i.col.rgb * (0.32 + 0.68 * d), i.col.a);         // top brightest, the two sides darker
+  return vec4f(i.col.rgb * (0.34 + 0.66 * d), i.col.a);         // tops brightest, the tilted sides darker
 }
 @fragment fn fs_flat(i: VOut) -> @location(0) vec4f { return i.col; }  // translucent FX: full-bright, blended
 `;
+
+// --- tiny column-major 4x4 matrix helpers (WGSL mat4x4f is column-major) ---------
+const v3sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const v3cross = (a, b) => [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
+const v3dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const v3norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+function m4mul(a, b) {                                    // a*b, both column-major[16]
+  const o = new Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+r] * b[c*4+k];
+    o[c*4+r] = s;
+  }
+  return o;
+}
+function m4vec(m, v) {                                    // m * v (v=[x,y,z,w])
+  return [ m[0]*v[0]+m[4]*v[1]+m[8]*v[2]+m[12]*v[3], m[1]*v[0]+m[5]*v[1]+m[9]*v[2]+m[13]*v[3],
+           m[2]*v[0]+m[6]*v[1]+m[10]*v[2]+m[14]*v[3], m[3]*v[0]+m[7]*v[1]+m[11]*v[2]+m[15]*v[3] ];
+}
+function m4scale(s) { return [s,0,0,0, 0,s,0,0, 0,0,s,0, 0,0,0,1]; }
+function m4perspective(fovy, aspect, near, far) {        // WebGPU clip: z in [0,1]
+  const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+  return [ f/aspect,0,0,0,  0,f,0,0,  0,0,far*nf,-1,  0,0,near*far*nf,0 ];
+}
+function m4lookAt(eye, center, up) {                     // right-handed view matrix
+  const z = v3norm(v3sub(eye, center)), x = v3norm(v3cross(up, z)), y = v3cross(z, x);
+  return [ x[0],y[0],z[0],0,  x[1],y[1],z[1],0,  x[2],y[2],z[2],0,
+           -v3dot(x,eye),-v3dot(y,eye),-v3dot(z,eye),1 ];
+}
+function m4invert(m) {                                    // general 4x4 inverse
+  const a00=m[0],a01=m[1],a02=m[2],a03=m[3], a10=m[4],a11=m[5],a12=m[6],a13=m[7],
+        a20=m[8],a21=m[9],a22=m[10],a23=m[11], a30=m[12],a31=m[13],a32=m[14],a33=m[15];
+  const b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10, b03=a01*a12-a02*a11,
+        b04=a01*a13-a03*a11, b05=a02*a13-a03*a12, b06=a20*a31-a21*a30, b07=a20*a32-a22*a30,
+        b08=a20*a33-a23*a30, b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+  let det = b00*b11-b01*b10+b02*b09+b03*b08-b04*b07+b05*b06;
+  if (!det) return null; det = 1/det;
+  return [
+    (a11*b11-a12*b10+a13*b09)*det, (a02*b10-a01*b11-a03*b09)*det, (a31*b05-a32*b04+a33*b03)*det, (a22*b04-a21*b05-a23*b03)*det,
+    (a12*b08-a10*b11-a13*b07)*det, (a00*b11-a02*b08+a03*b07)*det, (a32*b02-a30*b05-a33*b01)*det, (a20*b05-a22*b02+a23*b01)*det,
+    (a10*b10-a11*b08+a13*b06)*det, (a01*b08-a00*b10-a03*b06)*det, (a30*b04-a31*b02+a33*b00)*det, (a21*b02-a20*b04-a23*b00)*det,
+    (a11*b07-a10*b09-a12*b06)*det, (a00*b09-a01*b07+a02*b06)*det, (a31*b01-a30*b03-a32*b00)*det, (a20*b03-a21*b01+a22*b00)*det ];
+}
 
 const IN_FWD = 1, IN_BACK = 2, IN_LEFT = 4, IN_RIGHT = 8;
 const KEYMAP = { KeyW: IN_FWD, KeyS: IN_BACK, KeyA: IN_LEFT, KeyD: IN_RIGHT,
@@ -85,8 +124,7 @@ async function main() {
     SUB: wasm.subcell(), STRIDE: wasm.inst_stride(), MAX_INST: wasm.inst_max(),
     NM: wasm.n_mites(), MR: wasm.mite_r(), MCAP: wasm.mite_cap_max(), NWC: wasm.n_world_cells(),
     MEMPTY: wasm.mite_empty(), NEST: wasm.nest_count(), NF: wasm.n_fields(),
-    // chapter-4 render protocol: the iso basis, the kinds, the baked meshes
-    IX: wasm.iso_x(), IY: wasm.iso_y(), IZ: wasm.iso_z(), DSPAN: wasm.iso_depth_span(),
+    // chapter-4 render protocol: the kinds + the baked meshes (the projection is a host MVP)
     KOC: wasm.k_opaque_count(), MVSTRIDE: wasm.mesh_vstride(), MVTOTAL: wasm.mesh_vert_total(),
     MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(),
   };
@@ -132,7 +170,7 @@ async function main() {
   const meshForKind = []; for (let k = 0; k < C.KOC; k++) meshForKind.push(wasm.mesh_for_kind(k));
 
   const instBuf = device.createBuffer({ size: C.MAX_INST * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-  const viewBuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const viewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const module = device.createShaderModule({ code: WGSL });
 
   const bgl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } }] });
@@ -174,39 +212,49 @@ async function main() {
   }
   new ResizeObserver(resize).observe(canvas); resize();
 
-  // --- the free isometric camera: drag to pan, pinch / wheel to zoom -------------
-  // The projection is a pure function in the shader; the camera is ONLY this uniform.
-  // camX,camY is the world point at screen centre (subcells); zoom multiplies the
-  // whole-world fit (zoom 1 shows all sixteen screens). viewWrite writes the uniform
-  // and remembers the mapping (cam3d) so a pixel can be inverted back to a world cell.
-  // Nothing here touches the simulation.
+  // --- the top-down PERSPECTIVE camera: drag to pan, pinch / wheel to zoom --------
+  // The projection is a host-built model-view-projection matrix (the shader just
+  // applies it); the camera is ONLY that uniform. camX,camY is the ground point the
+  // camera looks at (subcells); zoom sets how close it is. A slight PITCH from
+  // straight-down gives the angled, perspective look (leaning south, so screen-up is
+  // north). viewWrite writes the MVP and remembers its inverse so a pixel can be cast
+  // back onto the ground. Nothing here touches the simulation.
   let useAssets = false;
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false;
-  let cam3d = { sx: 1, sy: 1, ox: 0, oy: 0 };
+  let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
-  function baseScale() {                              // px per screen-unit with the whole world fit
-    const worldW = (C.BW + C.BH) * C.SUB * C.IX, worldH = (C.BW + C.BH) * C.SUB * C.IY + C.SUB * C.IZ;
-    return Math.min(canvas.width * 0.96 / worldW, canvas.height * 0.92 / worldH);
-  }
+  const PITCH = 30 * Math.PI / 180;     // tilt from straight-down (a slight angled offset)
+  const FOV = 36 * Math.PI / 180;       // vertical field of view
   function clampCam() {
     zoom = Math.max(ZMIN, Math.min(ZMAX, zoom));
     camX = Math.max(0, Math.min(C.BW * C.SUB, camX));
     camY = Math.max(0, Math.min(C.BH * C.SUB, camY));
   }
-  function viewWrite() {
-    const S = baseScale() * zoom;
-    const isx = (camX - camY) * C.IX, isy = (camX + camY) * C.IY;       // iso of the camera centre (wz=0)
-    const sclX = S * 2 / canvas.width, sclY = -S * 2 / canvas.height;
-    cam3d = { sx: sclX, sy: sclY, ox: -isx * sclX, oy: -isy * sclY };
-    device.queue.writeBuffer(viewBuf, 0, new Float32Array([sclX, sclY, cam3d.ox, cam3d.oy, C.IX, C.IY, C.IZ, C.DSPAN]));
+  function baseDist() {                  // camera distance (cells) that fits the whole world at zoom 1
+    const t = Math.tan(FOV / 2), aspect = canvas.width / canvas.height;
+    return Math.max((C.BH * 0.62) / (t / Math.cos(PITCH)), (C.BW * 0.62) / (t * aspect));
   }
-  // invert screen pixels -> a world point on the ground plane (wz=0), in subcells
+  function viewWrite() {
+    const dist = baseDist() / zoom;                      // cells; zoom in -> closer
+    const t = [camX / C.SUB, camY / C.SUB, 0];           // look-at target, in cells
+    const eye = [t[0], t[1] + dist * Math.sin(PITCH), t[2] + dist * Math.cos(PITCH)];   // above + south
+    const view = m4lookAt(eye, t, [0, -1, 0]);           // up = north, so screen-up = north
+    const proj = m4perspective(FOV, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), dist * 4 + (C.BW + C.BH));
+    const mvp = m4mul(m4mul(proj, view), m4scale(1 / C.SUB));   // subcells -> clip
+    invMVP = m4invert(mvp);
+    device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
+  }
+  // cast a screen NDC point onto the ground plane (z=0) -> world subcells
+  function groundAt(ndcx, ndcy) {
+    if (!invMVP) return { x: camX, y: camY };
+    const a = m4vec(invMVP, [ndcx, ndcy, 0, 1]), b = m4vec(invMVP, [ndcx, ndcy, 1, 1]);
+    const ax = a[0]/a[3], ay = a[1]/a[3], az = a[2]/a[3], bx = b[0]/b[3], by = b[1]/b[3], bz = b[2]/b[3];
+    const k = az - bz; const tt = Math.abs(k) < 1e-6 ? 0 : az / k;          // where z=0 along the ray
+    return { x: ax + tt * (bx - ax), y: ay + tt * (by - ay) };
+  }
   function screenToWorld(clientX, clientY) {
     const r = canvas.getBoundingClientRect();
-    const ndcx = (clientX - r.left) / r.width * 2 - 1, ndcy = -((clientY - r.top) / r.height * 2 - 1);
-    const sxu = (ndcx - cam3d.ox) / cam3d.sx, syu = (ndcy - cam3d.oy) / cam3d.sy;
-    const a = sxu / C.IX, b = syu / C.IY;
-    return { x: (a + b) / 2, y: (b - a) / 2 };
+    return groundAt((clientX - r.left) / r.width * 2 - 1, -((clientY - r.top) / r.height * 2 - 1));
   }
   function cellAt(clientX, clientY) {
     const p = screenToWorld(clientX, clientY);
@@ -214,13 +262,12 @@ async function main() {
     if (wcx < 0 || wcx >= C.BW || wcy < 0 || wcy >= C.BH) return null;
     return { wcx, wcy };
   }
-  // the world-space box the canvas shows (its four corners inverse-projected) — what
-  // the renderer must emit; the cost scales with this, not the whole world.
+  // the world box the camera shows (its four corners cast to the ground) — what the
+  // renderer must emit; the cost scales with this, not the whole world.
   function visibleBox() {
-    const r = canvas.getBoundingClientRect();
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [cx, cy] of [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]]) {
-      const p = screenToWorld(cx, cy);
+    for (const [nx, ny] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+      const p = groundAt(nx, ny);
       x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
     }
     return [Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1)];
@@ -236,24 +283,18 @@ async function main() {
   function camScreen() { return { sx: Math.floor(camX / (C.GW * C.SUB)) % C.SX, sy: Math.floor(camY / (C.GH * C.SUB)) % C.SY }; }
   function gotoScreen(sx, sy) { camX = sx * C.GW * C.SUB + C.GW * C.SUB / 2; camY = sy * C.GH * C.SUB + C.GH * C.SUB / 2; follow = false; clampCam(); setPicker(false); }
 
-  // pan by a screen-pixel delta (drag): convert to a world delta on the ground plane
-  function panBy(dpx, dpy) {
-    const r = canvas.getBoundingClientRect();
-    const dsx = (dpx / r.width * 2) / cam3d.sx, dsy = (-dpy / r.height * 2) / cam3d.sy;   // px -> screen-units
-    const a = dsx / C.IX, b = dsy / C.IY;
-    camX -= (a + b) / 2; camY -= (b - a) / 2; clampCam();
+  // drag-pan: keep the world point you grabbed under the cursor (correct in perspective)
+  function panBy(prevX, prevY, curX, curY) {
+    const a = screenToWorld(prevX, prevY), b = screenToWorld(curX, curY);
+    camX -= b.x - a.x; camY -= b.y - a.y; clampCam();
   }
   // zoom by `factor`, keeping the world point under (clientX,clientY) fixed
   function zoomBy(factor, clientX, clientY) {
-    const r = canvas.getBoundingClientRect();
-    const ndcx = (clientX - r.left) / r.width * 2 - 1, ndcy = -((clientY - r.top) / r.height * 2 - 1);
-    const P = screenToWorld(clientX, clientY);
+    const before = screenToWorld(clientX, clientY);
     zoom = Math.max(ZMIN, Math.min(ZMAX, zoom * factor));
-    const S = baseScale() * zoom, sclX = S * 2 / canvas.width, sclY = -S * 2 / canvas.height;
-    const isoPx = (P.x - P.y) * C.IX, isoPy = (P.x + P.y) * C.IY;
-    const isoCamX = isoPx - ndcx / sclX, isoCamY = isoPy - ndcy / sclY;
-    const a = isoCamX / C.IX, b = isoCamY / C.IY;
-    camX = (a + b) / 2; camY = (b - a) / 2; clampCam();
+    viewWrite();                                        // refresh the matrix (+ inverse) for the new zoom
+    const after = screenToWorld(clientX, clientY);
+    camX += before.x - after.x; camY += before.y - after.y; clampCam();
     if (zR) zR.value = zoom.toFixed(2);
   }
 
@@ -271,7 +312,7 @@ async function main() {
     const prev = pointers.get(e.pointerId); if (!prev) return;            // hovering, no button down here
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragMoved += Math.abs(dx) + Math.abs(dy);
-    if (pointers.size === 1) { panBy(dx, dy); follow = false; }
+    if (pointers.size === 1) { panBy(prev.x, prev.y, e.clientX, e.clientY); follow = false; }
     else if (pointers.size >= 2) { const d = pdist(); if (pinchPrev > 0) { const [mx, my] = pmid(); zoomBy(d / pinchPrev, mx, my); } pinchPrev = d; follow = false; }
   });
   function endPointer(e) {
@@ -394,7 +435,7 @@ function buildTouchPad(map) {
   map.appendChild(pad);
 }
 
-// a minimap of the 4x4 world, kept TOP-DOWN while the main view is isometric — the
+// a minimap of the 4x4 world, kept FLAT TOP-DOWN while the main view is perspective 3-D — the
 // same sim data drawn two ways at once. Each screen is a tiny canvas showing the
 // walls, the nests, the tanks, and the whole swarm as downsampled dots (hunting =
 // red, homing = the nest's colour, wandering = teal); click a screen to view it.

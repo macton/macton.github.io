@@ -13,7 +13,7 @@ model and the chapter has failed its own thesis.
 ## The frozen simulation (the thesis)
 
 - The simulation sources — everything under `src/` that is not `render.c` /
-  `render.h` / `iso.h` / `mesh_data.*` and not `wasm.c`'s render exports — are
+  `render.h` / `view.h` / `mesh_data.*` and not `wasm.c`'s render exports — are
   **byte-for-byte identical to chapter 3**. `sim.c`, `mites.c`, `tanks_fire.c`,
   `tanks_path.c`, `agent_turn`/`agent_move`, `collide.c`, the path tables, the
   per-cell index, the gossip, the route fields, the RNG: unchanged.
@@ -26,29 +26,33 @@ model and the chapter has failed its own thesis.
   RNG, the frame. The result must equal the golden literal `CH3_GOLDEN_HASH =
   0xFB9DAC47`, captured by running the identical routine against chapter-3's sources.
 
-## The projection (`iso.h`)
+## The projection (`view.h` + a host-built MVP)
 
-- A **pure function**, the only new math:
-  `screenX = (wx - wy) * ISO_X`, `screenY = (wx + wy) * ISO_Y - wz * ISO_Z`.
-- **Dimetric 2:1**: `ISO_X : ISO_Y == 2 : 1` (a `_Static_assert` pins it). The view
-  is **orthographic** (no perspective).
-- It lives in the **shader** (the GPU reads `ISO_X/Y/Z` from the view uniform, fed by
-  wasm exports — one source of truth) and in the header for the native test.
-  `render.c` emits **world placements**, never baked screen positions, so the camera
-  is a uniform (zoom + follow offset), not a rebuild. Test: `iso_project` is linear,
-  so a camera pan is a constant offset added to every placement — it distorts nothing.
+- Each instance carries a **3-D world placement** — a cell `(wx, wy)`, a render-only
+  height `wz`, a facing, a tint — and the **vertex shader** projects it with a single
+  **model-view-projection matrix**: `clip = mvp * vec4(world, 1)`, where
+  `mvp = perspective · lookAt(eye, target) · scale(1/SUB)`.
+- The camera is a real **top-down perspective**: it looks down from above and slightly
+  to the **south** (a fixed ~30° tilt off straight-down), so near things are larger
+  than far ones and you see a sliver of their near faces. The MVP is the **view
+  uniform**, so a pan/zoom is a different matrix — never a geometry rebuild.
+- `render.c` emits **world placements**, never baked screen positions — one source of
+  truth, the host owns the camera. The only render-side constant left in C is the
+  translucent painter key in `view.h`. Test: the rebuild is **byte-identical** across
+  frames (the projection never reaches into the instance stream).
 
 ## Depth
 
-- **Opaque** geometry (terrain, tanks, mites, nests) uses a **z-buffer**: each vertex's
-  depth is `wx + wy + wz` mapped into NDC; the GPU resolves occlusion, no CPU sort. A
-  **depth texture** is added to the render pass — new *render* state, not sim state.
-- The depth key is **monotone along the view diagonal** (tested): stepping south,
-  east, or up strictly increases nearness, so a north-west thing never sorts in front
-  of a south-east one.
+- **Opaque** geometry (terrain, tanks, mites, nests) uses a **z-buffer**: the
+  **perspective matrix writes real depth** (`clip.z/w`); the GPU resolves occlusion, no
+  CPU sort. A **depth texture** is added to the render pass — new *render* state, not
+  sim state.
 - **Translucent** FX (laser glow, destruction bursts) draw in a **second pass** after
   the opaque one, depth-test on / depth-write off, **painter-sorted back-to-front** by
-  `wx + wy + wz`.
+  the `view.h` key. Because the camera leans south and looks down, "nearer" grows with
+  `+y` (south) and `+z` (height) and is flat in `x`: `view_depth_key(wx,wy,wz) = wy + wz`.
+- The key is **monotone** in `+y` and `+z` (tested), so a north thing never sorts in
+  front of a south one at the same height.
 
 ## Shading
 
@@ -79,8 +83,9 @@ that are **pure presentation** — derived from the sim, or from one host-set ho
 cell; none of it writes the model:
 
 - **Hover** (`K_HOVER`): a highlight tile on the world cell under the cursor. The host
-  inverts the iso projection to a cell and passes it (with the visible box) to
-  `set_view`; a cell outside the visible box emits nothing.
+  unprojects the cursor through the **inverse MVP** onto the ground plane to a cell and
+  passes it (with the visible box) to `set_view`; a cell outside the visible box emits
+  nothing.
 - **Selection** (`K_RING`): the selected tank's mode — a bright base ring + a tall
   state spike, **green for auto-path, yellow for manual**; UNSELECTED tanks draw none.
 - **Destination** (`K_DEST`): a beacon, in the tank's colour, at each routing tank's
@@ -102,14 +107,14 @@ cell; none of it writes the model:
 ## Boundaries / non-promises
 
 - `z` is **render-only**: the world stays a 2-D grid; the simulation has no height.
-- No perspective camera or free orbit (the iso angle is fixed; a zoom is provided), no
-  animated/rigged meshes, no shadows/AO/PBR, no 3-D minimap (it stays top-down). These
-  are deferred (see `README.md`), noted here, not built.
+- No free 3-D orbit (the camera tilt is fixed ~30° south; pan and zoom are provided),
+  no animated/rigged meshes, no shadows/AO/PBR, no 3-D minimap (it stays top-down).
+  These are deferred (see `README.md`), noted here, not built.
 
 ## How it's tested
 
 `./test.sh` builds natively (no wasm, no GPU) — the sim core **and** `render.c` are
 plain C over the `World`. It runs every chapter-3 sim test unchanged, then the
-chapter-4 render tests: the **sim-hash-equals-chapter-3** regression, the dimetric
-projection, the monotone depth key, the linear (uniform) camera, and the
+chapter-4 render tests: the **sim-hash-equals-chapter-3** regression, the monotone
+translucent depth key (`view.h`), the byte-identical render rebuild, and the
 emit-for-visible bound.

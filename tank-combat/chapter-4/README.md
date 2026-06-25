@@ -1,8 +1,8 @@
-# Tank Combat — Chapter 4: The View (isometric 3D)
+# Tank Combat — Chapter 4: The View (top-down perspective)
 
 Chapter 4 of *Data-Oriented Design, by picture* (the book index is one level up). It
 takes [chapter 3](../chapter-3/)'s world — the 4×4 toroidal grid, the four self-routing
-tanks, the thousand gossiping mites, the combat — and **redraws it isometric 3-D**,
+tanks, the thousand gossiping mites, the combat — and **redraws it in top-down perspective 3-D**,
 changing **nothing about the simulation**. The same seed and inputs produce the same
 play, down to a byte: the chapter's whole point is that a clean **one-way
 sim/render dependency** lets you replace the *view* wholesale while the *model* sits
@@ -26,7 +26,7 @@ Built following Mike Acton's data-oriented design rules:
 [**data-oriented-design.md**](https://github.com/macton/nagent/blob/master/context/data-oriented-design.md).
 
 Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge). The main
-view is **isometric 3-D**; the minimap stays **top-down** — the same data drawn two
+view is **top-down perspective 3-D**; the minimap stays **flat top-down** — the same data drawn two
 ways at once. The four tanks are still yours: **tap a tank** to cycle it *auto-path*
 (tap a cell to route it there) → *manual* (`W`/`S`/`A`/`D` or the pad) → *unselected*.
 Two **render-only** controls sit under the canvas (clearly labelled presentation): a
@@ -41,36 +41,38 @@ contract; see [`CONTRACT.md`](CONTRACT.md).
 
 ## What changed (the render half only)
 
-### The projection — dimetric 2:1, in the shader (`iso.h`)
+### The projection — a top-down perspective camera, in the shader
 
 The world is the same `BIG_W × BIG_H` grid of cells in subcells. Each instance now
 carries a **3-D world placement** — a cell `(wx, wy)`, a render-only **height `wz`**,
 a **facing** (the body/turret angle the sim already stores), and a **tint** — and the
-**vertex shader** projects it:
+**vertex shader** projects it with a host-built **model-view-projection matrix**:
 
 ```
-screenX = (wx - wy) * ISO_X
-screenY = (wx + wy) * ISO_Y - wz * ISO_Z      // ISO_X : ISO_Y = 2 : 1
+clip = mvp * vec4(world, 1)     // mvp = perspective · lookAt(eye, target) · scale(1/SUB)
 ```
 
-The classic **dimetric 2:1** ratio, **orthographic** (no perspective). `render.c`
-emits placements, never baked screen positions — the iso basis, zoom, and follow
-offset live in the **view uniform**, so the camera is a uniform, not a rebuild. The
-constants are exported from wasm so the shader reads one source of truth; the native
-test exercises the C `iso_project`/`iso_depth` directly.
+The camera looks down on the world from above and slightly to the **south** (a fixed
+~30° tilt off straight-down), so you see the tops of things and a sliver of their near
+faces, and the **perspective** gives real depth — near walls larger than far. `render.c`
+emits placements, never baked screen positions — the MVP is the **view uniform**, so a
+pan/zoom is just a different matrix, not a rebuild. Depth is the matrix's own
+`clip.z/w`; the only render-side constant left in C is the translucent painter key
+(`view.h`).
 
 ### Depth — a z-buffer for the meshes, a painter's key for the glow
 
-Opaque geometry draws with a **depth buffer** (a new texture in the pass): depth is
-`wx + wy + wz`, the GPU resolves occlusion, no CPU sort. The key is **monotone along
-the view diagonal** (tested). Translucent FX (laser glow, bursts) draw in a **second
-pass** — depth-test on, write off, **painter-sorted back-to-front** by `wx + wy + wz`.
+Opaque geometry draws with a **depth buffer** (a new texture in the pass): the
+**perspective matrix writes real depth** (`clip.z/w`), the GPU resolves occlusion, no
+CPU sort. Translucent FX (laser glow, bursts) draw in a **second pass** — depth-test on,
+write off, **painter-sorted back-to-front** by a small key: since the camera leans south
+and looks down, "nearer" grows with `+y` (south) and `+z` (height) — `view.h`, tested.
 
 ### Shading — flat per-face, no asset required
 
 One directional light; each face is `tint * (ambient + (1-ambient)·dot(n, light))`,
 computed in the shader from the face normal. An axis-aligned block reads top-bright,
-sides-darker — the iso cue, for free.
+sides-darker — the depth cue, for free.
 
 ### Assets are late-bound data
 
@@ -111,19 +113,19 @@ A tap selects/sends, a drag pans, two fingers (or the wheel) zoom.
 
 ```
 src/
-  iso.h          NEW  the dimetric projection + depth key (pure, shared with the test)
+  view.h         NEW  the translucent depth key (the projection is a host-side perspective MVP)
   render.h       the instance layout (20-byte 3-D box), the kinds, the DrawList
   render.c       reads the World, emits 3-D placements grouped by kind (no sim writes)
   mesh_data.h    NEW  the baked-mesh table interface (M_CUBE, M_PYLON, ...)
   mesh_data.c    GENERATED  the baked low-poly vertex buffers (tools/gen_meshes.c)
-  wasm.c         + render exports (DrawList, iso basis, meshes); sim exports unchanged
+  wasm.c         + render exports (DrawList + meshes); sim exports unchanged
   test.c         + the chapter-4 render tests; the chapter-3 sim tests are unchanged
   sim.c sim.h mites.c tanks_fire.c tanks_path.c agent_*.c collide.c grid_paths.c
   edge_paths.c escape_table.c map_data.c dirtab.c defs.h ...   FROZEN (== chapter 3)
 tools/
   gen_meshes.c   NEW  host-bake the low-poly meshes -> src/mesh_data.c
   gen_escape.c gen_map.c ...   unchanged
-app.js           the isometric WebGPU renderer (2 pipelines, depth, mesh bind, camera)
+app.js           the perspective WebGPU renderer (2 pipelines, depth, mesh bind, MVP camera)
 ```
 
 ## Memory budget (static, no dynamic allocation)
@@ -152,7 +154,7 @@ GitHub Pages serves it with no build step.
 
 `./test.sh` builds natively (no wasm, no GPU) and runs **134 checks**: every chapter-3
 sim test unchanged (115), then the chapter-4 render tests (19) — the
-sim-hash-equals-chapter-3 thesis, the dimetric projection, the monotone depth key, the
+sim-hash-equals-chapter-3 thesis, the translucent depth key, the host-uniform camera, the
 linear (uniform) camera, and the emit-for-visible bound. `render.c` is plain C over the
 `World`, so it is exercised on the host with no browser.
 
@@ -162,14 +164,15 @@ linear (uniform) camera, and the emit-for-visible bound. `render.c` is plain C o
 - The sim state-hash after the scripted run equals chapter 3's golden `0xFB9DAC47`.
 - The first pass renders from primitives only (the unit cube); the second pass swaps in
   baked low-poly meshes via the kind→mesh table; neither pass touches the sim.
-- The page shows the world, the tanks, and the thousand mites in isometric 3-D,
+- The page shows the world, the tanks, and the thousand mites in top-down perspective 3-D,
   depth-correct and flat-shaded, with the top-down minimap beside it and the chapter-3
   debug widgets live in context.
 
 ## Deferred (not built — no speculative generality)
 
-Perspective camera / free 3-D orbit (the iso angle is fixed; a zoom is provided);
-animated or rigged meshes / skeletal animation (static low-poly, oriented by the sim's
+A free 3-D orbit — rotating the camera around the world (the tilt is a fixed ~30° off
+straight-down; pan and zoom are provided); animated or rigged meshes / skeletal
+animation (static low-poly, oriented by the sim's
 existing facing); shadows, ambient occlusion, normal/PBR materials (flat face-shading
 only); height/elevation in the **simulation** (`z` is render-only — the world stays a
 2-D grid); terrain autotiling / corner-aware tilesets; a 3-D minimap (it stays
