@@ -183,7 +183,7 @@ async function main() {
   let useAssets = false;
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false;
   let cam3d = { sx: 1, sy: 1, ox: 0, oy: 0 };
-  const ZMIN = 0.85, ZMAX = 6;
+  const ZMIN = 0.85, ZMAX = 20;
   function baseScale() {                              // px per screen-unit with the whole world fit
     const worldW = (C.BW + C.BH) * C.SUB * C.IX, worldH = (C.BW + C.BH) * C.SUB * C.IY + C.SUB * C.IZ;
     return Math.min(canvas.width * 0.96 / worldW, canvas.height * 0.92 / worldH);
