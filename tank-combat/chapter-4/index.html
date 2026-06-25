@@ -37,11 +37,14 @@
   #toolbar .tblabel { color: var(--dim); }
   #toolbar #camlabel { color: var(--acc); }
   .followbtn { font-weight: 700; min-width: 30px; text-align: center; }
-  .followbtn.t0 { border-color: #f29e29; color: #f5c277; }
-  .followbtn.t1 { border-color: #4db3e6; color: #8fd2f2; }
-  .followbtn.t2 { border-color: #78cd78; color: #a6e0a6; }
-  .followbtn.t3 { border-color: #c48ceb; color: #d8b6f3; }
-  #toolbar .followbtn.active, #toolbar #freecam.active { background: var(--acc); color: #161616; border-color: var(--acc); }
+  #toolbar .followbtn { color: #161616; opacity: 0.62; }            /* solid tank colour; dim when not active */
+  #toolbar .followbtn.t0 { background: #f29e29; border-color: #f29e29; }
+  #toolbar .followbtn.t1 { background: #4db3e6; border-color: #4db3e6; }
+  #toolbar .followbtn.t2 { background: #78cd78; border-color: #78cd78; }
+  #toolbar .followbtn.t3 { background: #c48ceb; border-color: #c48ceb; }
+  #toolbar .followbtn:hover { opacity: 0.85; }
+  #toolbar .followbtn.active { opacity: 1; box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--acc); }   /* the followed tank */
+  #toolbar #freecam.active { background: var(--acc); color: #161616; border-color: var(--acc); }
 
   /* the game */
   #map { position: relative; width: 100%; max-width: 720px; margin: 8px auto 0;
@@ -184,7 +187,7 @@
     connected map; the minimap below stays <b>flat top-down</b> — the same data drawn two ways. <b>Drag</b> to
     pan, <b>shift- or right-drag</b> (or a <b>two-finger drag</b>) to <b>orbit &amp; tilt</b>, <b>pinch</b> or
     <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b> sliders above are live;
-    the <b>toolbar</b> follow-cams a tank or returns to <b>free</b> view, and <b>F</b> frames the selected tank. The
+    the <b>toolbar</b> follow-cams a tank (selecting it) or returns to <b>free</b> view — pan/zoom/orbit adjust the follow; <b>F</b> frames the selection. The
     <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (a yellow spike; drive it: W/S/A/D or the pad) →
@@ -366,11 +369,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.25-203128"></script>
+  <script src="version.js?v=2026.06.25-204511"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.25-203128");</script>
+  <script type="module">import("./app.js?v=2026.06.25-204511");</script>
 </body>
 </html>

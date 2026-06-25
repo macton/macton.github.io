@@ -47,6 +47,15 @@ EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_
 
 EXPORT(set_input)   void set_input(uint32_t tank, uint32_t bits) { if (tank < N_TANKS) g_world.tank_in[tank] = (uint8_t)bits; }
 EXPORT(cycle_tank)  void cycle_tank(uint32_t tank) { sim_cycle_tank(&g_world, tank); rebuild(); }
+/* follow-cam picks a tank: SELECT it (into AUTOPATH) without cycling — mirrors
+ * sim_cycle_tank's select branch, but never advances an already-selected tank. */
+EXPORT(select_tank) void select_tank(uint32_t tank) {
+  if (tank >= N_TANKS || g_world.selected == tank) return;
+  if (g_world.selected != SEL_NONE) g_world.tstate[g_world.selected] = TS_UNSELECTED;
+  g_world.selected = (uint8_t)tank;
+  g_world.tstate[tank] = TS_AUTOPATH;
+  rebuild();
+}
 EXPORT(set_dest)    void set_dest(uint32_t tank, uint32_t wcx, uint32_t wcy) { sim_set_dest(&g_world, tank, wcx, wcy); rebuild(); }
 EXPORT(toggle_wall) void toggle_wall(uint32_t wcx, uint32_t wcy) { sim_toggle_wall(&g_world, wcx, wcy); rebuild(); }
 

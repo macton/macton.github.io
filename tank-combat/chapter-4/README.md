@@ -31,9 +31,10 @@ ways at once. The four tanks are still yours: **tap a tank** to cycle it *auto-p
 (tap a cell to route it there) → *manual* (`W`/`S`/`A`/`D` or the pad) → *unselected*.
 **Render-only** controls wrap the canvas (clearly labelled presentation): a **low-poly
 art** toggle (placeholder cubes ↔ baked meshes) and **zoom / pitch / fov** sliders below,
-and a **toolbar** above with the screen badge, a **per-tank follow-cam** button, and a
-**free**-view button; **F** frames the selected tank. Drag to pan; **shift-, right-, or
-two-finger-drag** to **orbit and tilt**; pinch or scroll to zoom.
+and a **toolbar** above with the screen badge, **per-tank follow-cam** buttons (each
+selects that tank), and a **free**-view button; **F** frames the selected tank. Drag to
+pan; **shift-, right-, or two-finger-drag** to **orbit and tilt**; pinch or scroll to
+zoom — and while following, those adjust the follow rather than dropping it.
 
 ## The thesis, stated as a test
 

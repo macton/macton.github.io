@@ -220,7 +220,7 @@ async function main() {
   // north). viewWrite writes the MVP and remembers its inverse so a pixel can be cast
   // back onto the ground. Nothing here touches the simulation.
   let useAssets = false;
-  let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1;
+  let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
   let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
   const DEG = Math.PI / 180;
@@ -306,18 +306,31 @@ async function main() {
   function camScreen() { return { sx: Math.floor(camX / (C.GW * C.SUB)) % C.SX, sy: Math.floor(camY / (C.GH * C.SUB)) % C.SY }; }
   function gotoScreen(sx, sy) { camX = sx * C.GW * C.SUB + C.GW * C.SUB / 2; camY = sy * C.GH * C.SUB + C.GH * C.SUB / 2; follow = false; clampCam(); setPicker(false); }
 
-  // drag-pan: keep the world point you grabbed under the cursor (correct in perspective)
+  // while following, the camera looks at (tank + offset); keep the offset within ~a screen
+  function clampOffset() {
+    const mx = C.GW * C.SUB, my = C.GH * C.SUB;
+    followOffX = Math.max(-mx, Math.min(mx, followOffX));
+    followOffY = Math.max(-my, Math.min(my, followOffY));
+  }
+  // drag-pan: keep the world point you grabbed under the cursor (correct in perspective).
+  // While following a tank, pan shifts the follow OFFSET instead, so it stays a follow-cam.
   function panBy(prevX, prevY, curX, curY) {
     const a = screenToWorld(prevX, prevY), b = screenToWorld(curX, curY);
-    camX -= b.x - a.x; camY -= b.y - a.y; clampCam();
+    const ddx = b.x - a.x, ddy = b.y - a.y;
+    if (follow && followTank >= 0) { followOffX -= ddx; followOffY -= ddy; clampOffset(); }
+    else { camX -= ddx; camY -= ddy; clampCam(); }
   }
-  // zoom by `factor`, keeping the world point under (clientX,clientY) fixed
+  // zoom by `factor`. Free-cam keeps the world point under (clientX,clientY) fixed; while
+  // following, zoom just changes the level and stays centred on the tank.
   function zoomBy(factor, clientX, clientY) {
-    const before = screenToWorld(clientX, clientY);
+    const free = !(follow && followTank >= 0);
+    const before = free ? screenToWorld(clientX, clientY) : null;
     zoom = Math.max(ZMIN, Math.min(ZMAX, zoom * factor));
-    viewWrite();                                        // refresh the matrix (+ inverse) for the new zoom
-    const after = screenToWorld(clientX, clientY);
-    camX += before.x - after.x; camY += before.y - after.y; clampCam();
+    if (free) {
+      viewWrite();                                      // refresh the matrix (+ inverse) for the new zoom
+      const after = screenToWorld(clientX, clientY);
+      camX += before.x - after.x; camY += before.y - after.y; clampCam();
+    }
     if (zR) zR.value = zoom.toFixed(2);
   }
   // orbit the camera around the look-at point: horizontal drag swings yaw, vertical drag
@@ -356,12 +369,11 @@ async function main() {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragMoved += Math.abs(dx) + Math.abs(dy);
     if (pointers.size === 1) {
       if (rotateDrag) rotateBy(dx, dy); else panBy(prev.x, prev.y, e.clientX, e.clientY);
-      follow = false;
     } else if (pointers.size >= 2) {                                      // pinch -> zoom, centroid drag -> orbit
       const d = pdist(), [mx, my] = pmid();
       if (pinchPrev > 0) zoomBy(d / pinchPrev, mx, my);
       if (midPrev) rotateBy(mx - midPrev[0], my - midPrev[1]);
-      pinchPrev = d; midPrev = [mx, my]; follow = false;
+      pinchPrev = d; midPrev = [mx, my];
     }
   });
   function endPointer(e) {
@@ -373,7 +385,7 @@ async function main() {
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
   canvas.addEventListener("pointerleave", () => { lastMouse = null; });
-  canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); follow = false; }, { passive: false });
+  canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); }, { passive: false });
 
   // a tap: a tank cell -> cycle its state (and follow it); else send the auto-path tank there
   function clickAt(clientX, clientY) {
@@ -382,7 +394,7 @@ async function main() {
     for (let t = 0; t < C.NT; t++)
       if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) {
         wasm.cycle_tank(t);
-        if (view.tstate()[t] !== 0) { followTank = t; follow = true; }   // now selected -> follow it
+        if (view.tstate()[t] !== 0) { followTank = t; follow = true; followOffX = followOffY = 0; }  // now selected -> follow it
         else { follow = false; followTank = -1; }                        // cycled to unselected -> free
         return;
       }
@@ -399,7 +411,7 @@ async function main() {
 
   // toolbar camera buttons: per-tank follow-cam + a free-view button
   for (const b of document.querySelectorAll(".followbtn"))
-    b.onclick = () => { followTank = +b.dataset.tank; follow = true; };
+    b.onclick = () => { const t = +b.dataset.tank; wasm.select_tank(t); followTank = t; follow = true; followOffX = followOffY = 0; };
   const freeBtn = document.getElementById("freecam");
   if (freeBtn) freeBtn.onclick = () => { follow = false; followTank = -1; };
   function updateCamUI() {
@@ -452,7 +464,7 @@ async function main() {
   const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
   dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; };
   dbg.onReset = () => {
-    wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; followTank = -1;
+    wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; followTank = -1; followOffX = followOffY = 0;
     yaw = 0; pitch = PITCH0; fov = FOV0; syncViewUI(); setPicker(false);
   };
 
@@ -470,9 +482,10 @@ async function main() {
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
 
-    // follow-cam: track the chosen tank (until you pan/zoom/rotate) — snap on the toroidal wrap
+    // follow-cam: track the chosen tank + your pan offset; pan/zoom/orbit stay relative to
+    // the follow (they never drop it). Snap on the toroidal wrap.
     if (follow && followTank >= 0) {
-      const xy = view.xy(), tx = xy[2 * followTank], ty = xy[2 * followTank + 1];
+      const xy = view.xy(), tx = xy[2 * followTank] + followOffX, ty = xy[2 * followTank + 1] + followOffY;
       const dxw = tx - camX, dyw = ty - camY;
       camX = Math.abs(dxw) > C.BW * C.SUB / 2 ? tx : camX + dxw * 0.12;
       camY = Math.abs(dyw) > C.BH * C.SUB / 2 ? ty : camY + dyw * 0.12;
