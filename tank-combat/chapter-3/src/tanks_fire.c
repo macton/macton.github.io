@@ -64,6 +64,15 @@ static void spawn_fx(World* w, uint32_t xy, uint8_t kind) {
   w->fx_head = (uint8_t)((w->fx_head + 1u) % N_FX);
 }
 
+/* jolt a struck wall cell briefly (cosmetic ring; refresh it if already shaking) */
+static void shake_wall(World* w, uint16_t cell) {
+  for (uint32_t i = 0; i < WALL_SHAKE_MAX; i++)
+    if (w->wall_shake_t[i] && w->wall_shake_cell[i] == cell) { w->wall_shake_t[i] = WALL_SHAKE_DUR; return; }
+  w->wall_shake_cell[w->wall_shake_head] = cell;
+  w->wall_shake_t   [w->wall_shake_head] = WALL_SHAKE_DUR;
+  w->wall_shake_head = (uint8_t)((w->wall_shake_head + 1u) % WALL_SHAKE_MAX);
+}
+
 /* destroy mite m: a burst, mark it dead (respawn timer), freeze the corpse, and the
  * "death cry" — every live mite within 2x sensing range of it learns the firing tank's
  * cell (record stamped now + hunt), written into the current record buffer (read next
@@ -144,6 +153,7 @@ static void proj_step(World* w, uint32_t b, uint32_t frame) {
     int impx = iwx * SUB + SUB / 2 - ((co * (SUB / 2)) >> TRIG_SHIFT);   /* pulled back to the near face */
     int impy = iwy * SUB + SUB / 2 - ((si * (SUB / 2)) >> TRIG_SHIFT);
     spawn_fx(w, xy_pack(wrap_x(impx), wrap_y(impy)), FX_IMPACT);
+    shake_wall(w, (uint16_t)wc_pack(iwx, iwy));           /* and jolt the wall segment it struck */
     w->tank_proj_live[b] = 0;
     return;
   }
@@ -181,6 +191,7 @@ void tanks_fire(World* w) {
   int rate = w->turret_rate;
 
   for (uint32_t i = 0; i < N_FX; i++) if (w->fx_t[i]) w->fx_t[i]--;   /* age the bursts */
+  for (uint32_t i = 0; i < WALL_SHAKE_MAX; i++) if (w->wall_shake_t[i]) w->wall_shake_t[i]--;  /* and the wall shakes */
 
   for (uint32_t t = 0; t < N_TANKS; t++) {
     /* every bolt this tank has in flight pierces on this tick (and may expire at a wall / its
@@ -221,7 +232,12 @@ void tanks_fire(World* w) {
         uint32_t c = (uint32_t)wc_pack(wrap_wcx(tcx + ox), wrap_wcy(tcy + oy));
         if (w->mite_cnt[c] == 0) continue;                         /* no mites in this cell */
         if (!los(w->grid, tcx, tcy, tcx + ox, tcy + oy)) continue;  /* whole cell out of sight */
-        int ad = (int16_t)(aim_angle(ox * SUB, oy * SUB) - turret); if (ad < 0) ad = -ad;
+        uint16_t cang = aim_angle(ox * SUB, oy * SUB);             /* the cell's bearing (32-dir) */
+        /* skip a candidate whose shot would pass through a friendly tank — re-target to a clear
+         * one instead of locking a mite we'd only have to hold fire on. */
+        uint32_t cd = (uint32_t)(cang >> ANGLE_SHIFT);
+        if (friendly_in_path(w, t, dir_cos(cd), dir_sin(cd))) continue;
+        int ad = (int16_t)(cang - turret); if (ad < 0) ad = -ad;
         uint32_t m = TGT_NONE;                                      /* lowest index over the segment slots */
         for (uint8_t s = 0; s < MITE_CAP; s++) { uint32_t mm = w->mite_list[c * MITE_CAP + s]; if (mm < m) m = mm; }
         if (m != TGT_NONE && (ad < best_ang || (ad == best_ang && m < target))) { best_ang = ad; target = m; }

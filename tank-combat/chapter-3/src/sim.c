@@ -38,6 +38,8 @@ void sim_init(World* w) {
   w->frame = 0;
   for (uint32_t i = 0; i < N_FX; i++) w->fx_t[i] = 0;   /* no destruction bursts yet */
   w->fx_head = 0;
+  for (uint32_t i = 0; i < WALL_SHAKE_MAX; i++) w->wall_shake_t[i] = 0;   /* no wall shakes yet */
+  w->wall_shake_head = 0;
   w->move_speed = 16;         /* subcells per tick (16 ticks per cell) */
   w->turn_rate  = 1024;       /* body angle units/tick: ~16 ticks per 90 degrees */
   w->turret_rate = 2048;      /* turret angle units/tick: ~8 ticks per 90 degrees (swings independently) */

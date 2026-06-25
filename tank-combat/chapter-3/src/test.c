@@ -787,12 +787,28 @@ static void t_tanks_fire(void) {
   W.fire_period = 30; W.mite_respawn = 300;
   mites_build_index(&W);
   for (int i = 0; i < 10; i++) tanks_fire(&W);
-  check(W.tank_target[0] == 0, "the shooter acquires the mite past the friendly");
+  check(W.tank_target[0] == TGT_NONE, "the shooter won't lock a mite whose only shot is blocked by the friendly");
   check(!W.tank_proj_live[0] && !W.tank_proj_live[1 * PROJ_MAX] && W.mite_resp[0] == 0,
         "neither tank fires through the other — the mite between them survives");
   place_tank(&W, 1, 7, 2);                                  /* move the friendly out of the line */
   tanks_fire(&W);
   check(W.tank_proj_live[0], "with the friendly clear, the shooter takes the shot");
+
+  /* re-targeting: when the most-hittable mite's shot is blocked by a friendly, the turret picks a
+   * different, unblocked mite instead of locking the blocked one. */
+  sim_init(&W); gossip_setup(&W, 2);
+  for (int c = 2; c <= 8; c++) clear_wall(&W, c, 7);       /* open the east row */
+  for (int r = 4; r <= 7; r++) clear_wall(&W, 5, r);       /* open a north column at col 5 */
+  place_tank(&W, 0, 5, 7);                                  /* shooter, turret east */
+  place_tank(&W, 1, 7, 7);                                  /* a friendly 2 cells east, in the line */
+  mite_reset(&W, 0, 8, 7);                                  /* mite A: east, past the friendly (blocked) */
+  mite_reset(&W, 1, 5, 4);                                  /* mite B: north, clear */
+  W.fire_period = 30; W.mite_speed = 0;
+  mites_build_index(&W); tanks_fire(&W);
+  check(W.tank_target[0] == 1, "the turret skips the blocked east mite and targets the clear north one");
+  place_tank(&W, 1, 7, 2);                                  /* clear the east line */
+  tanks_fire(&W);
+  check(W.tank_target[0] == 0, "with the line clear, the east mite (least rotation) is targeted again");
 
   /* run-over: a MOVING tank squashes a mite under its (cell-sized) footprint; a STILL tank
    * doesn't, and a mite a cell away (outside the footprint) survives either way. */
@@ -813,10 +829,12 @@ static void t_tanks_fire(void) {
   place_tank(&W, 0, 5, 7);                                  /* turret east; cols 8..11 are walls */
   mite_reset(&W, 0, 6, 7);                                  /* a target east, so it fires toward the wall */
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
-  int impact = 0;
-  for (int i = 0; i < 30 && !impact; i++) { sim_tick(&W);
-    for (uint32_t f = 0; f < N_FX; f++) if (W.fx_t[f] && W.fx_kind[f] == FX_IMPACT) impact = 1; }
+  int impact = 0, shake = 0;
+  for (int i = 0; i < 30 && !(impact && shake); i++) { sim_tick(&W);
+    for (uint32_t f = 0; f < N_FX; f++) if (W.fx_t[f] && W.fx_kind[f] == FX_IMPACT) impact = 1;
+    for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++) if (W.wall_shake_t[e]) shake = 1; }
   check(impact, "a bolt striking a wall spawns an impact effect");
+  check(shake, "a bolt striking a wall shakes that wall segment");
 
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
    * so the bolt connects, and step until it lands. */

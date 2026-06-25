@@ -195,8 +195,8 @@ destruction bursts. Per tank, each tick:
   travelling shot (`proj_speed`, a page tunable — slow default 1 cell/tick), not a hitscan beam: each tick `proj_step`
   marches it along its fixed heading, **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
-  has flown `PROJ_RANGE` cells, then it expires — a hot **impact spark** marks where it struck a
-  wall. Because the 32-direction aim can't pin an
+  has flown `PROJ_RANGE` cells, then it expires — a hot **impact spark** marks, and a brief
+  **jolt** shakes, the wall it struck. Because the 32-direction aim can't pin an
   off-centre mite exactly, the bolt **carries the mite it was aimed at** (`tank_proj_tgt`) and
   kills it for sure when it reaches that mite's cell — so a locked turret reliably drops what
   it shot at, while the thin half-width means other mites a sub-segment off the line **dodge**.
@@ -206,10 +206,12 @@ destruction bursts. Per tank, each tick:
   barrel is free to swing onto the next target while the shot is still travelling. A tank may
   have **up to `PROJ_MAX` (4) bolts in flight at once** (a flat pool, `t*PROJ_MAX + slot`), so a
   slow bolt no longer throttles the fire rate — only when **all four slots are full** does
-  firing wait for one to clear; the cadence is otherwise the cooldown. A tank also **holds its
-  shot if the bolt would pass through a friendly tank** (`friendly_in_path`: another tank ahead,
-  within range, inside a body-plus-beam corridor, in clear line of sight) — tanks never fire
-  through each other, even at the cost of sparing a mite hiding behind one.
+  firing wait for one to clear; the cadence is otherwise the cooldown. Tanks **never fire through
+  each other**: targeting **skips any mite whose shot would pass through a friendly tank**
+  (`friendly_in_path`: one ahead, within range, inside a body-plus-beam corridor, in clear line of
+  sight), so the turret **re-targets a clear mite** instead of locking a blocked one — and a
+  precise fire-time check is the final guard. Tanks won't shoot each other even at the cost of
+  sparing a mite hiding behind one.
 - **Death cry.** Each kill writes the **firing tank's cell** into the record of every live
   mite within **2× sensing range** of the destroyed one (stamped now, mode → hunt), through
   the ordinary record buffer — so a bolt that mows a line broadcasts the shooter's position
@@ -280,7 +282,7 @@ table, the field active/peak counters, the per-tank turret/cooldown/target + in-
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
 `tank_turret` (separate from the body), each in-flight **bolt** (a hot streak + bright head)
-and the **bursts** (white mite-kills, orange wall impacts), plus the fifteen nest markers; the minimap (`app.js`) shows the
+and the **bursts** (white mite-kills, orange wall impacts), with struck **walls jolting** briefly, plus the fifteen nest markers; the minimap (`app.js`) shows the
 whole live swarm and the nests (it skips the dead too).
 
 ## Memory budget (static, no dynamic allocation)
@@ -351,10 +353,12 @@ blocks line of sight; the turret **swings at a turn rate** and does not snap; ta
 picks the mite **closest to the turret's direction**, not the spatially nearest; the
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
 **turret is free to swing onto a new target while the bolt is still travelling** (firing no
-longer locks it); a tank keeps **several bolts aloft at once, capped at `PROJ_MAX`**; the
+longer locks it); a tank keeps **several bolts aloft at once, capped at `PROJ_MAX`**; a tank
+**re-targets** a clear mite when the most-hittable one's shot is blocked by a friendly; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
 revives at its nest **with its memory cleared** after the timeout; a **moving** tank runs over
-a mite under it (a still one doesn't); a bolt striking a wall leaves an **impact** spark);
+a mite under it (a still one doesn't); a bolt striking a wall leaves an **impact** spark and
+shakes the wall);
 **wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,
 with firing on by default).

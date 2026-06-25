@@ -81,11 +81,21 @@ static uint16_t g_trace[BIG_W * BIG_H];    /* path-trace scratch */
  * tanks (state outline behind, body+barrel on top). */
 static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
                              uint32_t screen, int ox, int oy) {
-  /* walls */
+  /* walls — a recently-struck wall segment jolts: a small, fast-decaying jitter from wall_shake */
+  int wsx = (int)(screen % SCREENS_X), wsy = (int)(screen / SCREENS_X);
   for (int cy = 0; cy < GRID_H; cy++)
     for (int cx = 0; cx < GRID_W; cx++)
-      if ((w->grid[screen * GRID_H + cy] >> cx) & 1u)
-        k = push(out, k, ox + cx * SUB + SUB / 2, oy + cy * SUB + SUB / 2, 123, 123, 16384, 0, COL_WALL);
+      if ((w->grid[screen * GRID_H + cy] >> cx) & 1u) {
+        int jx = 0, jy = 0;
+        uint16_t cell = (uint16_t)wc_pack(wsx * GRID_W + cx, wsy * GRID_H + cy);
+        for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++)
+          if (w->wall_shake_t[e] && w->wall_shake_cell[e] == cell) {
+            int tt = w->wall_shake_t[e], amp = (WALL_SHAKE_AMP * tt) / WALL_SHAKE_DUR;
+            jx = (tt & 1) ? amp : -amp; jy = (tt & 2) ? amp : -amp;   /* flips each tick: a buzz */
+            break;
+          }
+        k = push(out, k, ox + cx * SUB + SUB / 2 + jx, oy + cy * SUB + SUB / 2 + jy, 123, 123, 16384, 0, COL_WALL);
+      }
 
   /* paths: mark which tanks route through each cell of this screen */
   for (uint32_t i = 0; i < N_CELLS; i++) g_pmask[i] = 0;

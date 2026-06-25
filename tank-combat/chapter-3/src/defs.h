@@ -125,6 +125,11 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define FX_KILL      0          /* burst kind: a destroyed mite (a white pop) */
 #define FX_IMPACT    1          /* burst kind: a bolt splashing on a wall (a hot orange spark) */
 
+/* a struck wall jolts briefly: a small ring of (cell, timer), cosmetic like the burst ring. */
+#define WALL_SHAKE_MAX  32      /* max wall segments shaking at once */
+#define WALL_SHAKE_DUR  6       /* ticks a struck wall shakes */
+#define WALL_SHAKE_AMP  12      /* peak shake offset in subcells (slight) */
+
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u
 #define IN_BACK  2u

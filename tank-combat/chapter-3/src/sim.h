@@ -71,6 +71,11 @@ struct World {
   uint8_t  fx_kind[N_FX]; /* FX_KILL (mite pop) or FX_IMPACT (wall spark) — picks the burst colour */
   uint8_t  fx_head;       /* ring write cursor (wraps; bursts overwrite the oldest) */
 
+  /* a struck wall's brief jolt (cosmetic, like the burst ring): which world cell + ticks left */
+  uint16_t wall_shake_cell[WALL_SHAKE_MAX];
+  uint8_t  wall_shake_t   [WALL_SHAKE_MAX];
+  uint8_t  wall_shake_head;
+
   /* ---- per-tank interaction + routing (every tank can path) -------------- */
   uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
   uint8_t  pdest_screen[N_TANKS];   /* destination screen (0..15) */
