@@ -153,12 +153,19 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
    * onto other screens), like the bursts below. */
   for (uint32_t t = 0; t < N_TANKS; t++) {
     if (!w->tank_proj_live[t]) continue;
+    /* the bolt spawns at the tank centre, so its first stretch is still inside the barrel —
+     * don't draw that. Only the length the head has travelled BEYOND the turret's leading edge
+     * (the barrel tip, 87 + 56 subcells from centre) is shown; the streak's tail is clipped
+     * there. While the head is still within the barrel (beyond <= 0) the bolt isn't drawn. */
+    int beyond = (int)w->tank_proj_dist[t] - (87 + 56);
+    if (beyond <= 0) continue;
     int bx = xy_lo(w->tank_proj_xy[t]), by = xy_hi(w->tank_proj_xy[t]);
     int wcx = wrap_wcx(bx >> SUB_SHIFT), wcy = wrap_wcy(by >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + bx - sox, ly = oy + by - soy;
     uint32_t di = w->tank_proj_dir[t] >> ANGLE_SHIFT; int32_t co = dir_cos(di), si = dir_sin(di);
-    int half = w->proj_speed / 2;                          /* the streak trails back over the tick's travel */
+    int seg = w->proj_speed; if (seg > beyond) seg = beyond;  /* clip the tail at the barrel tip */
+    int half = seg / 2;                                   /* the streak trails back over the drawn segment */
     int mx = lx - ((co * half) >> TRIG_SHIFT), my = ly - ((si * half) >> TRIG_SHIFT);
     k = push(out, k, mx, my, half, 12, co, si, COL_BOLT_GLOW);   /* trailing glow streak */
     k = push(out, k, lx, ly, 24,    9, co, si, COL_BOLT_CORE);   /* bright leading head */
