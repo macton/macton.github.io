@@ -2,6 +2,7 @@
 #include "sim.h"
 #include "collide.h"     /* cell_is_wall */
 #include "edge_paths.h"  /* pg_fold, route_next_dir_pg, route_remaining_pg */
+#include "dirtab.h"      /* dir_cos / dir_sin — for laser-repulsion geometry */
 
 #define RM_INF 0xFFFFFFFFu
 
@@ -276,6 +277,15 @@ void mites_update_fields(World* w) {
 #ifndef FLOCK_SEP_RANGE
 #define FLOCK_SEP_RANGE SUB  /* "close" = within one cell (subcells) */
 #endif
+#ifndef FLOCK_REPEL
+#define FLOCK_REPEL 60       /* flee a live laser: max vote at the beam line, 0 at REPEL_RANGE */
+#endif
+#ifndef REPEL_RANGE
+#define REPEL_RANGE (2 * SUB) /* how far (subcells) a flocking mite feels a beam's repulsion */
+#endif
+#ifndef BEAM_BLOCK
+#define BEAM_BLOCK (3 * SUB / 4) /* a cell this close to a live beam is impassable this tick (mites detour around) */
+#endif
 
 static inline int iabs_(int x) { return x < 0 ? -x : x; }
 /* the wrapped (shortest signed) toroidal delta on an axis of length `span` subcells */
@@ -317,6 +327,34 @@ static int preferred_card(World* w, uint16_t dest, uint32_t mc) {
   return best_d;
 }
 
+/* the perpendicular offset of point (px,py) from tank t's LIVE beam, alongside its segment:
+ * returns the squared perpendicular distance and the away vector (*ax,*ay); a huge value if
+ * the beam is dead or the point is off either end. The one geometry both the beam-as-obstacle
+ * test and the flee-repulsion read. */
+static int beam_offset(World* w, uint32_t t, int px, int py, int* ax, int* ay) {
+  if (w->tank_tracer[t] == 0) return 0x7FFFFFFF;
+  int sx = xy_lo(w->tank_xy[t]), sy = xy_hi(w->tank_xy[t]);
+  uint32_t bd = (uint32_t)(w->tank_turret[t] >> ANGLE_SHIFT);
+  int co = dir_cos(bd), si = dir_sin(bd);
+  int vx = tor_sub(px - sx, BIG_W * SUB), vy = tor_sub(py - sy, BIG_H * SUB);
+  int along = (vx * co + vy * si) >> TRIG_SHIFT;
+  if (along < 0 || along > LASER_MAX * SUB) return 0x7FFFFFFF;     /* behind the muzzle / past max reach */
+  int ex = wc_x(w->tank_shot_cell[t]) * SUB + SUB / 2, ey = wc_y(w->tank_shot_cell[t]) * SUB + SUB / 2;
+  int blen = (tor_sub(ex - sx, BIG_W * SUB) * co + tor_sub(ey - sy, BIG_H * SUB) * si) >> TRIG_SHIFT;
+  if (along > blen + SUB) return 0x7FFFFFFF;                       /* past where the beam stopped (a wall) */
+  *ax = vx - ((along * co) >> TRIG_SHIFT);                         /* perpendicular component: from line to point */
+  *ay = vy - ((along * si) >> TRIG_SHIFT);
+  return (*ax) * (*ax) + (*ay) * (*ay);
+}
+/* is a cell's centre within BEAM_BLOCK of any live beam? such a cell is impassable this tick,
+ * so a mite (hunter or not) routes around the beam instead of stepping onto it. */
+static int cell_on_beam(World* w, uint16_t cell) {
+  int px = wc_x(cell) * SUB + SUB / 2, py = wc_y(cell) * SUB + SUB / 2, ax, ay;
+  for (uint32_t t = 0; t < N_TANKS; t++)
+    if (beam_offset(w, t, px, py, &ax, &ay) < BEAM_BLOCK * BEAM_BLOCK) return 1;
+  return 0;
+}
+
 static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   int cx = wc_x(mc), cy = wc_y(mc);
   uint8_t bit = (uint8_t)(1u << seg_of(m));
@@ -327,6 +365,7 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
     uint32_t nc = (uint32_t)wc_pack(nx, ny);
     if (g_tally[nc] & bit) continue;                   /* my sub-segment is taken there */
     if (popcount4(g_tally[nc]) >= cap) continue;       /* the cell already holds `cap` segments */
+    if (cell_on_beam(w, (uint16_t)nc)) continue;       /* a live beam blocks the step -> route around it */
     vd[nv] = d; vc[nv] = (uint16_t)nc; nv++;
   }
   if (nv == 0) { w->mite_tgt[m] = (uint16_t)mc; return DIR_NONE; }   /* hold */
@@ -341,9 +380,10 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
     if (pref >= 0) for (int i = 0; i < nv; i++) if (vd[i] == pref) { bi = i; break; }
   }
 
-  /* any other case (preferred blocked, or wandering) -> basic flocking off the 3x3. */
+  /* any other case (preferred blocked, or wandering) -> basic flocking off the 3x3,
+   * plus repulsion away from any live laser beam (the swarm parts around a firing tank). */
   if (bi < 0) {
-    int vote[4] = { 0, 0, 0, 0 }, nsamp = 0;
+    int vote[4] = { 0, 0, 0, 0 }, influenced = 0;
     int mx = xy_lo(w->mite_xy[m]), my = xy_hi(w->mite_xy[m]);
     for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
       uint32_t nc = (uint32_t)wc_pack(wrap_wcx(cx + dx), wrap_wcy(cy + dy));
@@ -358,10 +398,21 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
           if (iabs_(rdx) + iabs_(rdy) < FLOCK_SEP_RANGE) vote[(ct + 2) & 3] += FLOCK_SEP; /* separation */
         }
         vote[card_of_dir((uint32_t)(w->mite_ang[p] >> ANGLE_SHIFT))] += FLOCK_ALI;        /* alignment */
-        nsamp++;
+        influenced = 1;
       }
     }
-    if (nsamp == 0) {
+    /* laser repulsion: for each LIVE beam within REPEL_RANGE of the mite, vote to step along
+     * the perpendicular AWAY from it — strongest at the line, falling to 0 at the range — so a
+     * mite shoved off its blocked path actively flees the barrel rather than milling beside it. */
+    for (uint32_t t = 0; t < N_TANKS; t++) {
+      int ax, ay, pd2 = beam_offset(w, t, mx, my, &ax, &ay), r2 = REPEL_RANGE * REPEL_RANGE;
+      if (pd2 >= r2) continue;                                /* dead beam, off the ends, or too far */
+      int rc = card_toward(ax, ay);                           /* the away (flee) cardinal */
+      if (rc < 0) continue;                                   /* exactly on the line — the cap/flock handles it */
+      vote[rc] += FLOCK_REPEL * (r2 - pd2) / r2;              /* max at the line, linear (in d^2) to 0 at range */
+      influenced = 1;
+    }
+    if (!influenced) {
       bi = (int)(xs32(&w->rng) % (uint32_t)nv);         /* utterly alone: fall back to a random wander step */
     } else {
       bi = 0; int best = vote[vd[0]];

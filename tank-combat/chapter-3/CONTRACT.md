@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (116 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (117 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -111,6 +111,14 @@ the inherited tests still pass and the baked escape table is byte-identical.
   utterly alone, it falls back to a random wander step. It is integer + deterministic and
   never breaks the cap. *(tested: a wanderer with east-heading neighbours steps east with
   them, not at random; the cap + determinism hold with flocking on.)*
+- **A live laser beam is a transient obstacle the swarm parts around.** A cell within
+  `BEAM_BLOCK` of any live beam line is **impassable that tick**, so a mite — hunter
+  included — never steps onto a firing barrel's line; its blocked preferred step drops it
+  into the flocking fallback, where a **repulsion** vote (strongest at the line, falling to
+  0 at `REPEL_RANGE`) steers it perpendicular **away** from the beam. So hunters detour
+  around the beam and resume once it fades (~`LASER_TICKS`), and the swarm opens a gap along
+  a firing tank's line of sight. Deterministic; the cap still holds. *(tested: a flocking
+  mite beside a live beam steps perpendicular off it.)*
 
 ## Combat (the tanks shoot the swarm)
 

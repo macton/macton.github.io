@@ -160,6 +160,19 @@ hunters **flow with the swarm around a jam instead of stalling**, so **kills ris
 while alive stays ~945 and the cap holds. The worst single nest ticks up slightly
 (~19.8→21.7) — cohesion's cost — which the light `COH` keeps small.
 
+**Parting around the laser.** A flocking mite also feels a **repulsion** away from any
+**live laser beam**: `beam_offset` gives its perpendicular distance to each firing tank's
+beam segment, and it votes a cardinal **off the line**, strongest at the beam and fading
+to 0 at `REPEL_RANGE`. On its own that barely showed — measured, **94% of the mites near a
+beam are committed *hunters*** that path straight through it. So the beam is also made a
+**transient obstacle**: a cell within `BEAM_BLOCK` (¾ cell) of a live beam is impassable
+that tick, like a wall, so a hunter's preferred step onto the beam comes back "not free"
+and it drops into the flocking-and-flee fallback — it **detours around the barrel's line
+and resumes when the beam fades** (~`LASER_TICKS`). The swarm opens a visible gap along a
+firing tank's sightline: measured, mites within half a cell of a live beam drop ~21%
+without piling at the edges. It costs some aggression (kills ~175→~159 — hunters keep a
+berth from the barrel) and is deterministic; the cap still holds.
+
 ### Determinism
 
 All randomness — every wander direction and every hunt/home roll — comes from a
@@ -305,7 +318,7 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **116 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **117 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
 sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
@@ -335,7 +348,7 @@ with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (116 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (117 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the

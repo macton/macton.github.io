@@ -465,6 +465,21 @@ static void t_mite_behaviour(void) {
     check(W.mite_tgt[0] == (uint16_t)wc_pack(bx + 1, by),
           "a wandering mite flocks with its neighbours (steps east toward/with them), not at random"); }
 
+  /* laser repulsion: a lone flocking mite beside a LIVE beam flees perpendicular to it. Tank
+   * fires east; the mite sits one cell NORTH of the beam line, three cells along it -> steps north. */
+  sim_init(&W); gossip_setup(&W, 0); W.mite_sense = 0;
+  { int tx = 5, ty = 33;                                       /* tank cell; beam runs east */
+    place_tank(&W, 0, tx, ty);
+    W.tank_turret[0]    = (uint16_t)((uint32_t)CARD_DI[DIR_E] << ANGLE_SHIFT);  /* aim east */
+    W.tank_tracer[0]    = LASER_TICKS;                         /* beam is live */
+    W.tank_shot_cell[0] = (uint16_t)wc_pack(tx + 10, ty);      /* beam ends 10 cells east */
+    int bx = tx + 3, by = ty - 1;                              /* lone mite: along the beam, one cell north of the line */
+    for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) clear_wall(&W, bx + dx, by + dy);
+    mite_reset(&W, 0, bx, by);                                 /* MM_WANDER, no neighbours */
+    mites_build_index(&W); mites_step(&W);
+    check(W.mite_tgt[0] == (uint16_t)wc_pack(bx, by - 1),
+          "a flocking mite beside a live laser flees perpendicular off the beam (steps north)"); }
+
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */
   sim_init(&W); gossip_setup(&W, 1);

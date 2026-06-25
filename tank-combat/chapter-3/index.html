@@ -305,6 +305,16 @@
     clumping; and because a blocked hunter now <em>flows with the crowd around a jam</em> instead of
     stalling against it, the swarm presses tanks harder (measured: kills up ~20%, the average nest
     less crowded) while the cap still holds every tick.</p>
+    <p>The same fallback is where the swarm learns to <strong>fear the laser</strong>. A flocking mite
+    feels a <strong>repulsion</strong> away from any <em>live beam</em> — it votes the cardinal
+    perpendicular off the line, strongest at the beam. But that alone barely shows: the mites packed
+    around a firing tank are almost all <em>hunters</em>, and a clean hunter paths straight through. So a
+    live beam is also made a <strong>transient obstacle</strong> — a cell on it is impassable that tick,
+    like a wall — so the hunter's preferred step comes back <em>blocked</em>, it drops into the
+    flock-and-flee fallback, and it <strong>detours around the barrel's line</strong>, resuming once the
+    beam blinks out. Watch a tank fire into the knot: the swarm <strong>parts along the sightline</strong>
+    and closes again behind it. It is the same one rule — <em>path if the step is free, else flock</em> —
+    with the beam simply making the step un-free.</p>
 
     <h2>The tanks shoot back: one transform, the same index</h2>
     <p>Combat is its own small transform (<a href="src/tanks_fire.c">tanks_fire.c</a>), and it
