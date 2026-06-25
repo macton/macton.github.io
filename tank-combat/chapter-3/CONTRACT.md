@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (117 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (115 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -43,13 +43,11 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## The shared record (last-write-wins)
 
-- **One cell + one timestamp per mite** — the last known tank position, and the frame it
-  was recorded. **Newer timestamp wins**; ties break on lowest mite index. *(tested.)*
-- **The record is typed** (the cell's top bit, `GONE_FLAG`): a **sighting** "tank at X", a
-  **gone** "cell X is empty", or **no-info** (`REC_EMPTY`). A sighting propagates to anyone;
-  a **gone-of-X is adopted only by a mite hunting X**; **no-info never propagates** (absence
-  is not gossiped, so an empty can't wipe a live sighting of another cell). *(tested: a newer
-  empty does not overwrite a sighting; a gone-of-X clears X's hunters and spares a Y-hunter.)*
+- **One cell + one timestamp per mite** — the last known tank position (a world cell,
+  or empty), and the frame it was recorded. **Newer timestamp wins**; ties break on
+  lowest mite index. *(tested.)*
+- **Empty is a readable value that propagates.** A newer *empty* record overwrites an
+  older cell record by the same rule. *(tested.)*
 - **Timestamps are monotone.** An older record never overwrites a newer one. *(tested.)*
 - **The gossip is order-independent.** Every mite reads the previous tick's records and
   writes the next tick's, then the buffers swap (double-buffered), so a planted record
@@ -58,24 +56,24 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Behaviour
 
-- **Sense → sighting + hunt.** A tank within `mite_sense` cells sets the record to a
-  **sighting** of the tank's cell, stamped this frame, and the mite hunts it. A self-sensed
-  tank is always hunted. *(tested.)*
-- **Adopt → 80/20 hunt/home.** On adopting a newer peer **sighting**, the mite rolls the
-  role die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
+- **Sense → record + hunt.** A tank within `mite_sense` cells sets the record to the
+  tank's cell, stamped this frame, and the mite hunts it. A self-sensed tank is always
+  hunted. *(tested.)*
+- **Adopt → 80/20 hunt/home.** On adopting a newer peer record, the mite rolls the role
+  die: with probability `mite_phunt` (= 80%) it **hunts** the recorded cell, else it
   **paths home** to its nest; either way it keeps and relays the record. The roll fires
   **even while already hunting or homing** — a newer record interrupts and re-rolls.
   *(tested: the boundaries `P_HUNT = 0`/`100` are exact, the default split matches the
   RNG stream statistically, and a newer record interrupts a homing mite.)*
 - **Arrive (hunt).** A hunting mite that reaches within one cell of its recorded cell
-  refreshes the sighting (stamp now) if a tank is there; if the tank is **gone** it
-  broadcasts a **gone-of-X** (stamp now) and wanders. Only the other mites hunting X adopt
-  the gone, so a stale cluster disperses off X without wiping a live sighting elsewhere.
-  *(tested: refresh; the gone-of-X broadcast; targeted adoption.)*
-- **Arrive (home).** A homing mite that reaches its nest reverts to wander (record dropped
-  to no-info). So a mite carries the nest tint only while in transit — it does not get stuck
-  `MM_HOME` (nest-coloured) at the nest. *(tested: it reverts to wander with the record cleared.)*
-- **A no-info record means wander.** A mite with no recorded cell wanders.
+  refreshes the record (stamp now) if a tank is there, or **erases** it (empty, stamp
+  now) and reverts to wander if not — the erase, being newest, propagates "it's gone."
+  *(tested: both refresh and erase.)*
+- **Arrive (home).** A homing mite that reaches its nest **delivers the sighting and
+  reverts to wander** (record erased, stamped now). So a mite carries the nest tint only
+  while in transit — it does not get stuck `MM_HOME` (nest-coloured) at the nest.
+  *(tested: on reaching its nest the mite reverts to wander with its record cleared.)*
+- **An empty record means wander.** A mite with no recorded cell wanders.
 
 ## Nests & shared route fields
 
@@ -169,7 +167,7 @@ the inherited tests still pass and the baked escape table is byte-identical.
 - **Mites route, tanks route — but the cost differs.** Each tank holds its own route;
   the mites share a few fields keyed by destination. A mite stuck where no field route
   exists (overflow, or a sealed goal) falls back to greedy and relies on the
-  wander/gone-of-X rules and the swarm's collective coverage.
+  wander/erase rules and the swarm's collective coverage.
 - **The laser is hitscan, and only mites take damage.** The beam is an instant line to
   the nearest wall, not a travelling projectile; tanks fire but are not damaged by the
   swarm (tank health/score is not promised here). A turret parked facing a nest

@@ -412,14 +412,13 @@ static void t_mite_gossip(void) {
   check(get_rec_cell(&W, 0) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 0) == 100, "a newer record overwrites an older one on contact");
   check(get_rec_cell(&W, 1) == (uint16_t)wcell(30, 30) && get_rec_time(&W, 1) == 100, "an older record never overwrites a newer one (timestamps monotone)");
 
-  /* absence is not gossiped: a newer no-info (EMPTY) record does NOT overwrite a sighting */
+  /* a newer EMPTY record is a readable value that propagates */
   sim_init(&W); gossip_setup(&W, 2);
   mite_reset(&W, 0, 1, 5); mite_reset(&W, 1, 1, 6);
   set_rec(&W, 0, (uint16_t)wcell(20, 20), 50);
   set_rec(&W, 1, REC_EMPTY, 100);
   mites_build_index(&W); mites_records(&W);
-  check(get_rec_cell(&W, 0) == (uint16_t)wcell(20, 20) && get_rec_time(&W, 0) == 50,
-        "a newer EMPTY (no-info) record does NOT overwrite a sighting (absence is not gossiped)");
+  check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 100, "a newer EMPTY record propagates (overwrites an older cell)");
 }
 
 /* ---- behaviour: sense / hunt / arrive / erase / refresh / 80-20 / interrupt - */
@@ -436,28 +435,14 @@ static void t_mite_behaviour(void) {
   check(get_rec_time(&W, 0) == 500, "the sighting is stamped this frame");
   check(W.mite_mode[0] == MM_HUNT && W.mite_dest[0] == (uint16_t)wcell(10, 7), "a self-sensed tank is always hunted");
 
-  /* reach the recorded cell with NO tank -> broadcast a GONE-of-X + wander */
+  /* reach the recorded cell with NO tank -> erase + wander */
   sim_init(&W); gossip_setup(&W, 1);
   mite_reset(&W, 0, 10, 7);
   set_rec(&W, 0, (uint16_t)wcell(10, 7), 50); W.mite_mode[0] = MM_HUNT; W.mite_dest[0] = (uint16_t)wcell(10, 7);
   W.frame = 600;
   mites_build_index(&W); mites_records(&W);
-  check(rec_is_gone(get_rec_cell(&W, 0)) && rec_cell_of(get_rec_cell(&W, 0)) == (uint16_t)wcell(10, 7) && get_rec_time(&W, 0) == 600,
-        "reaching the recorded cell with no tank turns the record into a GONE-of-X (stamped now)");
-  check(W.mite_mode[0] == MM_WANDER, "after finding the cell empty it stands down to wander");
-
-  /* a GONE-of-X clears a peer HUNTING X, but never touches a peer hunting a different cell */
-  sim_init(&W); gossip_setup(&W, 3); W.mite_sense = 0;          /* no sensing: pure gossip */
-  mite_reset(&W, 0, 2, 7); mite_reset(&W, 1, 1, 7); mite_reset(&W, 2, 3, 7);  /* 0 sees both 1 and 2 */
-  { uint16_t X = (uint16_t)wcell(40, 40), Y = (uint16_t)wcell(50, 50);
-    set_rec(&W, 0, rec_gone_of(X), 200); W.mite_mode[0] = MM_WANDER;          /* 0 carries GONE-of-X */
-    set_rec(&W, 1, X, 100); W.mite_mode[1] = MM_HUNT; W.mite_dest[1] = X;     /* 1 hunts X (older) */
-    set_rec(&W, 2, Y, 100); W.mite_mode[2] = MM_HUNT; W.mite_dest[2] = Y;     /* 2 hunts Y (older) */
-    mites_build_index(&W); mites_records(&W);
-    check(rec_is_gone(get_rec_cell(&W, 1)) && W.mite_mode[1] == MM_WANDER,
-          "a GONE-of-X is adopted by a mite hunting X -> it stands down");
-    check(get_rec_cell(&W, 2) == Y && W.mite_mode[2] == MM_HUNT,
-          "a GONE-of-X never touches a mite hunting a different cell (no cross-erase = no forgetting)"); }
+  check(get_rec_cell(&W, 0) == REC_EMPTY && get_rec_time(&W, 0) == 600, "reaching the recorded cell with no tank erases the record (stamped now)");
+  check(W.mite_mode[0] == MM_WANDER, "after erasing, the mite reverts to wander");
 
   /* reach the recorded cell WITH a tank there -> refresh (sense=0 so the arrive
    * branch, not the sense branch, does it) */

@@ -89,27 +89,22 @@ forced-convergence stress and the one-mite-per-sub-segment invariant.
 
 ### The shared knowledge — last-known-tank-position (the heart of the chapter)
 
-One **record** per mite: the **last known tank position**, plus the **frame it was
-recorded** (a timestamp). A **last-write-wins register**; the swarm's behaviour emerges
-entirely from copying it on contact. The record is **typed** (the cell's top bit, see
-`defs.h`): a **sighting** "tank at X", a **gone** "cell X is empty" (`X | GONE_FLAG`), or
-**no-info** (`REC_EMPTY`). Per tick, for each mite (`mites_records`):
+One **record** per mite: the **last known tank position** as a world cell (or
+`REC_EMPTY`), plus the **frame it was recorded** (a timestamp). A **last-write-wins
+register**; the swarm's behaviour emerges entirely from copying it on contact. Per
+tick, for each mite (`mites_records`):
 
-- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record a **sighting** of its
-  cell, stamped now, and **hunt** it. A self-sensed tank is always hunted.
+- **Sense.** A tank within `mite_sense` cells (Chebyshev) → record its cell, stamped
+  now, and **hunt** it. A self-sensed tank is always hunted.
 - **Read a peer.** Otherwise adopt the **newest** record among the mites in the 3×3
-  (read from the index), if strictly newer (LWW, lowest index breaks ties). A **sighting**
-  is a candidate for anyone; a **gone-of-X** is a candidate **only if this mite is hunting
-  X**; **no-info never propagates**. On adopting a sighting, roll the **role die**:
-  `mite_phunt`% (80) → **hunt** the recorded cell, else → **home** (path to this mite's
-  nest); it fires **even while already hunting/homing**. On adopting a gone-of-its-target,
-  the mite **stands down to wander** and relays the gone onward.
+  (read from the index), if strictly newer — including an *empty* one (LWW, lowest
+  index breaks ties). On adopting, roll the **role die**: `mite_phunt`% (80) → **hunt**
+  the recorded cell, else → **home** (path to this mite's nest). It fires **even while
+  already hunting/homing** — a newer record interrupts and re-rolls. Either way the
+  mite keeps and relays the record; an adopted *empty* record means **wander**.
 - **Arrive (hunt).** A hunting mite within one cell of its recorded cell: tank there →
-  **refresh** (stamp now); gone → broadcast a **gone-of-X** (stamp now) and wander. Only
-  the other mites hunting X adopt it, so the stale cluster clears off X while a live
-  sighting of every **other** cell is left untouched — the swarm no longer "forgets" a
-  tank that is still sitting there (the fix: an untyped empty used to be the newest record
-  and swept the whole swarm back to wander).
+  **refresh** (stamp now); gone → **erase** (empty, stamp now) and wander. The
+  empty-stamped-now record is newest, so "it's gone" propagates back.
 - **Arrive (home).** A homing mite that reaches its nest has delivered the sighting:
   it **drops the record and reverts to wander** (empty, stamp now), rejoining the swarm.
   So a mite is nest-tinted only while *in transit*; without this, homed mites pile up at
@@ -291,15 +286,14 @@ the host:
 ./analyze.sh      # the inherited steer's sampled-cell / 16-pattern analysis
 ```
 
-`src/test.c` covers **117 checks**: the inherited chapter-1/2 movement + pathing (a
+`src/test.c` covers **115 checks**: the inherited chapter-1/2 movement + pathing (a
 regression after the `agent_*` rename and the `edge_paths` generalisation — names and
 shape changed, not behaviour); the **pool & index** (each mite in its own (cell,
 sub-segment) slot); the **crowding cap** (every tick, naturally, under forced
 convergence, **and with firing on** — kills + nest respawns; ≤1 mite per sub-segment);
 the **gossip** (one-hop-per-tick propagation = order-independent, newer overwrites
-older, older never overwrites newer, a no-info *empty* does **not** overwrite a sighting);
-the **typed records** (a gone-of-X clears X's hunters, spares a mite hunting another cell);
-the **behaviour** (sense → hunt, arrive refresh / broadcast-gone, the 80/20 hunt/home split at the `P_HUNT`
+older, older never overwrites newer, a newer *empty* propagates); the **behaviour**
+(sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
 boundaries and statistically, a newer record interrupts a homing mite and re-rolls, a
 mite that reaches its nest **reverts to wander** with its record cleared — so homed mites
 don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into fifteen balanced groups; a homing mite
@@ -322,7 +316,7 @@ with firing on by default).
 
 ## Verified
 
-- `./test.sh` passes (117 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
+- `./test.sh` passes (115 checks): the swarm/gossip/cap/nests/fields/overflow/combat/
   determinism tests **and** the inherited chapter-1/2 movement + pathing.
 - The shared route field gives **byte-for-byte the same route as the tank pathing**
   for the same destination (the field is the tank route keyed by destination), and the
