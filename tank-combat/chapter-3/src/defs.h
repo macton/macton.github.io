@@ -108,7 +108,8 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define TGT_NONE     0xFFFFu    /* tank has no target */
 #define LASER_MAX    64         /* max beam length in cells (it stops at the first wall) */
 #define BEAM_HW      40         /* laser kill half-width, subcells (< SUBQ, so off-line mites dodge) */
-#define LASER_TICKS  6          /* ticks a fired beam stays drawn (~0.1 s at 60 ticks/s) */
+#define LASER_TICKS  12         /* ticks a fired beam stays drawn (~0.2 s at 60 ticks/s) — also how
+                                 * long it lingers as an obstacle the swarm parts around */
 
 /* destruction effects: a small fixed ring of expanding/fading bursts, one per mite the
  * laser destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */

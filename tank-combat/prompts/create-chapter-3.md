@@ -265,7 +265,7 @@ spreads any sighting. Per tick (after movement):
   destroying every mite whose position lies within a narrow band (`BEAM_HW`) of the beam
   line — again just reading the per-cell index. Because mites sit in sub-segments a
   quarter-cell off centre, the ones **on** the line die and the ones **off** it
-  **dodge** (the aimed target always dies). The beam is drawn for `LASER_TICKS` (~0.1 s);
+  **dodge** (the aimed target always dies). The beam is drawn for `LASER_TICKS` (~0.2 s);
   while it is live the **turret is locked** to its firing direction (a shot commits the
   aim). A killed mite is marked **dead** (a `mite_resp` respawn countdown), leaves the
   index on the next rebuild, is not drawn / gossiped / targeted, and spawns a cosmetic

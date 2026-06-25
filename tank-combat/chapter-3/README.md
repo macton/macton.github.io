@@ -203,7 +203,7 @@ destruction bursts. Per tank, each tick:
   tank until it meets a wall, **destroying every mite in the cells it crosses** (`LASER_MAX`
   caps the length). Each destroyed mite is marked dead (`mite_resp` = the respawn timer),
   drops out of the index next rebuild (never drawn — minimap included — gossiped, or
-  targeted), and spawns a **destruction burst**. The beam is drawn for `LASER_TICKS` (~0.1 s),
+  targeted), and spawns a **destruction burst**. The beam is drawn for `LASER_TICKS` (~0.2 s),
   during which the **turret is locked** to its firing direction — a shot commits the aim for
   its whole duration; the turret is free to track again only once the beam fades.
 - **Death cry.** Each kill writes the **firing tank's cell** into the record of every live

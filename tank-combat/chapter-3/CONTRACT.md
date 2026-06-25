@@ -143,7 +143,7 @@ the inherited tests still pass and the baked escape table is byte-identical.
   (length capped at `LASER_MAX`), destroying mites whose position lies within `BEAM_HW` of
   the beam line. Because mites sit in sub-segments a quarter-cell off centre, mites **on**
   the line die and mites **off** it dodge — the aimed target is always destroyed. The beam
-  is drawn for `LASER_TICKS` (~0.1 s), during which the **turret is locked** to its firing
+  is drawn for `LASER_TICKS` (~0.2 s), during which the **turret is locked** to its firing
   direction (it cannot turn toward another target until the beam fades) — a shot commits
   the aim. Each destroyed mite is marked dead and leaves the per-cell index next rebuild —
   a corpse is not drawn (on the map either), gossiped, or targeted — and spawns a cosmetic
