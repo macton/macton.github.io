@@ -26,9 +26,13 @@ static const uint32_t COL_MANUAL   = RGBA(245, 225, 90, 255);
 static const uint32_t COL_MITE_IDLE     = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD= RGBA(150,  64,  74, 255);
-/* the four nests, drawn on the map and used to tint the mites homing to each */
+/* the nests (one per screen but (0,0)), drawn on the map and used to tint mites homing to
+ * each — a hue wheel so adjacent screens read as different colours (match NESTC in app.js) */
 static const uint32_t COL_NEST[NEST_COUNT] = {
-  RGBA(232, 196, 72, 255), RGBA(120, 196, 232, 255), RGBA(150, 210, 130, 255), RGBA(206, 140, 226, 255) };
+  RGBA(230, 146, 110, 255), RGBA(230, 194, 110, 255), RGBA(218, 230, 110, 255), RGBA(170, 230, 110, 255),
+  RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
+  RGBA(110, 170, 230, 255), RGBA(110, 122, 230, 255), RGBA(146, 110, 230, 255), RGBA(194, 110, 230, 255),
+  RGBA(230, 110, 218, 255), RGBA(230, 110, 170, 255), RGBA(230, 110, 122, 255) };
 static const uint32_t COL_LASER_GLOW = RGBA(255,  96,  64, 255);   /* the beam's wide outer glow */
 static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 255);   /* its thin bright core */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */

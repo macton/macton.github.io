@@ -72,8 +72,13 @@ static inline int seg_oy(uint32_t mite) { return (seg_of(mite) & 2) ? SUBQ : -SU
 static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u) + ((b >> 2) & 1u) + ((b >> 3) & 1u)); }
 
 /* Every mite belongs to one of NEST_COUNT home cells, assigned by index. A nest
- * is a destination a mite can path home to (the 20% that carry a sighting home). */
-#define NEST_COUNT  4
+ * is a destination a mite can path home to (the 20% that carry a sighting home).
+ * There is one nest per screen EXCEPT the tank start screen (0,0) — 15 of the 16
+ * screens. Spreading the homes across all the screens spreads the spawn/revival
+ * load: with a single screenful of nests every revived mite funnelled out through
+ * that one screen's two or three border openings (a Poisson pile-up at the exits);
+ * one nest per screen gives each its own exits and roughly N_MITES/15 residents. */
+#define NEST_COUNT  15
 static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 
 /* A killed mite revives at its nest — but the nest CELL sits on the swarm's hunt routes

@@ -50,13 +50,25 @@ void sim_init(World* w) {
   w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */
   w->nest_ttl     = 600;      /* a nest forgets a tank sighting after 600 ticks = 10 s (0 = never) */
 
-  /* the four nests (home cells), spread across the world on open ring cells. Nest 0
-   * sits in screen (1,1), NOT in screen (0,0) where all four tanks start — so revived
-   * mites don't pop up under a tank. The other three are the far corner screens. */
-  w->nest_cell[0] = wc_pack(21, 22);   /* screen (1,1) ring — off the tank start screen */
-  w->nest_cell[1] = wc_pack(78,  7);   /* screen (3,0) */
-  w->nest_cell[2] = wc_pack( 1, 52);   /* screen (0,3) */
-  w->nest_cell[3] = wc_pack(78, 52);   /* screen (3,3) */
+  /* One nest per screen EXCEPT screen (0,0), where all four tanks start — so revived
+   * mites never pop up under a tank, and the spawn load is spread over fifteen screens
+   * instead of piling out through one screen's exits. Each sits on the open cell nearest
+   * its screen centre (so mites disperse toward all four borders), chosen by gen below. */
+  w->nest_cell[ 0] = wc_pack(30,  7);  /* screen (1,0) */
+  w->nest_cell[ 1] = wc_pack(50,  7);  /* screen (2,0) */
+  w->nest_cell[ 2] = wc_pack(70,  7);  /* screen (3,0) */
+  w->nest_cell[ 3] = wc_pack(10, 22);  /* screen (0,1) */
+  w->nest_cell[ 4] = wc_pack(30, 22);  /* screen (1,1) */
+  w->nest_cell[ 5] = wc_pack(50, 22);  /* screen (2,1) */
+  w->nest_cell[ 6] = wc_pack(70, 22);  /* screen (3,1) */
+  w->nest_cell[ 7] = wc_pack(10, 37);  /* screen (0,2) */
+  w->nest_cell[ 8] = wc_pack(30, 37);  /* screen (1,2) */
+  w->nest_cell[ 9] = wc_pack(50, 37);  /* screen (2,2) */
+  w->nest_cell[10] = wc_pack(70, 37);  /* screen (3,2) */
+  w->nest_cell[11] = wc_pack(10, 52);  /* screen (0,3) */
+  w->nest_cell[12] = wc_pack(29, 51);  /* screen (1,3) */
+  w->nest_cell[13] = wc_pack(51, 51);  /* screen (2,3) */
+  w->nest_cell[14] = wc_pack(69, 53);  /* screen (3,3) */
   for (uint32_t n = 0; n < NEST_COUNT; n++) { w->nest_rec_cell[n] = REC_EMPTY; w->nest_rec_time[n] = 0; }
 
   /* Build the rarely-changing path tables once: Level 1, then Level 2 on top, then

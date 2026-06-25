@@ -596,13 +596,15 @@ static uint32_t wc_local (uint32_t c) { return ((uint32_t)wc_y(c) % GRID_H) * GR
 static void t_mite_nests_fields(void) {
   printf("nests & shared route fields:\n");
 
-  /* nest_of partitions the swarm into NEST_COUNT equal groups */
+  /* nest_of partitions the swarm into NEST_COUNT balanced groups (floor or ceil of
+   * N_MITES/NEST_COUNT each — N_MITES need not divide evenly by the nest count) */
   sim_init(&W);
   int cnt[NEST_COUNT]; for (int n = 0; n < NEST_COUNT; n++) cnt[n] = 0;
   int part_ok = 1;
   for (uint32_t m = 0; m < N_MITES; m++) { if (nest_of(m) != m % NEST_COUNT) part_ok = 0; cnt[nest_of(m)]++; }
-  int even = 1; for (int n = 0; n < NEST_COUNT; n++) if (cnt[n] != (int)(N_MITES / NEST_COUNT)) even = 0;
-  check(part_ok && even, "nest_of(i) = i % 4 partitions the swarm into four equal nests");
+  int lo = (int)(N_MITES / NEST_COUNT), balanced = 1;
+  for (int n = 0; n < NEST_COUNT; n++) if (cnt[n] != lo && cnt[n] != lo + 1) balanced = 0;
+  check(part_ok && balanced, "nest_of(i) = i % NEST_COUNT partitions the swarm into balanced nests");
 
   /* a homing mite reaches its nest cell (mite 0's nest is (21,22) in screen (1,1);
    * start a few open cells along its row). Firing off: this checks navigation, not
@@ -831,12 +833,12 @@ static void t_tanks_fire(void) {
     uint32_t fill[4] = {0, 4, 8, 12};                          /* nest 0, sub-segments 0..3 */
     for (int k = 0; k < 4; k++) { uint32_t fm = fill[k]; W.mite_resp[fm] = 0; W.mite_tgt[fm] = nz;
       W.mite_xy[fm] = xy_pack(wc_x(nz) * SUB + SUB/2 + seg_ox(fm), wc_y(nz) * SUB + SUB/2 + seg_oy(fm)); }
-    W.mite_resp[16] = 1;                                       /* nest 0, sub-segment 0 (taken) — due to revive */
+    W.mite_resp[15] = 1;                                       /* mite 15 belongs to nest 0 (15 % NEST_COUNT) — due to revive, its cell full */
     mites_build_index(&W);
     int full = (W.mite_cnt[nz] == MITE_CAP);
     mites_respawn(&W);
-    check(full && W.mite_resp[16] == 0, "a due mite revives even when its nest cell's sub-segment is full");
-    check(W.mite_cell[16] != nz && cell_chebyshev(W.mite_cell[16], nz) <= MITE_REVIVE_R,
+    check(full && W.mite_resp[15] == 0, "a due mite revives even when its nest cell's sub-segment is full");
+    check(W.mite_cell[15] != nz && cell_chebyshev(W.mite_cell[15], nz) <= MITE_REVIVE_R,
           "it revives into a free slot in the nest's neighbourhood, not the full nest cell"); }
 
   /* respawn respects the crowding cap: fill a nest, kill an extra owner of it, and

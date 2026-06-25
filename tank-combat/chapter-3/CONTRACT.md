@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (121 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (133 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -30,9 +30,9 @@ the inherited tests still pass and the baked escape table is byte-identical.
 ## The crowding cap
 
 - **At most one mite per (cell, sub-segment)** — so ≤ `mite_cap` (≤ 4) mites per cell —
-  after every tick. A mite is assigned a sub-segment by index (`(m >> 2) & 3` — distinct
-  from `nest_of = m & 3`, so a nest's mites spread over all four segments and revive in
-  parallel rather than one at a time), moves into it
+  after every tick. A mite is assigned a sub-segment by index (`(m >> 2) & 3` — decoupled
+  from `nest_of = m % 15` (15 not a multiple of 4), so a nest's mites spread over all four
+  segments and revive in parallel rather than one at a time), moves into it
   (parking a quarter-cell off the cell centre, which spreads the swarm out), and enters a
   cell only if its own sub-segment there is free. Enforced by a deterministic in-order
   reservation — a per-cell **bitmask** of reserved sub-segments (current occupants +
@@ -117,8 +117,11 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Nests & shared route fields
 
-- **Every mite belongs to one of four nests**, `nest_of(i) = i % 4`, partitioning the
-  swarm into four equal groups. *(tested.)*
+- **Every mite belongs to one of `NEST_COUNT = 15` nests**, `nest_of(i) = i % 15` — one
+  per screen except the tanks' start screen (0,0) — partitioning the swarm into fifteen
+  balanced groups (floor/ceil of `N_MITES/15`). Spreading the homes across the screens
+  spreads the spawn/revival load over fifteen screens' exits instead of piling it out
+  through one screen's two or three border openings. *(tested.)*
 - **A hunting/homing mite navigates the path tables, not a greedy heuristic.** A homing
   mite reaches its nest cell; a hunting mite reaches within one cell of its recorded
   cell. *(tested.)*
@@ -182,8 +185,8 @@ the inherited tests still pass and the baked escape table is byte-identical.
   the nest cell sits on the hunt routes and is usually full of passing hunters, revival
   searches an **expanding ring** around the nest (`MITE_REVIVE_R`, the nest cell first, then
   outward) for a free `(cell, sub-segment)` slot, so the respawn queue does not jam on the
-  one cell; only if the whole neighbourhood is full does it wait a tick. The four nests sit
-  **off the tanks' start screen** so revived mites don't appear under a barrel. *(tested:
+  one cell; only if the whole neighbourhood is full does it wait a tick. Every nest sits
+  **off the tanks' start screen (0,0)** so revived mites don't appear under a barrel. *(tested:
   revival at/next to the nest after the timeout; revival into the neighbourhood when the nest
   cell is full; the cap holds across thousands of ticks with firing on.)*
 

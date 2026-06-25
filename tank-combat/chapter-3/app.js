@@ -39,7 +39,8 @@ let touchBits = 0;
 const STATE = ["unselected", "auto-path", "manual"];
 const STATUS = ["idle", "routing", "arrived", "no path"];
 const MODE = ["wander", "hunt", "home"];
-const NESTC = [[232,196,72],[120,196,232],[150,210,130],[206,140,226]];  // nest colours (match render.c)
+// nest colours, a hue wheel, one per screen but (0,0) (match COL_NEST in render.c)
+const NESTC = [[230,146,110],[230,194,110],[218,230,110],[170,230,110],[122,230,110],[110,230,146],[110,230,194],[110,218,230],[110,170,230],[110,122,230],[146,110,230],[194,110,230],[230,110,218],[230,110,170],[230,110,122]];
 const sdir = (a, b, n) => (a === b ? 0 : ((b - a + n) % n === 1 ? 1 : -1));  // toroidal one-step
 
 async function main() {
@@ -427,21 +428,18 @@ function mountWidgets(wasm, view, C) {
     trate.input.onchange   = () => wasm.set_turret_rate(parseInt(trate.input.value) | 0);
     tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, wbias.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, nttl.wrap, trate.wrap, size.wrap);
 
-    // the four nest positions (re-fold a nest's field on change)
-    const nests = [];
-    for (let n = 0; n < C.NEST; n++) {
-      const x = numField(`nest ${n} x`, 0, C.BW - 1, 1, 0), y = numField(`nest ${n} y`, 0, C.BH - 1, 1, 0);
-      const set = () => wasm.set_nest(n, parseInt(x.input.value) | 0, parseInt(y.input.value) | 0);
-      x.input.onchange = set; y.input.onchange = set;
-      tc.append(x.wrap, y.wrap); nests.push({ x, y });
-    }
+    // nests are structural now: one per screen except the tank start (0,0), placed at each
+    // screen's centre. That's C.NEST of them — too many to expose as x/y fields, so just note it.
+    const nestNote = document.createElement('div');
+    nestNote.style.cssText = 'grid-column:1/-1;opacity:.6;font-size:12px;margin-top:2px';
+    nestNote.textContent = `${C.NEST} nests — one per screen except the tank start (0,0), at each screen centre`;
+    tc.append(nestNote);
+
     const sync = (f, get) => { if (focused() !== f.input) f.input.value = get(); };
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
       sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt()); sync(wbias, () => wasm.wander_bias());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
-      sync(fire, rateOf); sync(respawn, respOf); sync(nttl, ttlOf); sync(trate, () => wasm.turret_rate());
-      const nc = view.nest();
-      for (let n = 0; n < C.NEST; n++) { sync(nests[n].x, () => nc[n] % C.BW); sync(nests[n].y, () => (nc[n] / C.BW) | 0); } });
+      sync(fire, rateOf); sync(respawn, respOf); sync(nttl, ttlOf); sync(trate, () => wasm.turret_rate()); });
   }
   return api;
 }

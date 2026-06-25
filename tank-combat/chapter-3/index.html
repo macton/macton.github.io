@@ -147,7 +147,7 @@
     unselected. Drive a tank through the swarm and watch a sighting spread — 80% then
     <b>hunt</b> it while 20% carry it <b>home</b> to a nest:
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
-    <span class="swatch" style="background:#e8c448"></span><span class="swatch" style="background:#78c4e8"></span><span class="swatch" style="background:#96d282"></span><span class="swatch" style="background:#ce8ce2"></span> homing (briefly, in its nest’s colour) ·
+    <span class="swatch" style="background:#e6926e"></span><span class="swatch" style="background:#dae66e"></span><span class="swatch" style="background:#6ee692"></span><span class="swatch" style="background:#6eaae6"></span><span class="swatch" style="background:#e66eda"></span> homing (briefly, in its nest’s colour — one per screen) ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
     Each tank’s <b>turret</b> turns at its own rate onto the mite it can most easily hit — the one
     closest to where the barrel already points — and, once aligned, fires a <b>laser</b>
@@ -291,19 +291,20 @@
     its nest — and it navigates with the very same path tables the tanks built. But it does
     <strong>not</strong> own a route. <em>What is the minimal routing data the swarm depends
     on?</em> Across 1000 mites the <em>distinct</em> destinations in flight are few — the
-    <strong>four nests</strong> plus the handful of recent sighting cells the gossip is
+    <strong>fifteen nests</strong> plus the handful of recent sighting cells the gossip is
     converging on — so we keep a small fixed table of <strong>shared route fields</strong>
     (<code>N_FIELDS</code>), each a remaining-distance vector keyed by a destination cell, and
-    many mites read the same field. The four nest fields stay resident; a sighting field is
+    many mites read the same field. The fifteen nest fields stay resident; a sighting field is
     folded the first tick it is wanted and freed when no mite wants it. Turning a destination
     into the input byte is exactly the tanks' path-follow — <strong>one movement model, two
     input sources</strong> — through the shared <code>agent_turn</code>/<code>agent_move</code>.</p>
-    <p>Every mite belongs to one of <strong>four nests</strong> (by index, <code>i % 4</code>),
+    <p>Every mite belongs to one of <strong>fifteen nests</strong> (by index, <code>i % 15</code>),
     drawn on the map and used to tint the homing mites. <strong>How big is the table?</strong>
-    Not a guess: instrumenting the distinct active-destination count across idle, roaming, and
-    fleeing tanks puts the high-water mark at <strong>~22</strong>, so <code>N_FIELDS = 64</code>
-    gives roughly 3× headroom — the same prove/measure/detect discipline the Level-1 byte got,
-    applied to a runtime peak. If the live count ever exceeds the table, those mites steer
+    Not a guess: instrumenting the distinct active-destination count puts the high-water mark at
+    <strong>~19</strong> in normal play — the fifteen resident nests plus the few sighting cells
+    the gossip has converged on — and adversarial tank churn pushes it into the 50s, so
+    <code>N_FIELDS = 64</code> holds it, the same prove/measure/detect discipline the Level-1 byte
+    got, applied to a runtime peak. If the live count ever exceeds the table, those mites steer
     greedily that tick — a safety net, never a crash. The counters above show the live
     <strong>active / 64</strong> routes and the running <strong>peak</strong>: a thousand movers
     served by a handful of routes is the chapter's payoff. Beside them the four tanks each
@@ -327,8 +328,13 @@
     direction (a shot commits the aim) — and each destroyed mite leaves a small expanding <strong>burst</strong>.
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
     <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
-    so no rule the swarm obeys is broken by combat. The four nests sit away from the tanks' start
-    screen, so revived mites don't pop up under a barrel.</p>
+    so no rule the swarm obeys is broken by combat. There is <strong>one nest per screen except the
+    tanks' start screen</strong> — fifteen homes — so revived mites never pop up under a barrel, and,
+    just as important, the spawn load is <strong>spread across fifteen screens' worth of exits</strong>
+    instead of piling out through one screen's two or three border openings. A single screenful of
+    nests is a Poisson pile-up at those few exits; one home per screen gives each its own openings and
+    roughly N_MITES/15 residents — measured, the worst nest's local crowd drops by a third and the
+    average nest neighbourhood empties by two-thirds.</p>
     <p>The payoff is the feedback loop. Every kill is a <strong>death cry</strong>: each mite within
     <strong>2× sensing range</strong> of the dead one has its record overwritten with the
     <strong>firing tank's cell</strong>, stamped now, and is flipped to <strong>hunt</strong> — so a
@@ -345,9 +351,9 @@
     <strong>single integer PRNG</strong> (xorshift32) seeded in the world and advanced as mites
     are processed in index order. So the whole swarm is a <strong>pure function of the seed and
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
-    to re-scatter the swarm, move the four nests, and tune the rest live:</p>
+    to re-scatter the swarm and tune the rest live (the fifteen nests are fixed, one per screen):</p>
     <div class="fig">
-      <p class="cap">the editable seed, the four nest positions, and the tunables · sensing range, cap, P(hunt), wander outward bias, mite speed/turn, fire rate, respawn delay, nest memory, turret turn</p>
+      <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), wander outward bias, mite speed/turn, fire rate, respawn delay, nest memory, turret turn</p>
       <div id="w-mite-tunables"></div>
     </div>
 
