@@ -9,8 +9,8 @@
  *   cycle_tank(tank)              cycle a tank UNSELECTED->AUTOPATH->MANUAL->...
  *   set_dest(tank, wcx, wcy)      give a tank a destination (world cell)
  *   toggle_wall(wcx, wcy)         flip a wall, rebuild affected tables
- *   set_camera(sx,sy) / set_slide(to_sx,to_sy,dx,dy) / clear_slide()
- *                                 the host drives the follow camera + screen slide
+ *   set_view(wx0,wy0,wx1,wy1, hx,hy)  the world-space box the free pan/zoom camera
+ *                                 shows + the cursor cell; the wasm emits only that
  * Pointers expose every table for the live debug widgets. The whole view is
  * rebuilt each frame (build_view); inst_count is the instance count to draw.
  *
@@ -29,16 +29,19 @@ static World    g_world;
 static Inst     g_inst[INST_MAX];
 static DrawList g_dl;
 static uint32_t g_inst_count;
-static uint8_t  g_cam_sx, g_cam_sy;
-static uint16_t g_hover = REC_EMPTY;    /* the world cell under the cursor (render-only), or none */
+/* the visible world-space box (subcells) + the cursor cell — all render-only. The
+ * host owns the free pan/zoom camera and passes the box it can see; the wasm just
+ * builds it. Defaults to the whole world. */
+static int32_t  g_wx0, g_wy0, g_wx1 = ARENA_W_SUB - 1, g_wy1 = ARENA_H_SUB - 1;
+static uint16_t g_hover = REC_EMPTY;
 
 static void rebuild(void) {
-  g_inst_count = build_view(&g_world, g_inst, &g_dl, g_cam_sx, g_cam_sy, g_hover);
+  g_inst_count = build_view(&g_world, g_inst, &g_dl, g_wx0, g_wy0, g_wx1, g_wy1, g_hover);
 }
 
 EXPORT(init) void init(void) {
   sim_init(&g_world);
-  g_cam_sx = 0; g_cam_sy = 0; g_hover = REC_EMPTY;
+  g_wx0 = 0; g_wy0 = 0; g_wx1 = ARENA_W_SUB - 1; g_wy1 = ARENA_H_SUB - 1; g_hover = REC_EMPTY;
   rebuild();
 }
 EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_count; }
@@ -48,15 +51,11 @@ EXPORT(cycle_tank)  void cycle_tank(uint32_t tank) { sim_cycle_tank(&g_world, ta
 EXPORT(set_dest)    void set_dest(uint32_t tank, uint32_t wcx, uint32_t wcy) { sim_set_dest(&g_world, tank, wcx, wcy); rebuild(); }
 EXPORT(toggle_wall) void toggle_wall(uint32_t wcx, uint32_t wcy) { sim_toggle_wall(&g_world, wcx, wcy); rebuild(); }
 
-/* camera: the host computes the follow / picker; the wasm builds the 3x3 view it
- * names. (No slide state: the connected neighbourhood already holds the adjacent
- * screens, so the host just pans the camera uniform and re-anchors here.) */
-EXPORT(set_camera) void set_camera(uint32_t sx, uint32_t sy) {
-  g_cam_sx = (uint8_t)(sx % SCREENS_X); g_cam_sy = (uint8_t)(sy % SCREENS_Y);
-  rebuild();
-}
-/* the cursor-cell highlight (render-only). wcx>=BIG_W clears it (REC_EMPTY). */
-EXPORT(set_hover) void set_hover(uint32_t wcx, uint32_t wcy) {
+/* the visible box the free pan/zoom camera shows (world subcells), and the cursor
+ * cell highlight (wcx>=BIG_W clears it). Pure presentation; the host computes both
+ * from its camera, the wasm just emits what falls inside. */
+EXPORT(set_view) void set_view(int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy1, uint32_t wcx, uint32_t wcy) {
+  g_wx0 = wx0; g_wy0 = wy0; g_wx1 = wx1; g_wy1 = wy1;
   g_hover = (wcx < BIG_W && wcy < BIG_H) ? wc_pack((int32_t)wcx, (int32_t)wcy) : REC_EMPTY;
   rebuild();
 }
@@ -130,8 +129,6 @@ EXPORT(big_h)       uint32_t big_h(void)       { return BIG_H; }
 EXPORT(n_tanks)     uint32_t n_tanks(void)     { return N_TANKS; }
 EXPORT(subcell)     uint32_t subcell(void)     { return SUB; }
 EXPORT(selected)    uint32_t selected(void)    { return g_world.selected; }
-EXPORT(cam_sx)      uint32_t cam_sx(void)      { return g_cam_sx; }
-EXPORT(cam_sy)      uint32_t cam_sy(void)      { return g_cam_sy; }
 EXPORT(inst_count)  uint32_t inst_count(void)  { return g_inst_count; }
 EXPORT(inst_max)    uint32_t inst_max(void)    { return INST_MAX; }
 EXPORT(inst_stride) uint32_t inst_stride(void) { return (uint32_t)sizeof(Inst); }

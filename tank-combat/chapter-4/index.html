@@ -150,14 +150,14 @@
   <div id="viewctl">
     <span class="tag">view (presentation only)</span>
     <label><input type="checkbox" id="assetsToggle"> low-poly art <span style="opacity:.7">(late-bound meshes)</span></label>
-    <label>zoom <input type="range" id="zoom" min="0.6" max="2.2" step="0.05" value="1"></label>
+    <label>zoom <input type="range" id="zoom" min="0.85" max="6" step="0.05" value="1"></label>
   </div>
   <div id="status">loading…</div>
   <div id="help">
-    The main view is <b>isometric 3-D</b> and shows the focused screen <b>connected to its
-    neighbours</b> (zoom out to see more); the minimap below stays <b>top-down</b> — the same
-    data drawn two ways. <b>Hover</b> a cell to highlight it. The <b>mites</b> run themselves.
-    <b>Tap a tank</b> to cycle it:
+    The main view is <b>isometric 3-D</b> and shows the <b>whole 4×4 world</b> as one connected
+    map; the minimap below stays <b>top-down</b> — the same data drawn two ways. <b>Drag</b> to
+    pan, <b>pinch</b> or <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The
+    <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (a yellow spike; drive it: W/S/A/D or the pad) →
     unselected. Drive a tank through the swarm and watch a sighting spread — 80%
@@ -211,12 +211,14 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     which is exactly what isometric means. Crucially, <a href="src/render.c">render.c</a> does
     <strong>not</strong> bake screen positions — it emits world placements, and the shader projects
     them. So the iso basis, the zoom, and the follow offset all live in the <strong>view
-    uniform</strong>: the camera is a uniform, not a rebuild. Panning, following, and the screen
-    picker stay <strong>presentation-only</strong> and never change a placement — a fact the native
-    test pins (<code>iso_project</code> is linear, so a pan is a constant offset). The view shows
-    the focused screen <strong>connected to its eight neighbours</strong> (a 3×3 of the toroidal
-    world, adjacent across the seam) so it reads as one space — yet still emits only those nine
-    screens and the units on them, not the 4800-cell world. The minimap below is the same idea
+    uniform</strong>: the camera is a uniform, not a rebuild. Dragging to pan, pinching/scrolling
+    to zoom, and following a tank stay <strong>presentation-only</strong> and never change a
+    placement — a fact the native test pins (<code>iso_project</code> is linear, so a pan is a
+    constant offset). The whole <strong>4×4 world is one connected map</strong> (placements are
+    world positions, so all sixteen screens sit in their natural layout); the free camera shows any
+    part, and the host hands the renderer the <strong>visible box</strong> so it emits only the
+    cells and units in view — the whole world when zoomed out, a handful of cells when zoomed in,
+    never the 4800-cell world or the 1000-strong pool wholesale. The minimap below is the same idea
     taken literally: the <strong>same sim data drawn two ways at once</strong> — isometric above,
     top-down here. The top-down map's job is legibility, so it is <em>not</em> iso-skewed.</p>
     <p class="note">Clicking is unchanged from chapter 2 — tap a tank to cycle it, tap a cell to
@@ -267,8 +269,9 @@ screenY = (wx + wy) * ISO_Y - wz * ISO_Z      <span style="color:var(--dim)">// 
     The frequency-of-change spectrum is the whole story here — the <strong>assets load once</strong>,
     the world <strong>geometry rebuilds on a wall edit</strong> (rare), the <strong>projection runs
     every frame</strong> (constant), and the renderer <strong>scales with what is visible</strong>,
-    not with the 4800-cell world or the 1000-strong pool (only the connected 3×3 neighbourhood — nine
-    of the sixteen screens — and the units on them are ever emitted: the test pins it).</p>
+    not with the 4800-cell world or the 1000-strong pool (it emits only the cells and units inside
+    the camera's visible box — everything when zoomed out, a few cells when zoomed in: the test pins
+    both ends).</p>
 
     <h2>The simulation does not know it is drawn</h2>
     <p>Everything below this line is the <strong>model the view reads</strong> — and it is frozen,

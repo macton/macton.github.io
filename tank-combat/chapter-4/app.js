@@ -13,7 +13,6 @@
 // directly, exactly as before.
 
 const TICK_DT = 1 / 60;
-const SLIDE_DUR = 0.28;
 
 // View uniform: a = (scaleX, scaleY, offsetX, offsetY) maps screen units -> clip;
 // b = (isoX, isoY, isoZ, depthSpan) is the dimetric basis (read from wasm, one
@@ -67,7 +66,6 @@ const STATUS = ["idle", "routing", "arrived", "no path"];
 const MODE = ["wander", "hunt", "home"];
 // nest colours, a hue wheel, one per screen but (0,0) (match COL_NEST in render.c)
 const NESTC = [[230,146,110],[230,194,110],[218,230,110],[170,230,110],[122,230,110],[110,230,146],[110,230,194],[110,218,230],[110,170,230],[110,122,230],[146,110,230],[194,110,230],[230,110,218],[230,110,170],[230,110,122]];
-const sdir = (a, b, n) => (a === b ? 0 : ((b - a + n) % n === 1 ? 1 : -1));  // toroidal one-step
 
 async function main() {
   const VERSION = (typeof window !== "undefined" && window.TANK_VERSION) || "dev";
@@ -176,90 +174,136 @@ async function main() {
   }
   new ResizeObserver(resize).observe(canvas); resize();
 
-  // --- the isometric camera ----------------------------------------------
-  // the projection is a pure function in the shader; the camera is ONLY this
-  // uniform. viewWrite fits one screen's iso diamond into the canvas (with headroom
-  // for wall height), centres it on the viewport screen, and pans by `panx,pany`
-  // subcells during a slide. cam3d remembers the mapping so a click can be inverted
-  // back to a world cell. Nothing here touches the simulation.
-  let userZoom = 1.0, useAssets = false;
+  // --- the free isometric camera: drag to pan, pinch / wheel to zoom -------------
+  // The projection is a pure function in the shader; the camera is ONLY this uniform.
+  // camX,camY is the world point at screen centre (subcells); zoom multiplies the
+  // whole-world fit (zoom 1 shows all sixteen screens). viewWrite writes the uniform
+  // and remembers the mapping (cam3d) so a pixel can be inverted back to a world cell.
+  // Nothing here touches the simulation.
+  let useAssets = false;
+  let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false;
   let cam3d = { sx: 1, sy: 1, ox: 0, oy: 0 };
-  const WALL_SU = C.SUB * C.IZ;                       // a wall's screen-height, for vertical headroom
-  const VIEW_SPAN = 1.7;                              // fit ~1.7 screens, so the connected neighbours show
-  function viewWrite(panx, pany) {
-    const cx = C.GW * C.SUB / 2 + panx, cy = C.GH * C.SUB / 2 + pany;
-    const isx = (cx - cy) * C.IX, isy = (cx + cy) * C.IY;            // iso of the camera centre (wz=0)
-    const fullW = (C.GW + C.GH) * C.SUB * C.IX * VIEW_SPAN, fullH = ((C.GW + C.GH) * C.SUB * C.IY + WALL_SU) * VIEW_SPAN;
-    const S = Math.min(canvas.width * 0.96 / fullW, canvas.height * 0.92 / fullH) * userZoom;
+  const ZMIN = 0.85, ZMAX = 6;
+  function baseScale() {                              // px per screen-unit with the whole world fit
+    const worldW = (C.BW + C.BH) * C.SUB * C.IX, worldH = (C.BW + C.BH) * C.SUB * C.IY + C.SUB * C.IZ;
+    return Math.min(canvas.width * 0.96 / worldW, canvas.height * 0.92 / worldH);
+  }
+  function clampCam() {
+    zoom = Math.max(ZMIN, Math.min(ZMAX, zoom));
+    camX = Math.max(0, Math.min(C.BW * C.SUB, camX));
+    camY = Math.max(0, Math.min(C.BH * C.SUB, camY));
+  }
+  function viewWrite() {
+    const S = baseScale() * zoom;
+    const isx = (camX - camY) * C.IX, isy = (camX + camY) * C.IY;       // iso of the camera centre (wz=0)
     const sclX = S * 2 / canvas.width, sclY = -S * 2 / canvas.height;
-    const offX = -isx * sclX, offY = -isy * sclY;
-    cam3d = { sx: sclX, sy: sclY, ox: offX, oy: offY };
-    device.queue.writeBuffer(viewBuf, 0, new Float32Array([sclX, sclY, offX, offY, C.IX, C.IY, C.IZ, C.DSPAN]));
+    cam3d = { sx: sclX, sy: sclY, ox: -isx * sclX, oy: -isy * sclY };
+    device.queue.writeBuffer(viewBuf, 0, new Float32Array([sclX, sclY, cam3d.ox, cam3d.oy, C.IX, C.IY, C.IZ, C.DSPAN]));
+  }
+  // invert screen pixels -> a world point on the ground plane (wz=0), in subcells
+  function screenToWorld(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const ndcx = (clientX - r.left) / r.width * 2 - 1, ndcy = -((clientY - r.top) / r.height * 2 - 1);
+    const sxu = (ndcx - cam3d.ox) / cam3d.sx, syu = (ndcy - cam3d.oy) / cam3d.sy;
+    const a = sxu / C.IX, b = syu / C.IY;
+    return { x: (a + b) / 2, y: (b - a) / 2 };
+  }
+  function cellAt(clientX, clientY) {
+    const p = screenToWorld(clientX, clientY);
+    const wcx = Math.floor(p.x / C.SUB), wcy = Math.floor(p.y / C.SUB);
+    if (wcx < 0 || wcx >= C.BW || wcy < 0 || wcy >= C.BH) return null;
+    return { wcx, wcy };
+  }
+  // the world-space box the canvas shows (its four corners inverse-projected) — what
+  // the renderer must emit; the cost scales with this, not the whole world.
+  function visibleBox() {
+    const r = canvas.getBoundingClientRect();
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [cx, cy] of [[r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]]) {
+      const p = screenToWorld(cx, cy);
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+    }
+    return [Math.floor(x0), Math.floor(y0), Math.ceil(x1), Math.ceil(y1)];
   }
 
-  // --- camera (follow + slide) + picker -----------------------------------
-  const CAM = () => ({ sx: wasm.cam_sx(), sy: wasm.cam_sy() });
   const R = { wasm, view, C };
-  let slide = null;
-  let pickerOpen = false, manualView = false, lastSel = 255;
-  function startSlide(toSx, toSy, dx, dy) {
-    if (dx === 0 && dy === 0) { wasm.set_camera(toSx, toSy); return; }
-    // the connected 3x3 already holds the neighbour we're panning to, so the slide is
-    // purely a host-side pan of the camera uniform; set_camera re-anchors at the end.
-    slide = { dx, dy, toSx, toSy, t0: performance.now() / 1000 };
-  }
+  let pickerOpen = false, lastMouse = null;
   function setPicker(open) {
     pickerOpen = open;
     document.getElementById("picker").style.display = open ? "grid" : "none";
     for (const a of document.querySelectorAll(".scrollbtn")) a.style.display = open ? "block" : "none";
   }
-  function gotoScreen(sx, sy) { const c = CAM(); startSlide(sx, sy, sdir(c.sx, sx, C.SX), sdir(c.sy, sy, C.SY)); manualView = true; setPicker(false); }
+  function camScreen() { return { sx: Math.floor(camX / (C.GW * C.SUB)) % C.SX, sy: Math.floor(camY / (C.GH * C.SUB)) % C.SY }; }
+  function gotoScreen(sx, sy) { camX = sx * C.GW * C.SUB + C.GW * C.SUB / 2; camY = sy * C.GH * C.SUB + C.GH * C.SUB / 2; follow = false; clampCam(); setPicker(false); }
 
-  // invert the iso projection (on the ground plane) to a world cell under the cursor,
-  // spanning the connected 3x3 neighbourhood (so you can click a neighbour screen too);
-  // null if outside it. The camera is the only thing between pixels and the cell.
-  function cellAt(e) {
+  // pan by a screen-pixel delta (drag): convert to a world delta on the ground plane
+  function panBy(dpx, dpy) {
     const r = canvas.getBoundingClientRect();
-    const ndcx = (e.clientX - r.left) / r.width * 2 - 1, ndcy = -((e.clientY - r.top) / r.height * 2 - 1);
-    const sx = (ndcx - cam3d.ox) / cam3d.sx, sy = (ndcy - cam3d.oy) / cam3d.sy;   // screen units
-    const a = sx / C.IX, b = sy / C.IY;                                           // wz = 0 plane
-    const lcx = Math.floor(((a + b) / 2) / C.SUB), lcy = Math.floor(((b - a) / 2) / C.SUB);
-    if (lcx < -C.GW || lcx >= 2 * C.GW || lcy < -C.GH || lcy >= 2 * C.GH) return null;
-    const cam = CAM();
-    return { wcx: ((cam.sx * C.GW + lcx) % C.BW + C.BW) % C.BW, wcy: ((cam.sy * C.GH + lcy) % C.BH + C.BH) % C.BH };
+    const dsx = (dpx / r.width * 2) / cam3d.sx, dsy = (-dpy / r.height * 2) / cam3d.sy;   // px -> screen-units
+    const a = dsx / C.IX, b = dsy / C.IY;
+    camX -= (a + b) / 2; camY -= (b - a) / 2; clampCam();
   }
-  // click: a tank cell -> cycle its state; else set the auto-path tank's destination.
-  function clickCell(e) {
-    const c = cellAt(e); if (!c) return;
+  // zoom by `factor`, keeping the world point under (clientX,clientY) fixed
+  function zoomBy(factor, clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const ndcx = (clientX - r.left) / r.width * 2 - 1, ndcy = -((clientY - r.top) / r.height * 2 - 1);
+    const P = screenToWorld(clientX, clientY);
+    zoom = Math.max(ZMIN, Math.min(ZMAX, zoom * factor));
+    const S = baseScale() * zoom, sclX = S * 2 / canvas.width, sclY = -S * 2 / canvas.height;
+    const isoPx = (P.x - P.y) * C.IX, isoPy = (P.x + P.y) * C.IY;
+    const isoCamX = isoPx - ndcx / sclX, isoCamY = isoPy - ndcy / sclY;
+    const a = isoCamX / C.IX, b = isoCamY / C.IY;
+    camX = (a + b) / 2; camY = (b - a) / 2; clampCam();
+    if (zR) zR.value = zoom.toFixed(2);
+  }
+
+  // pointers: one-finger drag = pan, two-finger = pinch zoom, a tap = select / path.
+  const pointers = new Map();
+  let dragMoved = 0, pinchPrev = 0;
+  const pdist = () => { const p = [...pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
+  const pmid  = () => { const p = [...pointers.values()]; return [(p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2]; };
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragMoved = 0; if (pointers.size === 2) pinchPrev = pdist();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    lastMouse = { x: e.clientX, y: e.clientY };
+    const prev = pointers.get(e.pointerId); if (!prev) return;            // hovering, no button down here
+    const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragMoved += Math.abs(dx) + Math.abs(dy);
+    if (pointers.size === 1) { panBy(dx, dy); follow = false; }
+    else if (pointers.size >= 2) { const d = pdist(); if (pinchPrev > 0) { const [mx, my] = pmid(); zoomBy(d / pinchPrev, mx, my); } pinchPrev = d; follow = false; }
+  });
+  function endPointer(e) {
+    const was = pointers.size; pointers.delete(e.pointerId);
+    if (was === 1 && dragMoved < 8) clickAt(e.clientX, e.clientY);        // a tap, not a drag
+    if (pointers.size < 2) pinchPrev = 0;
+  }
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("pointerleave", () => { lastMouse = null; });
+  canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY); follow = false; }, { passive: false });
+
+  // a tap: a tank cell -> cycle its state (and follow it); else send the auto-path tank there
+  function clickAt(clientX, clientY) {
+    const c = cellAt(clientX, clientY); if (!c) return;
     const xy = view.xy();
     for (let t = 0; t < C.NT; t++)
-      if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) { wasm.cycle_tank(t); manualView = false; return; }
+      if ((xy[2 * t] >> 8) === c.wcx && (xy[2 * t + 1] >> 8) === c.wcy) { wasm.cycle_tank(t); follow = true; return; }
     const sel = wasm.selected();
-    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) { wasm.set_dest(sel, c.wcx, c.wcy); manualView = false; }
+    if (sel !== 255 && view.tstate()[sel] === 1 /*AUTOPATH*/) wasm.set_dest(sel, c.wcx, c.wcy);
   }
-  canvas.addEventListener("click", clickCell);
-
-  // hover highlight: track the cursor's world cell (render-only), poking the wasm only
-  // when it changes so the rebuild is occasional, not per-mouse-event.
-  let hoverKey = -1;
-  function hoverAt(e) {
-    const c = cellAt(e), key = c ? c.wcy * C.BW + c.wcx : -1;
-    if (key === hoverKey) return; hoverKey = key;
-    if (c) wasm.set_hover(c.wcx, c.wcy); else wasm.set_hover(C.BW, C.BH);   // out-of-range clears
-  }
-  canvas.addEventListener("mousemove", hoverAt);
-  canvas.addEventListener("mouseleave", () => { hoverKey = -1; wasm.set_hover(C.BW, C.BH); });
 
   document.getElementById("camlabel").addEventListener("click", () => setPicker(!pickerOpen));
-  const arrowStep = (dx, dy) => { const c = CAM(); gotoScreen((c.sx + dx + C.SX) % C.SX, (c.sy + dy + C.SY) % C.SY); };
+  const arrowStep = (dx, dy) => { camX += dx * C.GW * C.SUB; camY += dy * C.GH * C.SUB; follow = false; clampCam(); };
   document.querySelector(".scrollbtn.su").onclick = () => arrowStep(0, -1);
   document.querySelector(".scrollbtn.sd").onclick = () => arrowStep(0, 1);
   document.querySelector(".scrollbtn.sl").onclick = () => arrowStep(-1, 0);
   document.querySelector(".scrollbtn.sr").onclick = () => arrowStep(1, 0);
 
-  // render-only controls (clearly presentation): low-poly art toggle + camera zoom
+  // render-only controls (presentation): low-poly art toggle + a camera zoom slider
   const aT = document.getElementById("assetsToggle"); if (aT) aT.onchange = () => { useAssets = aT.checked; };
-  const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { userZoom = parseFloat(zR.value) || 1; };
+  const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { zoom = parseFloat(zR.value) || 1; clampCam(); };
 
   buildTouchPad(document.getElementById("map"));
   const dbg = mountWidgets(wasm, view, C);
@@ -272,13 +316,13 @@ async function main() {
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
   const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
-  dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; }; dbg.onReset = () => { wasm.init(); slide = null; setPicker(false); };
+  dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; };
+  dbg.onReset = () => { wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; setPicker(false); };
 
   function frame(now) {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
     const sel = wasm.selected(), ts = view.tstate();
-    if (sel !== lastSel) { manualView = false; lastSel = sel; }
     const manual = sel !== 255 && ts[sel] === 2;
 
     let bits = 0; for (const c of held) bits |= KEYMAP[c]; bits |= touchBits;
@@ -289,16 +333,19 @@ async function main() {
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
 
-    if (!pickerOpen && !manualView && sel !== 255 && !slide) {
-      const xy = view.xy(), c = CAM();
-      const tsx = (xy[2 * sel] >> 8) / C.GW | 0, tsy = (xy[2 * sel + 1] >> 8) / C.GH | 0;
-      if (tsx !== c.sx || tsy !== c.sy) startSlide(tsx, tsy, sdir(c.sx, tsx, C.SX), sdir(c.sy, tsy, C.SY));
+    // follow the selected tank (until you pan/zoom/pick) — snap on the toroidal wrap
+    if (follow && sel !== 255) {
+      const xy = view.xy(), tx = xy[2 * sel], ty = xy[2 * sel + 1];
+      const dxw = tx - camX, dyw = ty - camY;
+      camX = Math.abs(dxw) > C.BW * C.SUB / 2 ? tx : camX + dxw * 0.12;
+      camY = Math.abs(dyw) > C.BH * C.SUB / 2 ? ty : camY + dyw * 0.12;
+      clampCam();
     }
-    if (slide) {
-      let p = (now / 1000 - slide.t0) / SLIDE_DUR;
-      if (p >= 1) { wasm.set_camera(slide.toSx, slide.toSy); slide = null; viewWrite(0, 0); }
-      else viewWrite(slide.dx * C.GW * C.SUB * p, slide.dy * C.GH * C.SUB * p);
-    } else viewWrite(0, 0);
+    viewWrite();
+    // tell the wasm what the camera shows + the cursor cell; it builds only that
+    const box = visibleBox();
+    const hc = lastMouse ? cellAt(lastMouse.x, lastMouse.y) : null;
+    wasm.set_view(box[0], box[1], box[2], box[3], hc ? hc.wcx : C.BW, hc ? hc.wcy : C.BH);
 
     const n = wasm.inst_count();
     device.queue.writeBuffer(instBuf, 0, view.instBytes(n));
@@ -322,7 +369,7 @@ async function main() {
     if (tc) { pass.setPipeline(transPipe); const m = meshTable[C.CUBE]; pass.draw(m.cnt, tc, m.off, first); }
     pass.end(); device.queue.submit([enc.finish()]);
 
-    const cam = CAM(), camIdx = cam.sy * C.SX + cam.sx;
+    const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
     articleMap.update(camIdx);
     if (pickerOpen) pickerMap.update(camIdx);
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;

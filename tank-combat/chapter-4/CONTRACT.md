@@ -63,13 +63,14 @@ model and the chapter has failed its own thesis.
   third dimension — reusing facing (`co/si`) and tint (`rgba`).
 - The **kind/mesh id is not a per-instance field** (the shader never reads it). It is
   the **draw grouping**: instances are emitted contiguously by kind, and the host
-  draws one range per kind. `INST_MAX` ≈ 4400.
-- **Render scales with visibility** (tested): the view is the **connected 3×3
-  neighbourhood** — the viewport screen plus its eight toroidal neighbours, sitting
-  adjacent across the seam so the world reads as one space. Only those **9 of 16
-  screens** (one block per cell) and the tanks/mites/nests/FX on them are emitted —
-  fewer than the 4800-cell world, and **only the mites those screens show**, far fewer
-  than the 1000-strong pool.
+  draws one range per kind. `INST_MAX` ≈ 6500 (the whole world in view).
+- **Render scales with visibility** (tested): the whole **4×4 world is one connected
+  map** (placements are world positions, all sixteen screens in their natural layout).
+  A **free camera** — drag to pan, pinch/scroll to zoom — shows any part; the host
+  passes the **visible world-space box** and render emits only the cells and the
+  tanks/mites/nests/FX inside it. Zoomed out, that is the whole world (one block per
+  cell); zoomed in, it is a handful of cells and the few mites in view — never the
+  4800-cell world or the 1000-strong pool wholesale.
 
 ## Interaction overlays (render-only)
 
@@ -78,8 +79,8 @@ that are **pure presentation** — derived from the sim, or from one host-set ho
 cell; none of it writes the model:
 
 - **Hover** (`K_HOVER`): a highlight tile on the world cell under the cursor. The host
-  inverts the iso projection to a cell and sets it via `set_hover`; clearing it (or a
-  cell off the visible neighbourhood) emits nothing.
+  inverts the iso projection to a cell and passes it (with the visible box) to
+  `set_view`; a cell outside the visible box emits nothing.
 - **Selection** (`K_RING`): the selected tank's mode — a bright base ring + a tall
   state spike, **green for auto-path, yellow for manual**; UNSELECTED tanks draw none.
 - **Destination** (`K_DEST`): a beacon, in the tank's colour, at each routing tank's

@@ -51,10 +51,10 @@ static inline IsoPt iso_project(int32_t wx, int32_t wy, int32_t wz) {
  * (per vertex); the translucent FX pass sorts back-to-front by it. */
 static inline int32_t iso_depth(int32_t wx, int32_t wy, int32_t wz) { return wx + wy + wz; }
 
-/* the depth-key range, for the shader's map into [0,1] NDC depth. The camera-local
- * frame spans at most two screens plus a margin on each axis, and heights stay
- * within a few cells, so this bound holds every emitted vertex with headroom. */
+/* the depth-key range, for the shader's map into [0,1] NDC depth. Placements are
+ * WORLD positions (anchor = world origin), so wx+wy+wz spans [0, (BIG_W+BIG_H)*SUB +
+ * height], and this bound holds every emitted vertex with headroom. */
 #define ISO_WZ_MAX     (4 * SUB)
-#define ISO_DEPTH_SPAN (2 * (BIG_W + BIG_H) * SUB + ISO_WZ_MAX)
+#define ISO_DEPTH_SPAN ((BIG_W + BIG_H) * SUB + ISO_WZ_MAX)
 
 #endif

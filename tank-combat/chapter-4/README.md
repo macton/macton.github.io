@@ -84,11 +84,12 @@ flips between the two passes live. See [`ASSETS.md`](ASSETS.md).
 
 ### The connected world & the instance layout (`render.h`)
 
-The view is the **connected 3×3 neighbourhood** — the viewport screen plus its eight
-toroidal neighbours, sitting adjacent across the seam so the world reads as one space
-rather than an isolated screen; the follow camera pans within it and re-anchors on a
-crossing. Render still **scales with visibility** (9 of the 16 screens, and only the
-mites on them), not the whole world or the pool.
+The whole **4×4 world is one connected map**: placements are world positions (anchor =
+the world origin), so all sixteen screens sit in their natural layout. A **free camera**
+— drag to pan, pinch or scroll to zoom — shows any part; the host hands the renderer the
+**visible box** and it emits only the cells and units inside it, so render still **scales
+with visibility**: the whole world when zoomed out, a handful of cells when zoomed in,
+never the 4800-cell world or the 1000-strong pool wholesale.
 
 Chapter 3's instance was a 16-byte 2-D quad `{cx,cy, hx,hy, co,si, rgba}`. Chapter 4's
 is a 20-byte 3-D box `{wx,wy, wz,hz, hx,hy, co,si, rgba}` — exactly **+wz +hz**,
@@ -104,7 +105,7 @@ from the sim (or, for the cursor, one host-set hover cell): a **hover** highligh
 the cell under the cursor; the selected tank's **mode** (a ring + a tall spike, green
 for auto-path, yellow for manual); a **destination** beacon; and the **routed path**,
 a tile on each cell the tank will cross, traced from the same path tables it follows.
-Picking spans the whole 3×3, so you can send a tank to a neighbouring screen directly.
+A tap selects/sends, a drag pans, two fingers (or the wheel) zoom.
 
 ## Source layout
 
@@ -129,9 +130,9 @@ app.js           the isometric WebGPU renderer (2 pipelines, depth, mesh bind, c
 
 The **sim** memory is inherited from chapter 3 unchanged. New **render** memory:
 
-- **instance buffer** — 20-byte 3-D `Inst` × `INST_MAX` (~4400) ≈ **88 KB** (the view
-  is the connected 3×3 neighbourhood: 9 screens of terrain + their mites/tanks/FX +
-  the interaction overlays, one block per cell).
+- **instance buffer** — 20-byte 3-D `Inst` × `INST_MAX` (~6500) ≈ **130 KB** (worst
+  case: the whole world in view — every cell, the whole swarm, tanks, FX, and the
+  overlays; the free camera culls to far fewer when zoomed in).
 - **baked meshes** — `src/mesh_data.c`, 162 vertices × 8 bytes ≈ **1.3 KB**, loaded
   once.
 - the **depth buffer** is a viewport-sized GPU texture (`depth24plus`), **not** wasm
