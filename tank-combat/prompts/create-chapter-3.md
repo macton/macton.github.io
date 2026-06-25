@@ -178,13 +178,24 @@ remaining-distance vector (`pg`) **keyed by destination cell** instead of by tan
 
 **What `pg` is (so the table size is reproducible):** it is chapter 2's **Level-2
 remaining-distance vector keyed by edge point** — one entry per inter-screen *edge
-point* (≈ `N_EDGE_MAX` ≈ 128 entries, a few hundred bytes), **not** a per-cell
-distance map over all 4800 cells. Within a screen, the **baked Level-1 all-pairs
-table** gives the next step; `pg` only routes *between* screens. That two-level reuse
-is the whole reason a field is cheap and a fixed table of them fits the budget — if
-you instead fold a full per-cell BFS per destination (≈ 9.6 KB each) you have rebuilt
-chapter 2's job and blown the budget. Reuse the chapter-2 tables; do not re-derive a
-flat distance field.
+point*, **not** a per-cell distance map over all 4800 cells. Within a screen, the
+**baked Level-1 all-pairs table** gives the next step; `pg` only routes *between*
+screens. That two-level reuse is the whole reason a field is cheap and a fixed table
+of them fits the budget — if you instead fold a full per-cell BFS per destination
+(≈ 9.6 KB each) you have rebuilt chapter 2's job and blown the budget. Reuse the
+chapter-2 tables; do not re-derive a flat distance field. (Size `N_EDGE_MAX` from the
+**actual edge-point count of the map** — it is map-specific, ≈128 for the default map —
+and **detect overflow** rather than silently truncating edges.)
+
+**Read the field as one monotone potential — or it oscillates at screen borders.** The
+field must answer, at the mite's current cell, "the next cardinal whose neighbour has a
+**strictly smaller remaining distance to the destination**" — and that remaining
+distance must be **one global quantity** (Level-1-within-screen composed with
+`pg`-between-screens) evaluated **identically at the current cell and at the candidate
+neighbour**. The failure mode to avoid: choosing a screen *exit* independently of the
+within-screen step, so a mite steps north out of a screen and the next screen's field
+sends it straight back — a 2-cycle that never reaches the goal. Compose one potential,
+step strictly downhill; the route is a non-oscillating descent to the destination.
 
 Because the swarm shares destinations, the set of *distinct* destinations in flight
 is **small and practically bounded** — the 15 nests, plus the handful of recent
@@ -234,15 +245,22 @@ spreads any sighting. Per tick (after movement):
   toward its chosen aim at `turret_rate` per tick — it **does not snap**, and with no
   target it relaxes back toward the body heading.
 - **Target the mite MOST LIKELY TO BE HIT, not the nearest.** Scan the per-cell index
-  over a search box around the tank; among mites in **line of sight**, pick the one
-  whose bearing is **closest to the turret's current direction** (the least rotation to
-  bring the barrel on), lowest index breaking angle ties. Line of sight is an integer
-  **Bresenham** walk from the tank cell to the mite cell that crosses no wall (reuse the
-  wall grid — a mite behind a wall is not targetable).
+  over a search box around the tank — **at least `LASER_MAX` cells** in each direction:
+  the box must cover everything the laser can reach, or a mite the beam *would* kill can
+  never be aimed at (a consistency constraint between the aim range and the shot range).
+  Among mites in **line of sight**, pick the one whose bearing is **closest to the
+  turret's current direction** (the least rotation to bring the barrel on), lowest index
+  breaking angle ties. Line of sight is an integer **Bresenham** walk from the tank cell
+  to the mite cell that crosses no wall (reuse the wall grid — a mite behind a wall is
+  not targetable).
 - **Fire is a fixed-rate, exactly-aimed laser.** A tank fires only once the turret has
   swung **exactly** onto the target bearing (a line shot is never a cone, so the turn
   rate gates firing) and the cooldown has elapsed, every `fire_period` ticks (default
-  **30 = 2/sec**; `0` disables firing, aim only). The shot is a **laser**: a thin ray
+  **30 = 2/sec**; `0` disables firing, aim only). Make `turret_rate` **divide the
+  angle-per-direction step** so the turret can land *exactly* on a discrete bearing; a
+  rate that does not divide evenly overshoots forever and the tank never fires. The beam
+  half-width `BEAM_HW` must be **less than the quarter-cell sub-segment offset**, so that
+  a mite parked off the line genuinely dodges while the aimed one (on the line) dies. The shot is a **laser**: a thin ray
   marched from the muzzle along the barrel until it meets a wall (capped at `LASER_MAX`),
   destroying every mite whose position lies within a narrow band (`BEAM_HW`) of the beam
   line — again just reading the per-cell index. Because mites sit in sub-segments a
@@ -290,11 +308,15 @@ building from scratch, take it from `create-chapter-2.md`, where it is pinned):*
 **position integrator wraps toroidally** (a body crossing an edge reappears on the far
 side — *positions* wrap, not just the conceptual grid; clamping instead silently fakes
 a cap break); the discrete-direction ↔ heading mapping is fixed with **screen-down y**
-(so "north" is −y — getting the sign backwards inverts all navigation); rotate-then-
-move with the auto-steer reacting to the *previous* tick's `hit`; and collision tests
-only the **leading edge** the body enters (far-side rule), parameterised by radius
-below. These are chapter-2 guarantees the swarm leans on; a fresh build that guesses
-them differently will pass its own unit tests and still navigate wrong.
+(direction 0 = +x = east, advancing through the 32 dirs, so "north" is −y — getting the
+sign or the dir-0 anchor backwards inverts navigation); rotate-then-move with the
+auto-steer reacting to the *previous* tick's `hit`; and collision tests only the
+**leading edge at the body's destination** (far-side rule — test `pos + delta ± radius`,
+the cell the edge will occupy *after* the step, **not** the current edge `pos ± radius`;
+testing the current edge lets the footprint overshoot into a wall by up to one step's
+travel), parameterised by radius below. These are chapter-2 guarantees the swarm leans
+on; a fresh build that guesses them differently will pass its own unit tests and still
+navigate wrong.
 
 - **Rename `tanks_turn` → `agent_turn` and `tanks_move` → `agent_move`** (files and
   functions; `body_*` or `mover_*` are acceptable alternates). They operate on "a

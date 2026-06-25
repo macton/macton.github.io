@@ -141,3 +141,46 @@ nest per screen (15), the 2×2 sub-segment cap, and settled on the simpler gossi
 The rebuild correctly matched the *prompt*, so those are prompt-vs-shipped drift, not
 guidance gaps. Reconciling the prompt with the shipped feature set is a separate pass if
 desired.
+
+**Run 2** (after reconciling `create-chapter-3.md` with the shipped chapter — combat,
+15 nests, sub-segment cap, simple gossip — and re-running clean-room) confirmed the
+reconciliation landed: the rebuild **independently reproduced the full feature set** —
+the sub-segment cap (≤1 per `(cell,sub-seg)`, `seg_of` decoupled from `nest_of`), the
+15 nests, the death-cry, cap-respecting revival, and all of combat (turret aim / LOS /
+hitscan laser) — freestanding wasm + native tests passing, and its **budget matched**
+(Level-1 705.5 KB vs the stated ~706). The two run-1 focus fixes held: it sized the
+route field correctly as an edge-point vector (no 600 KB per-cell BFS) and got the
+sub-segment cap right first try off the drive-gate wording.
+
+The remaining divergences were **new, deeper details**, now closed:
+
+- **The route-field *composition* (the big one).** Run 1 fixed *what* `pg` is; run 2
+  showed the prompt never said *how to compose* the two-level field into a
+  non-oscillating walk. The rebuild's first composition picked a screen exit
+  independently of the within-screen step and **oscillated at borders** (a 2-cycle that
+  never reached the goal), failing 5/16 reach tests; it had to switch to one global
+  potential stepped strictly downhill. → the prompt now requires the field to be read as
+  a single monotone remaining-distance, evaluated identically at the current cell and
+  the neighbour, and names the border-oscillation failure mode.
+- **Combat consistency constraints the prompt left implicit:** the aim search box must
+  be **≥ `LASER_MAX`** (else a mite the beam can reach can't be aimed at — found by
+  probe); **`turret_rate` must divide the angle-per-direction step** or "exactly on
+  bearing" is never true and the tank never fires; **`BEAM_HW` < the quarter-cell
+  sub-segment offset** so off-line mites dodge. → all three pinned.
+- **Far-side collision precision:** "the leading edge the body enters" was ambiguous
+  between the current edge and the destination edge; the rebuild tested the current edge
+  and footprints **overshot into walls** (caught by the wall-safety test). → the
+  inherited-contract note now says test `pos + delta ± radius` (the destination edge),
+  and pins the dir-0 = +x anchor alongside the screen-down-y sign.
+
+**Inherent clean-room limits (not closable without handing over chapter-2 source):** the
+default **map** is unknown, so every spatial result (nest cells, spawn scatter, the
+edge-point count `N_EDGE_MAX`, path lengths) is downstream of an invented map and not
+comparable in absolutes; and the cross-builder **state hash** can't match because the
+xorshift32 variant is "e.g.", not pinned. The prompt now flags `N_EDGE_MAX` as
+map-specific with overflow detection; pinning an exact RNG triplet is the obvious next
+lever if a cross-builder golden hash is ever wanted. **Nothing from run 2 was worth
+adopting back** — the reference's edge-point next-hop already is the non-oscillating
+composition the rebuild re-derived, and its `N_FIELDS = 64` (vs the rebuild's 32) is the
+safer size once the corner-roaming stress peak (~52) is counted, which the rebuild's
+normal-play peak (19) missed.
