@@ -231,6 +231,14 @@ async function main() {
   const PITCH0 = 30 * DEG, FOV0 = 36 * DEG;
   const PITCH_MIN = 5 * DEG, PITCH_MAX = 80 * DEG, FOV_MIN = 15 * DEG, FOV_MAX = 70 * DEG;
   let pitch = PITCH0, yaw = 0, fov = FOV0;
+  // Keep the camera below the horizon: the TOP edge of the frustum must stay under the
+  // skyline (angle below horizontal = (90° − pitch) − fov/2 > 0), else the ground runs to
+  // infinity and clips. So the usable pitch tightens as fov widens; a small margin keeps
+  // the far ground from racing off to infinity (and wrecking depth precision).
+  const HALF_PI = Math.PI / 2;
+  const maxPitch = () => Math.min(PITCH_MAX, HALF_PI - fov / 2 - 5 * DEG);
+  const clampPitch = (p) => Math.max(PITCH_MIN, Math.min(maxPitch(), p));
+  const clampFov = (f) => Math.max(FOV_MIN, Math.min(FOV_MAX, f));
   function clampCam() {
     zoom = Math.max(ZMIN, Math.min(ZMAX, zoom));
     camX = Math.max(0, Math.min(C.BW * C.SUB, camX));
@@ -249,7 +257,12 @@ async function main() {
     const sp = Math.sin(pitch), cp = Math.cos(pitch), sy = Math.sin(yaw), cy = Math.cos(yaw);
     const eye = [t[0] + dist * sp * sy, t[1] + dist * sp * cy, t[2] + dist * cp];
     const view = m4lookAt(eye, t, [-sy, -cy, 0]);
-    const proj = m4perspective(fov, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), dist * 4 + (C.BW + C.BH));
+    // Far plane reaches the farthest visible ground — the point under the TOP frustum edge,
+    // which recedes toward the horizon as the camera tilts. (eye height / sin(edge angle))
+    // + a world-sized margin. near stays a small fraction of the look distance.
+    const topA = Math.max(3 * DEG, (HALF_PI - pitch) - fov / 2);
+    const far = (dist * cp) / Math.sin(topA) + dist + (C.BW + C.BH);
+    const proj = m4perspective(fov, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), far);
     const mvp = m4mul(m4mul(proj, view), m4scale(1 / C.SUB));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
@@ -312,7 +325,7 @@ async function main() {
   // Render-only, exactly like pan and zoom — it only rebuilds the MVP uniform.
   function rotateBy(dx, dy) {
     yaw += dx * 0.005;
-    pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, pitch - dy * 0.005));
+    pitch = clampPitch(pitch - dy * 0.005);
     const pd = (pitch / DEG).toFixed(0);
     if (pR) pR.value = pd; if (pV) pV.textContent = pd + "°";
   }
@@ -324,11 +337,16 @@ async function main() {
   const pdist = () => { const p = [...pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
   const pmid  = () => { const p = [...pointers.values()]; return [(p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2]; };
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());      // right-drag orbits, so no menu
+  canvas.addEventListener("dragstart", (e) => e.preventDefault());        // never native-drag the canvas
   canvas.addEventListener("pointerdown", (e) => {
-    canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // own the gesture: stop the browser starting a text-selection or image-drag, which
+    // otherwise leaves the cursor stuck as "no-drop" and swallows the pan.
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     dragMoved = 0;
-    // a mouse drag rotates when Shift is held or the right/middle button is used
-    rotateDrag = e.pointerType === "mouse" && (e.shiftKey || e.button === 1 || e.button === 2);
+    // a mouse drag rotates when Shift is held or the right button is used
+    rotateDrag = e.pointerType === "mouse" && (e.shiftKey || e.button === 2);
     if (pointers.size === 2) { pinchPrev = pdist(); midPrev = pmid(); }
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -379,14 +397,16 @@ async function main() {
   const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { zoom = parseFloat(zR.value) || 1; clampCam(); };
   // live pitch (tilt off straight-down) + fov (lens) — presentation-only, like zoom
   const pR = document.getElementById("pitch"), pV = document.getElementById("pitchval");
-  if (pR) pR.oninput = () => { pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, (parseFloat(pR.value) || 30) * DEG)); if (pV) pV.textContent = pR.value + "°"; };
+  if (pR) pR.oninput = () => { pitch = clampPitch((parseFloat(pR.value) || 30) * DEG); pR.value = (pitch / DEG).toFixed(0); if (pV) pV.textContent = pR.value + "°"; };
   const fR = document.getElementById("fov"), fV = document.getElementById("fovval");
-  if (fR) fR.oninput = () => { fov = Math.max(FOV_MIN, Math.min(FOV_MAX, (parseFloat(fR.value) || 36) * DEG)); if (fV) fV.textContent = fR.value + "°"; };
+  // widening fov lowers the horizon, so re-clamp pitch and refresh its slider range
+  if (fR) fR.oninput = () => { fov = clampFov((parseFloat(fR.value) || 36) * DEG); if (fV) fV.textContent = fR.value + "°"; pitch = clampPitch(pitch); syncViewUI(); };
   function syncViewUI() {
     if (zR) zR.value = zoom.toFixed(2);
-    if (pR) pR.value = (pitch / DEG).toFixed(0); if (pV) pV.textContent = (pitch / DEG).toFixed(0) + "°";
+    if (pR) { pR.max = Math.round(maxPitch() / DEG); pR.value = (pitch / DEG).toFixed(0); } if (pV) pV.textContent = (pitch / DEG).toFixed(0) + "°";
     if (fR) fR.value = (fov / DEG).toFixed(0);   if (fV) fV.textContent = (fov / DEG).toFixed(0) + "°";
   }
+  syncViewUI();   // set the pitch slider's fov-dependent max + initial readouts
 
   buildTouchPad(document.getElementById("map"));
   const dbg = mountWidgets(wasm, view, C);
