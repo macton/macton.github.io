@@ -437,14 +437,15 @@ async function main() {
   }
   syncViewUI();   // set the pitch slider's fov-dependent max + initial readouts
 
-  // 'f' frames the selected tank in the free camera (centre + a comfortable zoom; stays free)
+  // 'f' frames the selected tank WITHOUT changing the camera mode: in the free camera it
+  // centres the view on the tank; in a follow camera it (re)targets that tank and recentres.
   const FRAME_ZOOM = 6;
   function frameSelected() {
     const sel = wasm.selected(); if (sel === 255) return;
-    const xy = view.xy();
-    camX = xy[2 * sel]; camY = xy[2 * sel + 1];
-    zoom = Math.max(zoom, FRAME_ZOOM); follow = false; followTank = -1;
-    clampCam(); if (zR) zR.value = zoom.toFixed(2);
+    zoom = Math.max(zoom, FRAME_ZOOM);
+    if (follow) { followTank = sel; followOffX = followOffY = 0; }       // stay following — frame the selection
+    else { const xy = view.xy(); camX = xy[2 * sel]; camY = xy[2 * sel + 1]; clampCam(); }
+    if (zR) zR.value = zoom.toFixed(2);
   }
   addEventListener("keydown", (e) => {
     if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
