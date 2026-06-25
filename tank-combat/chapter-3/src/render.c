@@ -158,7 +158,7 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + bx - sox, ly = oy + by - soy;
     uint32_t di = w->tank_proj_dir[t] >> ANGLE_SHIFT; int32_t co = dir_cos(di), si = dir_sin(di);
-    int half = PROJ_SPEED / 2;                              /* the streak trails back over the tick's travel */
+    int half = w->proj_speed / 2;                          /* the streak trails back over the tick's travel */
     int mx = lx - ((co * half) >> TRIG_SHIFT), my = ly - ((si * half) >> TRIG_SHIFT);
     k = push(out, k, mx, my, half, 12, co, si, COL_BOLT_GLOW);   /* trailing glow streak */
     k = push(out, k, lx, ly, 24,    9, co, si, COL_BOLT_CORE);   /* bright leading head */

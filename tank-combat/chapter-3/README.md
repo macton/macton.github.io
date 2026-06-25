@@ -189,7 +189,7 @@ destruction bursts. Per tank, each tick:
   bolt leaves straight along the barrel — a line shot can't fire in a cone), the cooldown is
   elapsed (`fire_period`, default 30 ticks = **2/sec**; `0` = aim-only), and the tank's
   previous bolt has expired, launch a **piercing projectile** from the muzzle. The bolt is a
-  travelling shot (`PROJ_SPEED`, ~3 cells/tick), not a hitscan beam: each tick `proj_step`
+  travelling shot (`proj_speed`, a page tunable — slow default ~2.25 cells/tick), not a hitscan beam: each tick `proj_step`
   marches it along its fixed heading, **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
   has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin an
@@ -257,13 +257,13 @@ New in chapter 3:
 `defs.h` adds the mite vocabulary (`N_MITES`, `MITE_R`, `MITE_CAP`, `NEST_COUNT`,
 `nest_of`, `N_FIELDS`, the modes, `REC_EMPTY`, world-cell + toroidal-distance helpers,
 the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NONE`,
-`PROJ_RANGE`, `PROJ_HW`, `PROJ_SPEED`, `N_FX`, `FX_DURATION`).
+`PROJ_RANGE`, `PROJ_HW`, `PROJ_SPEED_DEFAULT`, `N_FX`, `FX_DURATION`).
 `sim.h`'s `World` gains the mite pool (SoA, incl. `mite_dest` and `mite_resp`), the
 double-buffered records, the per-cell index, the fifteen nests, the shared route-field
 table, the field active/peak counters, the per-tank turret/cooldown/target + in-flight
 **bolt** state (`tank_proj_xy`/`dir`/`dist`/`tgt`/`live`), the **destruction-effect ring**
 (`fx_xy`/`fx_t`), the PRNG, and the mite + combat tunables (`fire_period`, `mite_respawn`,
-`turret_rate`).
+`turret_rate`, `proj_speed`).
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
 `tank_turret` (separate from the body), each in-flight **bolt** (a hot streak + bright head)

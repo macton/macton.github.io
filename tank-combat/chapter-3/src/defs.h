@@ -112,9 +112,10 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define TGT_NONE     0xFFFFu    /* tank has no target */
 #define PROJ_RANGE   64         /* max bolt flight in cells before it expires (also stops at a wall) */
 #define PROJ_HW      40         /* bolt kill half-width, subcells (< SUBQ, so off-line mites dodge) */
-#define PROJ_SPEED   (3 * SUB)  /* bolt travel per tick in subcells (3 cells/tick — a fast bolt that
-                                 * clears its full range inside one fire period, so flight never
-                                 * blocks the next shot) */
+#define PROJ_SPEED_DEFAULT (9 * SUB / 4)  /* default bolt travel per tick in subcells: ~2.25 cells/tick,
+                                 * a "slow" ~3/4 of a 3-cell bolt. Live-tunable on the page as
+                                 * `w->proj_speed`; the default still clears PROJ_RANGE inside one fire
+                                 * period, so flight rarely blocks the next shot. */
 
 /* destruction effects: a small fixed ring of expanding/fading bursts, one per mite a
  * bolt destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */

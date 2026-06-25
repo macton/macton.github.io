@@ -317,7 +317,7 @@
     (an integer Bresenham walk over the wall grid), and tracks the smallest bearing change. The turret
     swings onto that target and, once exactly on it (and the cooldown elapsed), fires at a fixed rate
     (default <strong>2 shots/sec</strong>). The shot is a <strong>travelling, piercing bolt</strong> — not a
-    hitscan beam: launched from the muzzle, it marches a few cells per tick, destroying mites whose position
+    hitscan beam: launched from the muzzle, it marches a tunable couple of cells per tick (slow by default), destroying mites whose position
     lies within a narrow band of its path and <strong>piercing on through them</strong> — again just reading
     the per-cell index — until it meets a wall. Because mites sit in sub-segments off the cell centre, the
     ones <strong>on</strong> the line die and the ones <strong>off</strong> it <strong>dodge</strong> (the bolt

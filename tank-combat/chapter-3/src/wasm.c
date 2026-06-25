@@ -98,6 +98,9 @@ EXPORT(fire_period)      uint32_t fire_period(void)        { return g_world.fire
 EXPORT(set_fire_period)  void     set_fire_period(uint32_t v)  { g_world.fire_period = (uint16_t)(v > 6000 ? 6000 : v); }
 EXPORT(mite_respawn)     uint32_t mite_respawn(void)       { return g_world.mite_respawn; }
 EXPORT(set_mite_respawn) void     set_mite_respawn(uint32_t v) { g_world.mite_respawn = (uint16_t)(v < 1 ? 1 : (v > 60000 ? 60000 : v)); }
+/* bolt travel per tick in subcells (256 = 1 cell/tick); clamped so a bolt always moves */
+EXPORT(proj_speed)       uint32_t proj_speed(void)         { return g_world.proj_speed; }
+EXPORT(set_proj_speed)   void     set_proj_speed(uint32_t v) { g_world.proj_speed = (uint16_t)(v < 16 ? 16 : (v > 4096 ? 4096 : v)); }
 
 /* pointers — only the World fields the page reads (the chapter-2 path tables stay
  * simulation-internal in chapter 3, so they are no longer exported) */

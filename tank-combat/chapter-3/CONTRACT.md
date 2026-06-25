@@ -134,7 +134,7 @@ the inherited tests still pass and the baked escape table is byte-identical.
   `fire_period` ticks; default 30 = 2/sec; `0` disables firing, aim only), and the tank's
   previous bolt has expired (one live bolt per tank). The shot is a **travelling projectile**,
   not a hitscan beam: launched from the muzzle along the barrel, each tick it marches forward
-  `PROJ_SPEED` subcells (~3 cells/tick), **destroying every mite within `PROJ_HW` of the swept
+  `proj_speed` subcells (a page tunable; slow default ~2.25 cells/tick), **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
   has flown `PROJ_RANGE` cells, then it expires. Because the 32-direction aim can't pin a
   sub-segment-offset mite exactly, the bolt **carries the mite it was aimed at** and kills it

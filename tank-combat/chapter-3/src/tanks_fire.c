@@ -88,7 +88,7 @@ static void proj_step(World* w, uint32_t t, uint32_t frame) {
   int co = dir_cos(pd), si = dir_sin(pd);
   uint16_t pt = w->tank_proj_tgt[t];                      /* the aimed mite — killed on arrival regardless of perp */
 
-  int step = PROJ_SPEED;                                   /* this tick's reach (subcells) */
+  int step = w->proj_speed;                               /* this tick's reach (subcells, page-tunable) */
   int rng_left = (int)PROJ_RANGE * SUB - (int)w->tank_proj_dist[t];
   if (step > rng_left) step = rng_left;                    /* the last partial step before it expires */
 
