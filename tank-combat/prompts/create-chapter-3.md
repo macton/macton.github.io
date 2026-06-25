@@ -50,7 +50,10 @@ Roaches, Drones are all fine) — it appears only in the chapter-3 sources, its
 The world is the chapter-2 `BIG_W × BIG_H` (= 80 × 60 = 4800) toroidal grid of
 cells, organised as 4×4 screens. A **grid segment** in this prompt is **one world
 cell**. The mites' size, their crowding cap, their sensing range, and their arrival
-test are all expressed in whole cells.
+test are all expressed in whole cells. **"Within one cell" means the 3×3 Chebyshev
+neighbourhood** (the mite's cell and its 8 neighbours, toroidally) — used identically
+for sensing a tank, reading a peer, and the arrival test; resolve it by reading the
+per-cell index over those 9 cells, never a radius in subcells.
 
 ## What chapter 3 adds — the mites
 
@@ -143,6 +146,16 @@ or its nest). It does not compute its own route — it reads a **shared route fi
 for that destination: the same Level-1/Level-2 composition the tanks use, with the
 remaining-distance vector (`pg`) **keyed by destination cell** instead of by tank.
 
+**What `pg` is (so the table size is reproducible):** it is chapter 2's **Level-2
+remaining-distance vector keyed by edge point** — one entry per inter-screen *edge
+point* (≈ `N_EDGE_MAX` ≈ 128 entries, a few hundred bytes), **not** a per-cell
+distance map over all 4800 cells. Within a screen, the **baked Level-1 all-pairs
+table** gives the next step; `pg` only routes *between* screens. That two-level reuse
+is the whole reason a field is cheap and a fixed table of them fits the budget — if
+you instead fold a full per-cell BFS per destination (≈ 9.6 KB each) you have rebuilt
+chapter 2's job and blown the budget. Reuse the chapter-2 tables; do not re-derive a
+flat distance field.
+
 Because the swarm shares destinations, the set of *distinct* destinations in flight
 is **small and practically bounded** — the 4 nests, plus the handful of recent
 tank-sighting cells the gossip is converging on — even though 1000 mites are moving.
@@ -164,9 +177,13 @@ So keep a **fixed table of route fields** (`N_FIELDS`), keyed by destination cel
   and the peak is how you size the table.
 
 Turning a destination into the input byte is the tank path-follow, unchanged: the
-field gives the next cardinal from the mite's current cell; turn toward
-`CARD_DI[dir]` and drive only when the discrete heading is axis-aligned, so the mite
-tracks cells and clears the one-cell gaps.
+field gives the next cardinal from the mite's current cell; turn toward `CARD_DI[dir]`
+and **drive only when the discrete heading equals that chosen cardinal** — not merely
+"some axis". This matters for the cap: the mite must enter exactly the cell it
+reserved, so it advances at most one orthogonal cell-boundary per tick. Driving while
+the heading is any axis (a still-rotating mite drifting diagonally) lets it cross into
+an unreserved cell and the per-cell cap leaks. So: align to the *reserved* cardinal,
+then drive; the mite tracks cells and clears the one-cell gaps.
 
 **Wander** (empty record) needs no field: pick a random **open, non-full adjacent
 cell** (deterministic RNG), re-choosing at each cell centre.
@@ -189,6 +206,17 @@ The tanks and the mites are both **driven bodies on the grid**: a position, a
 heading, an input byte, a collision flag. They share the turn and move transforms.
 The transform already takes arrays and a count, so the work is naming and one
 parameter:
+
+**Inherited movement contract (you are reusing chapter 2's — do not re-derive it; if
+building from scratch, take it from `create-chapter-2.md`, where it is pinned):** the
+**position integrator wraps toroidally** (a body crossing an edge reappears on the far
+side — *positions* wrap, not just the conceptual grid; clamping instead silently fakes
+a cap break); the discrete-direction ↔ heading mapping is fixed with **screen-down y**
+(so "north" is −y — getting the sign backwards inverts all navigation); rotate-then-
+move with the auto-steer reacting to the *previous* tick's `hit`; and collision tests
+only the **leading edge** the body enters (far-side rule), parameterised by radius
+below. These are chapter-2 guarantees the swarm leans on; a fresh build that guesses
+them differently will pass its own unit tests and still navigate wrong.
 
 - **Rename `tanks_turn` → `agent_turn` and `tanks_move` → `agent_move`** (files and
   functions; `body_*` or `mover_*` are acceptable alternates). They operate on "a

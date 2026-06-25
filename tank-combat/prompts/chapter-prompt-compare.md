@@ -93,3 +93,51 @@ Note: the rebuild's 16-entry escape table (one orthogonal direction per pattern)
 is smaller than the reference's `[pattern][travel]` table, but it does *not*
 honour "nearest to current heading" and steers to a fixed-priority orthogonal
 direction — smaller, not better. Nothing from run 2 was worth adopting back.
+
+## What past runs found (chapter 3)
+
+The rebuild (forbidden from reading `chapter-3/`, so it reconstructed chapter 2 from
+the prompt + `AGENTS.md`) independently reproduced the core DOD result: flat SoA
+`World`, the per-cell index rebuilt every tick, **double-buffered last-write-wins**
+gossip propagating one hop/tick order-independently, the cap enforced by an in-order
+reservation, nests partitioning the swarm, and a deterministic xorshift32 swarm —
+freestanding wasm + native tests passing. The shape was right; the gaps were in the
+*details the prompt assumed from chapter 2 but never restated*, three of which the
+rebuild got wrong on the first pass and found only by debugging cap/nav failures.
+
+**Gaps, now closed** (all in `create-chapter-3.md`):
+
+- **The route field's representation was unreproducible.** The memory budget cites
+  `pg[128]` / ~256 B per field, but the navigation text only said "the same
+  Level-1/2 composition keyed by destination." A builder *without* chapter 2's
+  two-level tables can't know `pg` is an **edge-point** vector (≈128 entries) backed
+  by the baked per-screen Level-1 table — so it folds a full **per-cell BFS** (~9.6 KB
+  each, ~600 KB total): correct ground truth, blown budget. → the prompt now states
+  what `pg` is and that within-screen steps come from the Level-1 table, not a flat
+  field. *(This is the one divergence a faithful rebuild hits for certain.)*
+- **The cap's drive-gate was ambiguous.** "Drive only when the discrete heading is
+  axis-aligned" reads as *any* axis; the rebuild drove on any cardinal and a
+  still-rotating mite drifted diagonally into an **unreserved** cell — a silent cap
+  leak. → the prompt now says drive only when the heading equals the **reserved**
+  cardinal, and explains why (≤1 boundary crossing/tick).
+- **"Within one cell" was undefined** (Chebyshev 3×3 vs Manhattan vs a subcell
+  radius). → pinned to the 3×3 Chebyshev neighbourhood, read from the index.
+- **Inherited chapter-2 movement was assumed, not stated.** The rebuild had to
+  re-derive **toroidal position wrapping** (it clamped first → bodies piled on the
+  edge, faking a cap break) and the **screen-down-y direction sign** (inverted N/S →
+  navigation ran backwards). → the prompt now restates the inherited contract
+  (positions wrap not clamp, −y is north, rotate-then-move, leading-edge collision)
+  and points at `create-chapter-2.md`.
+
+**Nothing was worth adopting back.** The rebuild's full per-cell BFS field is simpler
+to write but strictly larger and is the chapter-2 work re-done; its 240 checks are
+finer granularity, not extra coverage. The reference's edge-point fields and
+sub-segment cap are more refined.
+
+**Scope note (not an instruction gap):** `create-chapter-3.md` specifies the *original*
+chapter-3 increment — 4 nests, untyped records, ≤4-per-cell cap, **no combat**. The
+shipped `chapter-3/` has since grown tank combat (laser/turret/death-cry/respawn), one
+nest per screen (15), the 2×2 sub-segment cap, and settled on the simpler gossip model.
+The rebuild correctly matched the *prompt*, so those are prompt-vs-shipped drift, not
+guidance gaps. Reconciling the prompt with the shipped feature set is a separate pass if
+desired.
