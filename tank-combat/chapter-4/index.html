@@ -341,9 +341,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js"></script>
-  <!-- cache-bust app.js too (not just the wasm): version.js runs first and sets
-       TANK_VERSION, so a new build always fetches the matching app.js. -->
-  <script type="module">import("./app.js?v=" + (window.TANK_VERSION || "dev"));</script>
+  <script src="version.js?v=2026.06.25-192452"></script>
+  <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
+       reload always fetches the app.js/version.js that match THIS page document. (Routing
+       the app.js bust through a separately-cached version.js could pin a stale app.js;
+       the page document is the one thing a reload reliably refreshes.) -->
+  <script type="module">import("./app.js?v=2026.06.25-192452");</script>
 </body>
 </html>

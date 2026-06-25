@@ -48,6 +48,11 @@ clang \
 
 VER="$(date -u '+%Y.%m.%d-%H%M%S')"
 printf 'window.TANK_VERSION = "%s";\n' "$VER" > version.js
+# Stamp the ?v= cache-busts directly into index.html so a reload always fetches the
+# app.js/version.js that match THIS page document. Routing the app.js bust through a
+# separately-cached version.js can pin a stale app.js (new HTML, old JS); the page
+# document is the one resource a reload reliably refreshes, so the version lives there.
+sed -i -E "s|(version\.js\?v=)[^\"]*|\1$VER|; s|(app\.js\?v=)[^\"]*|\1$VER|" index.html
 
 echo "built game.wasm: $(wc -c < game.wasm) bytes"
 echo "version: $VER"
