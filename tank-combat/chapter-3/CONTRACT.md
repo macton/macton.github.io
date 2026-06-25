@@ -132,9 +132,10 @@ the inherited tests still pass and the baked escape table is byte-identical.
   not targeted.)*
 - **Fire is a fixed-rate, exactly-aimed piercing bolt.** The tank fires only once the turret
   has swung **exactly** onto the target bearing (so the bolt leaves straight along the barrel —
-  a line shot is never a cone, so the turn rate gates firing), the cooldown is elapsed (every
-  `fire_period` ticks; default 30 = 2/sec; `0` disables firing, aim only), and the tank's
-  previous bolt has expired (one live bolt per tank). The shot is a **travelling projectile**,
+  a line shot is never a cone, so the turn rate gates firing) and the cooldown is elapsed (every
+  `fire_period` ticks; default 30 = 2/sec; `0` disables firing, aim only); a tank may have **up
+  to `PROJ_MAX` (4) bolts in flight at once**, so a slow bolt doesn't throttle the rate — only an
+  all-slots-full tank waits. The shot is a **travelling projectile**,
   not a hitscan beam: launched from the muzzle along the barrel, each tick it marches forward
   `proj_speed` subcells (a page tunable; slow default 1 cell/tick), **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
@@ -149,7 +150,8 @@ the inherited tests still pass and the baked escape table is byte-identical.
   and destroys it + a burst; it **pierces** the first mite on its line and destroys the next;
   it **misses ones off it**; it stops at a wall (a collinear mite beyond survives); the
   cooldown; the corpse leaving the index; an off-axis target not shot until the turret swings
-  on; the turret swings onto a new target while the bolt is still in flight.)*
+  on; the turret swings onto a new target while the bolt is still in flight; a tank keeps
+  several bolts aloft at once, capped at `PROJ_MAX`.)*
 - **Every kill is a death cry.** Every live mite within **2× `mite_sense`** cells of a
   destroyed one has its record set to the firing tank's cell (stamped now) and its mode set to hunt,
   through the ordinary record buffer — the swarm turns on its attacker by the same gossip

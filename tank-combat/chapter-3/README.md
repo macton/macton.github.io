@@ -189,9 +189,9 @@ destruction bursts. Per tank, each tick:
   along, via `fine_cos`/`fine_sin`), so it tracks smoothly and points precisely; only target
   selection uses the coarse 32.
 - **Fire (a bolt).** Once the turret has swung **exactly** onto the target bearing (so the
-  bolt leaves straight along the barrel — a line shot can't fire in a cone), the cooldown is
-  elapsed (`fire_period`, default 30 ticks = **2/sec**; `0` = aim-only), and the tank's
-  previous bolt has expired, launch a **piercing projectile** from the muzzle. The bolt is a
+  bolt leaves straight along the barrel — a line shot can't fire in a cone) and the cooldown is
+  elapsed (`fire_period`, default 30 ticks = **2/sec**; `0` = aim-only), launch a **piercing
+  projectile** from the muzzle into the first free bolt slot. The bolt is a
   travelling shot (`proj_speed`, a page tunable — slow default 1 cell/tick), not a hitscan beam: each tick `proj_step`
   marches it along its fixed heading, **destroying every mite within `PROJ_HW` of the swept
   segment and piercing on through them** (a kill never stops it), until it meets a **wall** or
@@ -202,8 +202,10 @@ destruction bursts. Per tank, each tick:
   Each destroyed mite is marked dead (`mite_resp` = the respawn timer), drops out of the index
   next rebuild (never drawn — minimap included — gossiped, or targeted), and spawns a
   **destruction burst**. Firing **no longer locks the turret**: the moment the bolt is away the
-  barrel is free to swing onto the next target while the shot is still travelling (one live bolt
-  per tank — the slot frees when the bolt expires).
+  barrel is free to swing onto the next target while the shot is still travelling. A tank may
+  have **up to `PROJ_MAX` (4) bolts in flight at once** (a flat pool, `t*PROJ_MAX + slot`), so a
+  slow bolt no longer throttles the fire rate — only when **all four slots are full** does
+  firing wait for one to clear; the cadence is otherwise the cooldown.
 - **Death cry.** Each kill writes the **firing tank's cell** into the record of every live
   mite within **2× sensing range** of the destroyed one (stamped now, mode → hunt), through
   the ordinary record buffer — so a bolt that mows a line broadcasts the shooter's position
@@ -287,7 +289,7 @@ Everything is static, integer, allocation-free.
 | mite SoA: `xy`,`vxy`,`ang`,`in`,`hit`,`mode`,`dest`,`cell`,`tgt`,`resp` × 1000 | ~21 KB |
 | records (double-buffered): `rec_cell` (u16) + `rec_time` (u32), ×2 | ~12 KB |
 | shared route fields: `field_pg[64 · 128]` (u16) + `field_dest[64]` | ~16 KB |
-| combat: per-tank turret/cooldown/target + in-flight bolt (×4) + effect ring `fx_xy`/`fx_t`[256] | ~2 KB |
+| combat: per-tank turret/cooldown/target + in-flight bolts (4 slots × 4 tanks) + effect ring `fx_xy`/`fx_t`[256] | ~2 KB |
 | `mites.c` BFS/scatter/tally/dest-mark scratch (file-static) | ~34 KB |
 | instance buffer (2 screens + up to `N_MITES` mite quads + nests) | ~43 KB |
 | 15 nests, PRNG state, mite + combat tunables, 128 KB stack | — |
@@ -341,7 +343,7 @@ blocks line of sight; the turret **swings at a turn rate** and does not snap; ta
 picks the mite **closest to the turret's direction**, not the spatially nearest; the
 **turn rate gates firing** — an off-axis target isn't shot until the turret swings on; the
 **turret is free to swing onto a new target while the bolt is still travelling** (firing no
-longer locks it); the
+longer locks it); a tank keeps **several bolts aloft at once, capped at `PROJ_MAX`**; the
 death cry teaches a nearby mite the shooter's cell and flips it to hunt; a destroyed mite
 revives at its nest **with its memory cleared** after the timeout); **wall safety** at
 `MITE_R`; and **determinism** (the swarm state hash **and** the tank combat-state hash,

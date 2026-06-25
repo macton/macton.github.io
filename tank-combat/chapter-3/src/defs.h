@@ -112,6 +112,7 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 #define TGT_NONE     0xFFFFu    /* tank has no target */
 #define PROJ_RANGE   64         /* max bolt flight in cells before it expires (also stops at a wall) */
 #define PROJ_HW      40         /* bolt kill half-width, subcells (< SUBQ, so off-line mites dodge) */
+#define PROJ_MAX     4          /* a tank can have up to this many bolts in flight at once */
 #define PROJ_SPEED_DEFAULT SUB  /* default bolt travel per tick in subcells: 1 cell/tick — a slow,
                                  * deliberate bolt. Live-tunable on the page as `w->proj_speed`. (A far
                                  * open-field shot can still be in flight when the next would fire; the

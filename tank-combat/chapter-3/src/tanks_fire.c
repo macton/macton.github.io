@@ -94,13 +94,14 @@ static void kill_mite(World* w, uint32_t m, uint16_t tcell, uint32_t frame) {
  * sub-segments a quarter-cell off centre, a thin bolt misses the ones off the line — they
  * dodge. The kill window tiles contiguously tick to tick (this tick's [0,step] from the new
  * head abuts last tick's), so every point on the path is swept exactly once. */
-static void proj_step(World* w, uint32_t t, uint32_t frame) {
-  int px = xy_lo(w->tank_proj_xy[t]), py = xy_hi(w->tank_proj_xy[t]);
-  int co = fine_cos(w->tank_proj_dir[t]), si = fine_sin(w->tank_proj_dir[t]);  /* the bolt flies the fine turret angle */
-  uint16_t pt = w->tank_proj_tgt[t];                      /* the aimed mite — killed on arrival regardless of perp */
+static void proj_step(World* w, uint32_t b, uint32_t frame) {
+  uint32_t t = b / PROJ_MAX;                              /* the firing tank owns slots t*PROJ_MAX .. +PROJ_MAX-1 */
+  int px = xy_lo(w->tank_proj_xy[b]), py = xy_hi(w->tank_proj_xy[b]);
+  int co = fine_cos(w->tank_proj_dir[b]), si = fine_sin(w->tank_proj_dir[b]);  /* the bolt flies the fine turret angle */
+  uint16_t pt = w->tank_proj_tgt[b];                      /* the aimed mite — killed on arrival regardless of perp */
 
   int step = w->proj_speed;                               /* this tick's reach (subcells, page-tunable) */
-  int rng_left = (int)PROJ_RANGE * SUB - (int)w->tank_proj_dist[t];
+  int rng_left = (int)PROJ_RANGE * SUB - (int)w->tank_proj_dist[b];
   if (step > rng_left) step = rng_left;                    /* the last partial step before it expires */
 
   /* the firing tank's CURRENT cell — what a kill teaches the nearby swarm (the death cry) */
@@ -137,10 +138,10 @@ static void proj_step(World* w, uint32_t t, uint32_t frame) {
     if (e2 <  adx) { err += adx; cy += sy; }
   }
 
-  if (hitwall) { w->tank_proj_live[t] = 0; return; }       /* spent against the wall */
-  w->tank_proj_xy[t]   = xy_pack(wrap_x(ex), wrap_y(ey));  /* advance the head (torus-wrapped) */
-  w->tank_proj_dist[t] = (uint16_t)(w->tank_proj_dist[t] + step);
-  if (w->tank_proj_dist[t] >= PROJ_RANGE * SUB) w->tank_proj_live[t] = 0;  /* flew its full range */
+  if (hitwall) { w->tank_proj_live[b] = 0; return; }       /* spent against the wall */
+  w->tank_proj_xy[b]   = xy_pack(wrap_x(ex), wrap_y(ey));  /* advance the head (torus-wrapped) */
+  w->tank_proj_dist[b] = (uint16_t)(w->tank_proj_dist[b] + step);
+  if (w->tank_proj_dist[b] >= PROJ_RANGE * SUB) w->tank_proj_live[b] = 0;  /* flew its full range */
 }
 
 void tanks_fire(World* w) {
@@ -151,9 +152,10 @@ void tanks_fire(World* w) {
   for (uint32_t i = 0; i < N_FX; i++) if (w->fx_t[i]) w->fx_t[i]--;   /* age the bursts */
 
   for (uint32_t t = 0; t < N_TANKS; t++) {
-    /* a bolt already in flight pierces on this tick (and may expire at a wall / its range),
-     * independent of where the turret now points — firing does not pin the bolt to the aim. */
-    if (w->tank_proj_live[t]) proj_step(w, t, frame);
+    /* every bolt this tank has in flight pierces on this tick (and may expire at a wall / its
+     * range), independent of where the turret now points — firing does not pin the bolt to the aim. */
+    for (uint32_t s = 0; s < PROJ_MAX; s++)
+      if (w->tank_proj_live[t * PROJ_MAX + s]) proj_step(w, t * PROJ_MAX + s, frame);
 
     int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
     int tcx = wrap_wcx(tx >> SUB_SHIFT), tcy = wrap_wcy(ty >> SUB_SHIFT);
@@ -195,17 +197,22 @@ void tanks_fire(World* w) {
     if (w->tank_cooldown[t] > 0) w->tank_cooldown[t]--;
 
     /* fire only once the barrel has swung EXACTLY onto the target bearing (so the bolt leaves
-     * straight along the barrel), the cooldown is ready (period 0 = off), and our previous bolt
-     * has expired (at most one in flight at a time). The shot is a PROJECTILE: a piercing bolt
-     * launched from the muzzle that mows the line ahead until it hits a wall (proj_step flies it). */
-    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want
-        && w->tank_cooldown[t] == 0 && !w->tank_proj_live[t]) {
-      w->tank_proj_xy[t]   = w->tank_xy[t];          /* spawn at the tank, heading along the barrel */
-      w->tank_proj_dir[t]  = w->tank_turret[t];
-      w->tank_proj_dist[t] = 0;
-      w->tank_proj_tgt[t]  = (uint16_t)target;        /* the bolt carries its target for a sure kill */
-      w->tank_proj_live[t] = 1;
-      w->tank_cooldown[t]  = (uint16_t)period;
+     * straight along the barrel) and the cooldown is ready (period 0 = off). The cadence is
+     * the cooldown; a tank may have up to PROJ_MAX bolts aloft at once, so a slow bolt no longer
+     * throttles the fire rate — only when ALL slots are full does firing wait. The shot is a
+     * PROJECTILE: a piercing bolt from the muzzle that mows the line ahead (proj_step flies it). */
+    if (period > 0 && target != TGT_NONE && w->tank_turret[t] == want && w->tank_cooldown[t] == 0) {
+      uint32_t slot = PROJ_MAX;                             /* the first free bolt slot, if any */
+      for (uint32_t s = 0; s < PROJ_MAX; s++) if (!w->tank_proj_live[t * PROJ_MAX + s]) { slot = s; break; }
+      if (slot < PROJ_MAX) {
+        uint32_t b = t * PROJ_MAX + slot;
+        w->tank_proj_xy[b]   = w->tank_xy[t];        /* spawn at the tank, heading along the barrel */
+        w->tank_proj_dir[b]  = w->tank_turret[t];
+        w->tank_proj_dist[b] = 0;
+        w->tank_proj_tgt[b]  = (uint16_t)target;      /* the bolt carries its target for a sure kill */
+        w->tank_proj_live[b] = 1;
+        w->tank_cooldown[t]  = (uint16_t)period;
+      }
     }
   }
 }

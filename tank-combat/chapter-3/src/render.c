@@ -151,19 +151,19 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
    * swept this tick (so it reads as a fast travelling shot, not a dot) capped by a bright head.
    * Each is keyed to the screen the bolt's HEAD is on (it travels away from its firing tank,
    * onto other screens), like the bursts below. */
-  for (uint32_t t = 0; t < N_TANKS; t++) {
-    if (!w->tank_proj_live[t]) continue;
+  for (uint32_t b = 0; b < N_TANKS * PROJ_MAX; b++) {
+    if (!w->tank_proj_live[b]) continue;
     /* the bolt spawns at the tank centre, so its first stretch is still inside the barrel —
      * don't draw that. Only the length the head has travelled BEYOND the turret's leading edge
      * (the barrel tip, 87 + 56 subcells from centre) is shown; the streak's tail is clipped
      * there. While the head is still within the barrel (beyond <= 0) the bolt isn't drawn. */
-    int beyond = (int)w->tank_proj_dist[t] - (87 + 56);
+    int beyond = (int)w->tank_proj_dist[b] - (87 + 56);
     if (beyond <= 0) continue;
-    int bx = xy_lo(w->tank_proj_xy[t]), by = xy_hi(w->tank_proj_xy[t]);
+    int bx = xy_lo(w->tank_proj_xy[b]), by = xy_hi(w->tank_proj_xy[b]);
     int wcx = wrap_wcx(bx >> SUB_SHIFT), wcy = wrap_wcy(by >> SUB_SHIFT);
     if ((uint32_t)((wcy / GRID_H) * SCREENS_X + (wcx / GRID_W)) != screen) continue;
     int lx = ox + bx - sox, ly = oy + by - soy;
-    int32_t co = fine_cos(w->tank_proj_dir[t]), si = fine_sin(w->tank_proj_dir[t]);  /* bolt at the fine turret angle */
+    int32_t co = fine_cos(w->tank_proj_dir[b]), si = fine_sin(w->tank_proj_dir[b]);  /* bolt at the fine turret angle */
     int seg = w->proj_speed; if (seg > beyond) seg = beyond;  /* clip the tail at the barrel tip */
     int half = seg / 2;                                   /* the streak trails back over the drawn segment */
     int mx = lx - ((co * half) >> TRIG_SHIFT), my = ly - ((si * half) >> TRIG_SHIFT);

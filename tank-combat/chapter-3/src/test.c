@@ -57,8 +57,9 @@ static void place_tank(World* w, uint32_t t, int wcx, int wcy) {
   /* match sim's place(): body east, turret resting east, no target/cooldown — so the
    * turret-turn-rate combat tests start from a known aim. */
   w->tank_turret[t] = 0; w->tank_cooldown[t] = 0; w->tank_target[t] = TGT_NONE;
-  w->tank_proj_live[t] = 0; w->tank_proj_xy[t] = 0; w->tank_proj_dir[t] = 0;
-  w->tank_proj_dist[t] = 0; w->tank_proj_tgt[t] = TGT_NONE;
+  for (uint32_t s = 0; s < PROJ_MAX; s++) { uint32_t b = t * PROJ_MAX + s;
+    w->tank_proj_live[b] = 0; w->tank_proj_xy[b] = 0; w->tank_proj_dir[b] = 0;
+    w->tank_proj_dist[b] = 0; w->tank_proj_tgt[b] = TGT_NONE; }
 }
 /* drive tank `t` (UNSELECTED, so it follows its own path) to a destination */
 static void run_to_dest(World* w, uint32_t t, int wcx, int wcy, int maxticks,
@@ -331,10 +332,12 @@ static uint32_t tank_combat_hash(World* w) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     h = (h ^ w->tank_turret[t]) * 16777619u;
     h = (h ^ w->tank_cooldown[t]) * 16777619u;
-    h = (h ^ ((uint32_t)w->tank_target[t] | ((uint32_t)w->tank_proj_live[t] << 16))) * 16777619u;
-    h = (h ^ w->tank_proj_xy[t]) * 16777619u;
-    h = (h ^ ((uint32_t)w->tank_proj_dir[t] | ((uint32_t)w->tank_proj_dist[t] << 16))) * 16777619u;
-    h = (h ^ w->tank_proj_tgt[t]) * 16777619u;
+    h = (h ^ w->tank_target[t]) * 16777619u;
+    for (uint32_t s = 0; s < PROJ_MAX; s++) { uint32_t b = t * PROJ_MAX + s;
+      h = (h ^ ((uint32_t)w->tank_proj_live[b] | ((uint32_t)w->tank_proj_tgt[b] << 16))) * 16777619u;
+      h = (h ^ w->tank_proj_xy[b]) * 16777619u;
+      h = (h ^ ((uint32_t)w->tank_proj_dir[b] | ((uint32_t)w->tank_proj_dist[b] << 16))) * 16777619u;
+    }
   }
   return h;
 }
@@ -756,6 +759,21 @@ static void t_tanks_fire(void) {
   for (int i = 0; i < 8 && !turned_live; i++) { sim_tick(&W);
     if (W.tank_proj_live[0] && W.tank_turret[0] != fired) turned_live = 1; }
   check(turned_live, "the turret swings toward a new target while the bolt is still travelling (no lock)");
+
+  /* multiple bolts aloft: a fast fire period + a slow bolt let a tank keep several shots
+   * travelling at once, capped at PROJ_MAX. The bolt is so slow it piles up near the muzzle
+   * without reaching the (in-sight, pinned) target inside the window, so firing never stalls
+   * on the target dying — only on the slot cap. */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 1, 7);
+  mite_reset(&W, 0, 7, 7);                                /* in sight east, before the col-8 wall */
+  W.fire_period = 3; W.proj_speed = 16; W.mite_speed = 0; W.mite_respawn = 300;
+  int maxlive = 0;
+  for (int i = 0; i < 24; i++) { sim_tick(&W);
+    int live = 0; for (int s = 0; s < PROJ_MAX; s++) if (W.tank_proj_live[s]) live++;
+    if (live > maxlive) maxlive = live; }
+  check(maxlive >= 2, "a tank keeps several bolts in flight at once (fast fire + slow bolt)");
+  check(maxlive <= PROJ_MAX, "simultaneous bolts are capped at PROJ_MAX");
 
   /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
    * so the bolt connects, and step until it lands. */
