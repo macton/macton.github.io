@@ -32,10 +32,11 @@ model and the chapter has failed its own thesis.
   height `wz`, a facing, a tint — and the **vertex shader** projects it with a single
   **model-view-projection matrix**: `clip = mvp * vec4(world, 1)`, where
   `mvp = perspective · lookAt(eye, target) · scale(1/SUB)`.
-- The camera is a real **top-down perspective**: it looks down from above and slightly
-  to the **south** (a fixed ~30° tilt off straight-down), so near things are larger
-  than far ones and you see a sliver of their near faces. The MVP is the **view
-  uniform**, so a pan/zoom is a different matrix — never a geometry rebuild.
+- The camera is a real **top-down perspective**: by default it looks down from above and
+  slightly to the **south** (~30° off straight-down), so near things are larger than far
+  ones and you see a sliver of their near faces. **Pitch (tilt), yaw (orbit), fov, pan,
+  and zoom are all live** — the MVP is the **view uniform**, so each is just a different
+  matrix, never a geometry rebuild.
 - `render.c` emits **world placements**, never baked screen positions — one source of
   truth, the host owns the camera. The only render-side constant left in C is the
   translucent painter key in `view.h`. Test: the rebuild is **byte-identical** across
@@ -70,7 +71,8 @@ model and the chapter has failed its own thesis.
   draws one range per kind. `INST_MAX` ≈ 6500 (the whole world in view).
 - **Render scales with visibility** (tested): the whole **4×4 world is one connected
   map** (placements are world positions, all sixteen screens in their natural layout).
-  A **free camera** — drag to pan, pinch/scroll to zoom — shows any part; the host
+  A **free camera** — drag to pan, shift/right/two-finger-drag to orbit and tilt,
+  pinch/scroll to zoom — shows any part; the host
   passes the **visible world-space box** and render emits only the cells and the
   tanks/mites/nests/FX inside it. Zoomed out, that is the whole world (one block per
   cell); zoomed in, it is a handful of cells and the few mites in view — never the
@@ -107,9 +109,10 @@ cell; none of it writes the model:
 ## Boundaries / non-promises
 
 - `z` is **render-only**: the world stays a 2-D grid; the simulation has no height.
-- No free 3-D orbit (the camera tilt is fixed ~30° south; pan and zoom are provided),
-  no animated/rigged meshes, no shadows/AO/PBR, no 3-D minimap (it stays top-down).
-  These are deferred (see `README.md`), noted here, not built.
+- No camera roll or first-person fly-through (the camera stays an up-right orbit — yaw,
+  pitch/tilt, fov, pan, and zoom are all provided), no animated/rigged meshes, no
+  shadows/AO/PBR, no 3-D minimap (it stays top-down). These are deferred (see
+  `README.md`), noted here, not built.
 
 ## How it's tested
 

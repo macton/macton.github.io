@@ -212,7 +212,7 @@ async function main() {
   }
   new ResizeObserver(resize).observe(canvas); resize();
 
-  // --- the top-down PERSPECTIVE camera: drag to pan, pinch / wheel to zoom --------
+  // --- the top-down PERSPECTIVE camera: drag = pan · shift/right/2-finger drag = orbit · pinch/wheel = zoom
   // The projection is a host-built model-view-projection matrix (the shader just
   // applies it); the camera is ONLY that uniform. camX,camY is the ground point the
   // camera looks at (subcells); zoom sets how close it is. A slight PITCH from
@@ -223,23 +223,33 @@ async function main() {
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false;
   let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
-  const PITCH = 30 * Math.PI / 180;     // tilt from straight-down (a slight angled offset)
-  const FOV = 36 * Math.PI / 180;       // vertical field of view
+  const DEG = Math.PI / 180;
+  // pitch = tilt off straight-down, yaw = orbit around the look-at point, fov = lens.
+  // All three are presentation-only and live (sliders + rotate-drag); the defaults are
+  // the shipped "slight angled offset, looking north" framing. The simulation never
+  // sees any of them — they only rebuild the MVP uniform.
+  const PITCH0 = 30 * DEG, FOV0 = 36 * DEG;
+  const PITCH_MIN = 5 * DEG, PITCH_MAX = 80 * DEG, FOV_MIN = 15 * DEG, FOV_MAX = 70 * DEG;
+  let pitch = PITCH0, yaw = 0, fov = FOV0;
   function clampCam() {
     zoom = Math.max(ZMIN, Math.min(ZMAX, zoom));
     camX = Math.max(0, Math.min(C.BW * C.SUB, camX));
     camY = Math.max(0, Math.min(C.BH * C.SUB, camY));
   }
   function baseDist() {                  // camera distance (cells) that fits the whole world at zoom 1
-    const t = Math.tan(FOV / 2), aspect = canvas.width / canvas.height;
-    return Math.max((C.BH * 0.62) / (t / Math.cos(PITCH)), (C.BW * 0.62) / (t * aspect));
+    const t = Math.tan(fov / 2), aspect = canvas.width / canvas.height;
+    return Math.max((C.BH * 0.62) / (t / Math.cos(pitch)), (C.BW * 0.62) / (t * aspect));
   }
   function viewWrite() {
     const dist = baseDist() / zoom;                      // cells; zoom in -> closer
     const t = [camX / C.SUB, camY / C.SUB, 0];           // look-at target, in cells
-    const eye = [t[0], t[1] + dist * Math.sin(PITCH), t[2] + dist * Math.cos(PITCH)];   // above + south
-    const view = m4lookAt(eye, t, [0, -1, 0]);           // up = north, so screen-up = north
-    const proj = m4perspective(FOV, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), dist * 4 + (C.BW + C.BH));
+    // the eye orbits the target: pitch tilts it off straight-down, yaw swings it around
+    // (yaw 0 == due south, looking north). up is the eye's ground heading, so screen-up
+    // always points away from the camera and turns with the orbit.
+    const sp = Math.sin(pitch), cp = Math.cos(pitch), sy = Math.sin(yaw), cy = Math.cos(yaw);
+    const eye = [t[0] + dist * sp * sy, t[1] + dist * sp * cy, t[2] + dist * cp];
+    const view = m4lookAt(eye, t, [-sy, -cy, 0]);
+    const proj = m4perspective(fov, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), dist * 4 + (C.BW + C.BH));
     const mvp = m4mul(m4mul(proj, view), m4scale(1 / C.SUB));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
@@ -297,28 +307,50 @@ async function main() {
     camX += before.x - after.x; camY += before.y - after.y; clampCam();
     if (zR) zR.value = zoom.toFixed(2);
   }
+  // orbit the camera around the look-at point: horizontal drag swings yaw, vertical drag
+  // tilts pitch (drag up = more oblique / more 3-D, drag down = flatter / more overhead).
+  // Render-only, exactly like pan and zoom — it only rebuilds the MVP uniform.
+  function rotateBy(dx, dy) {
+    yaw += dx * 0.005;
+    pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, pitch - dy * 0.005));
+    const pd = (pitch / DEG).toFixed(0);
+    if (pR) pR.value = pd; if (pV) pV.textContent = pd + "°";
+  }
 
-  // pointers: one-finger drag = pan, two-finger = pinch zoom, a tap = select / path.
+  // pointers: one-finger / left drag = pan; shift- or right/middle-drag = orbit (rotate
+  // + tilt); two fingers = pinch zoom AND drag-to-orbit; a tap = select / path.
   const pointers = new Map();
-  let dragMoved = 0, pinchPrev = 0;
+  let dragMoved = 0, pinchPrev = 0, midPrev = null, rotateDrag = false;
   const pdist = () => { const p = [...pointers.values()]; return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); };
   const pmid  = () => { const p = [...pointers.values()]; return [(p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2]; };
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());      // right-drag orbits, so no menu
   canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    dragMoved = 0; if (pointers.size === 2) pinchPrev = pdist();
+    dragMoved = 0;
+    // a mouse drag rotates when Shift is held or the right/middle button is used
+    rotateDrag = e.pointerType === "mouse" && (e.shiftKey || e.button === 1 || e.button === 2);
+    if (pointers.size === 2) { pinchPrev = pdist(); midPrev = pmid(); }
   });
   canvas.addEventListener("pointermove", (e) => {
     lastMouse = { x: e.clientX, y: e.clientY };
     const prev = pointers.get(e.pointerId); if (!prev) return;            // hovering, no button down here
     const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragMoved += Math.abs(dx) + Math.abs(dy);
-    if (pointers.size === 1) { panBy(prev.x, prev.y, e.clientX, e.clientY); follow = false; }
-    else if (pointers.size >= 2) { const d = pdist(); if (pinchPrev > 0) { const [mx, my] = pmid(); zoomBy(d / pinchPrev, mx, my); } pinchPrev = d; follow = false; }
+    if (pointers.size === 1) {
+      if (rotateDrag) rotateBy(dx, dy); else panBy(prev.x, prev.y, e.clientX, e.clientY);
+      follow = false;
+    } else if (pointers.size >= 2) {                                      // pinch -> zoom, centroid drag -> orbit
+      const d = pdist(), [mx, my] = pmid();
+      if (pinchPrev > 0) zoomBy(d / pinchPrev, mx, my);
+      if (midPrev) rotateBy(mx - midPrev[0], my - midPrev[1]);
+      pinchPrev = d; midPrev = [mx, my]; follow = false;
+    }
   });
   function endPointer(e) {
-    const was = pointers.size; pointers.delete(e.pointerId);
-    if (was === 1 && dragMoved < 8) clickAt(e.clientX, e.clientY);        // a tap, not a drag
-    if (pointers.size < 2) pinchPrev = 0;
+    const was = pointers.size, wasRotate = rotateDrag; pointers.delete(e.pointerId);
+    if (was === 1 && dragMoved < 8 && !wasRotate) clickAt(e.clientX, e.clientY);   // a tap, not a drag/orbit
+    if (pointers.size < 2) { pinchPrev = 0; midPrev = null; }
+    if (pointers.size === 0) rotateDrag = false;
   }
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
@@ -345,6 +377,16 @@ async function main() {
   // render-only controls (presentation): low-poly art toggle + a camera zoom slider
   const aT = document.getElementById("assetsToggle"); if (aT) aT.onchange = () => { useAssets = aT.checked; };
   const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { zoom = parseFloat(zR.value) || 1; clampCam(); };
+  // live pitch (tilt off straight-down) + fov (lens) — presentation-only, like zoom
+  const pR = document.getElementById("pitch"), pV = document.getElementById("pitchval");
+  if (pR) pR.oninput = () => { pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, (parseFloat(pR.value) || 30) * DEG)); if (pV) pV.textContent = pR.value + "°"; };
+  const fR = document.getElementById("fov"), fV = document.getElementById("fovval");
+  if (fR) fR.oninput = () => { fov = Math.max(FOV_MIN, Math.min(FOV_MAX, (parseFloat(fR.value) || 36) * DEG)); if (fV) fV.textContent = fR.value + "°"; };
+  function syncViewUI() {
+    if (zR) zR.value = zoom.toFixed(2);
+    if (pR) pR.value = (pitch / DEG).toFixed(0); if (pV) pV.textContent = (pitch / DEG).toFixed(0) + "°";
+    if (fR) fR.value = (fov / DEG).toFixed(0);   if (fV) fV.textContent = (fov / DEG).toFixed(0) + "°";
+  }
 
   buildTouchPad(document.getElementById("map"));
   const dbg = mountWidgets(wasm, view, C);
@@ -358,7 +400,10 @@ async function main() {
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
   const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
   dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; };
-  dbg.onReset = () => { wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; setPicker(false); };
+  dbg.onReset = () => {
+    wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false;
+    yaw = 0; pitch = PITCH0; fov = FOV0; syncViewUI(); setPicker(false);
+  };
 
   function frame(now) {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;

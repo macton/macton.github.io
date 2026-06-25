@@ -29,8 +29,10 @@ Play: open `index.html` from any web server with WebGPU (recent Chrome/Edge). Th
 view is **top-down perspective 3-D**; the minimap stays **flat top-down** — the same data drawn two
 ways at once. The four tanks are still yours: **tap a tank** to cycle it *auto-path*
 (tap a cell to route it there) → *manual* (`W`/`S`/`A`/`D` or the pad) → *unselected*.
-Two **render-only** controls sit under the canvas (clearly labelled presentation): a
-**low-poly art** toggle (placeholder cubes ↔ baked meshes) and a **zoom**.
+**Render-only** controls sit under the canvas (clearly labelled presentation): a
+**low-poly art** toggle (placeholder cubes ↔ baked meshes) and **zoom / pitch / fov**
+sliders. Drag to pan; **shift-, right-, or two-finger-drag** to **orbit and tilt**;
+pinch or scroll to zoom.
 
 ## The thesis, stated as a test
 
@@ -88,7 +90,8 @@ flips between the two passes live. See [`ASSETS.md`](ASSETS.md).
 
 The whole **4×4 world is one connected map**: placements are world positions (anchor =
 the world origin), so all sixteen screens sit in their natural layout. A **free camera**
-— drag to pan, pinch or scroll to zoom — shows any part; the host hands the renderer the
+— drag to pan, shift/right/two-finger-drag to orbit and tilt, pinch or scroll to zoom —
+shows any part; the host hands the renderer the
 **visible box** and it emits only the cells and units inside it, so render still **scales
 with visibility**: the whole world when zoomed out, a handful of cells when zoomed in,
 never the 4800-cell world or the 1000-strong pool wholesale.
@@ -170,8 +173,8 @@ linear (uniform) camera, and the emit-for-visible bound. `render.c` is plain C o
 
 ## Deferred (not built — no speculative generality)
 
-A free 3-D orbit — rotating the camera around the world (the tilt is a fixed ~30° off
-straight-down; pan and zoom are provided); animated or rigged meshes / skeletal
+Camera roll or a first-person fly-through (the camera stays an up-right orbit — yaw,
+pitch/tilt, fov, pan, and zoom are all provided); animated or rigged meshes / skeletal
 animation (static low-poly, oriented by the sim's
 existing facing); shadows, ambient occlusion, normal/PBR materials (flat face-shading
 only); height/elevation in the **simulation** (`z` is render-only — the world stays a
