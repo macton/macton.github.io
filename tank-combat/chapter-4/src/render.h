@@ -64,10 +64,10 @@ typedef struct {
 
 /* Capacity per built view: the worst case is the whole world in view — every cell
  * (one block each), the whole live swarm, the nests, every tank's hull+turret+barrel
- * (+ a 2-box laser, a 2-piece selection mark, a destination beacon), the FX ring, and
- * the routed path (capped). Render scales with what's shown, capped by the pools. */
+ * (3) + up to PROJ_MAX 2-box bolts in flight + a 2-piece selection mark + a destination
+ * beacon, the FX ring, and the routed path (capped). Render scales with what's shown. */
 #define PATH_MAX  400                    /* path tiles across all routing tanks (capped) */
-#define INST_MAX (N_WORLD_CELLS + N_MITES + NEST_COUNT + N_TANKS * 8 \
+#define INST_MAX (N_WORLD_CELLS + N_MITES + NEST_COUNT + N_TANKS * (6 + PROJ_MAX * 2) \
                   + N_FX + PATH_MAX + 1 /*hover*/)
 
 /* Build the whole view into out[0..) (grouped by kind) and fill `dl`. Emits at WORLD

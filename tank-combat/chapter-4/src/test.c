@@ -65,7 +65,9 @@ static void place_tank(World* w, uint32_t t, int wcx, int wcy) {
   /* match sim's place(): body east, turret resting east, no target/cooldown — so the
    * turret-turn-rate combat tests start from a known aim. */
   w->tank_turret[t] = 0; w->tank_cooldown[t] = 0; w->tank_target[t] = TGT_NONE;
-  w->tank_tracer[t] = 0; w->tank_shot_cell[t] = 0;
+  for (uint32_t s = 0; s < PROJ_MAX; s++) { uint32_t b = t * PROJ_MAX + s;
+    w->tank_proj_live[b] = 0; w->tank_proj_xy[b] = 0; w->tank_proj_dir[b] = 0;
+    w->tank_proj_dist[b] = 0; w->tank_proj_tgt[b] = TGT_NONE; }
 }
 /* drive tank `t` (UNSELECTED, so it follows its own path) to a destination */
 static void run_to_dest(World* w, uint32_t t, int wcx, int wcy, int maxticks,
@@ -332,7 +334,12 @@ static uint32_t tank_combat_hash(World* w) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     h = (h ^ w->tank_turret[t]) * 16777619u;
     h = (h ^ w->tank_cooldown[t]) * 16777619u;
-    h = (h ^ ((uint32_t)w->tank_target[t] | ((uint32_t)w->tank_shot_cell[t] << 16))) * 16777619u;
+    h = (h ^ w->tank_target[t]) * 16777619u;
+    for (uint32_t s = 0; s < PROJ_MAX; s++) { uint32_t b = t * PROJ_MAX + s;
+      h = (h ^ ((uint32_t)w->tank_proj_live[b] | ((uint32_t)w->tank_proj_tgt[b] << 16))) * 16777619u;
+      h = (h ^ w->tank_proj_xy[b]) * 16777619u;
+      h = (h ^ ((uint32_t)w->tank_proj_dir[b] | ((uint32_t)w->tank_proj_dist[b] << 16))) * 16777619u;
+    }
   }
   return h;
 }
@@ -629,45 +636,59 @@ static void t_mite_nests_fields(void) {
 }
 
 /* ---- combat: the tanks shoot the swarm ----------------------------------- */
-static void t_tanks_fire(void) {
-  printf("combat — laser aim/line-kill/stop-at-wall, death cry, nest respawn:\n");
+/* open a single world cell (clear its wall bit) — to carve an unambiguous test pocket */
+static void clear_wall(World* w, int wx, int wy) {
+  wx = wrap_wcx(wx); wy = wrap_wcy(wy);
+  uint32_t scr = (uint32_t)((wy / GRID_H) * SCREENS_X + wx / GRID_W);
+  w->grid[scr * GRID_H + (uint32_t)(wy % GRID_H)] &= ~(1u << (uint32_t)(wx % GRID_W));
+}
 
-  /* a tank lasers the mite it can hit: the target is destroyed, a burst is spawned */
+static void t_tanks_fire(void) {
+  printf("combat — bolt aim/pierce/stop-at-wall, freed turret, death cry, nest respawn:\n");
+
+  /* a tank fires a piercing BOLT at the mite it can hit: it launches the moment the aim is on
+   * target, then travels to the mite and destroys it (the kill is NOT instant — the bolt has to
+   * arrive), spawning a burst. Pin the mite under the bolt's line so it flies straight in. */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
-  W.fire_period = 30; W.mite_respawn = 300;
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
   sim_tick(&W);
   check(W.tank_target[0] == 0, "the turret acquires the mite in line of sight");
-  check(W.mite_resp[0] > 0, "the laser destroys the targeted mite");
-  check(W.tank_cooldown[0] > 0, "the tank goes on cooldown after firing");
+  check(W.tank_cooldown[0] > 0, "the tank goes on cooldown the moment it fires");
+  check(W.tank_proj_live[0], "a bolt is launched (in flight just after firing)");
+  int hit = 0; for (int i = 0; i < 6 && !hit; i++) { sim_tick(&W); if (W.mite_resp[0]) hit = 1; }
+  check(hit, "the travelling bolt reaches and destroys the targeted mite");
   int anyfx = 0; for (uint32_t i = 0; i < N_FX; i++) if (W.fx_t[i]) anyfx = 1;
   check(anyfx, "a destruction burst is spawned for the destroyed mite");
   sim_tick(&W);   /* the next index rebuild drops the corpse */
   check(W.mite_cnt[wcell(5, 7)] == 0, "a dead mite leaves the per-cell index (not drawn, not targetable)");
 
-  /* the laser is a thin LINE: mites on the beam die, mites off it (spread into other
-   * sub-segments) survive. Drive build_index + tanks_fire directly with hand-placed
-   * positions so the test isn't perturbed by movement/snap this tick. */
+  /* the bolt is a thin LINE that PIERCES: it destroys every mite on its line — it does NOT stop
+   * on the first — while mites off the line (spread into other sub-segments) survive. Drive
+   * build_index then repeated tanks_fire with hand-placed positions (no movement to perturb it)
+   * and let the bolt fly the length of the row. */
   sim_init(&W); gossip_setup(&W, 3);
-  place_tank(&W, 0, 1, 7);                                /* turret east, beam along row-7 centre */
+  place_tank(&W, 0, 1, 7);                                /* turret east, bolt along row-7 centre */
   mite_reset(&W, 0, 4, 7); mite_reset(&W, 1, 6, 7); mite_reset(&W, 2, 5, 7);
   W.mite_xy[0] = xy_pack(4 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line (perp 0) */
-  W.mite_xy[1] = xy_pack(6 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line */
-  W.mite_xy[2] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2 + 96);   /* off the line (perp 96 > BEAM_HW) */
+  W.mite_xy[1] = xy_pack(6 * SUB + SUB / 2, 7 * SUB + SUB / 2);        /* on the line, BEYOND mite 0 */
+  W.mite_xy[2] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2 + 96);   /* off the line (perp 96 > PROJ_HW) */
   W.fire_period = 30; W.mite_respawn = 300;
-  mites_build_index(&W); tanks_fire(&W);
-  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0, "the laser destroys mites on its line");
-  check(W.mite_resp[2] == 0, "a mite off the beam line survives — the thin beam misses it (the spread dodges)");
+  mites_build_index(&W);
+  for (int i = 0; i < 12; i++) tanks_fire(&W);            /* fire, then fly the bolt down the row */
+  check(W.mite_resp[0] > 0 && W.mite_resp[1] > 0, "the bolt pierces the first mite and destroys the next on its line");
+  check(W.mite_resp[2] == 0, "a mite off the bolt's line survives — the thin bolt misses it (the spread dodges)");
 
-  /* the beam stops at a wall: a collinear mite beyond the wall survives */
+  /* the bolt stops at a wall: a collinear mite beyond the wall survives */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 1, 7);
   mite_reset(&W, 0, 5, 7);  W.mite_xy[0] = xy_pack(5 * SUB + SUB / 2, 7 * SUB + SUB / 2);   /* before the block (col 8) */
   mite_reset(&W, 1, 13, 7); W.mite_xy[1] = xy_pack(13 * SUB + SUB / 2, 7 * SUB + SUB / 2);  /* beyond it (cols 8..11 walls) */
   W.fire_period = 30; W.mite_respawn = 300;
-  mites_build_index(&W); tanks_fire(&W);
-  check(W.mite_resp[0] > 0, "the laser destroys the mite before the wall");
-  check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the beam stops at the wall)");
+  mites_build_index(&W);
+  for (int i = 0; i < 10; i++) tanks_fire(&W);
+  check(W.mite_resp[0] > 0, "the bolt destroys the mite before the wall");
+  check(W.mite_resp[1] == 0, "a mite beyond the wall on the same line survives (the bolt stops at the wall)");
 
   /* line of sight is required: a mite behind the central wall block is NOT targeted */
   sim_init(&W); gossip_setup(&W, 1);
@@ -681,14 +702,15 @@ static void t_tanks_fire(void) {
    * it SWINGS at a turn rate rather than snapping. Body east, mite due north, mite pinned. */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7);                                            /* body + turret east */
-  mite_reset(&W, 0, 2, 4);                                            /* mite due north */
+  mite_reset(&W, 0, 2, 4);                                            /* mite ~due north (parks a sub-segment off centre) */
   W.fire_period = 0; W.mite_speed = 0;                                /* aim only; pin the mite */
   sim_tick(&W);
   check(W.tank_target[0] == 0, "fire off: the turret still acquires a target in sight");
   check((W.tank_turret[0] >> ANGLE_SHIFT) != CARD_DI[DIR_N], "the turret does not snap instantly — it has a turn rate");
   for (int i = 0; i < 12; i++) sim_tick(&W);                          /* let it swing onto the target */
   check(W.mite_resp[0] == 0, "fire off: no mite is killed");
-  check((W.tank_turret[0] >> ANGLE_SHIFT) == CARD_DI[DIR_N], "the turret swings to aim north at a mite due north");
+  int dN = (int16_t)(W.tank_turret[0] - (uint16_t)((uint32_t)CARD_DI[DIR_N] << ANGLE_SHIFT));
+  check((dN < 0 ? -dN : dN) <= 2048, "the turret swings to ~aim north at a near-north mite (fine aim resolves the sub-segment offset)");
   check((W.tank_ang[0] >> ANGLE_SHIFT) == 0, "the body heading is unchanged (turret aims separately)");
 
   /* targeting picks the mite closest to the turret's CURRENT direction (most likely to
@@ -710,35 +732,113 @@ static void t_tanks_fire(void) {
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;         /* pin the mite */
   sim_tick(&W);
   check(W.tank_target[0] == 0, "acquires the off-axis target");
-  check(W.mite_resp[0] == 0, "does not fire on tick 1 — the turret must swing on first (turn rate gates firing)");
+  check(W.mite_resp[0] == 0 && !W.tank_proj_live[0], "does not fire on tick 1 — the turret must swing on first (turn rate gates firing)");
   int swung = 0; for (int i = 0; i < 20 && !swung; i++) { sim_tick(&W); if (W.mite_resp[0]) swung = 1; }
   check(swung, "fires once the turret has swung onto the target");
 
-  /* the turret is LOCKED while the laser is live: it cannot turn toward a new target
-   * until the beam fades, then it is free again. */
+  /* the turret is FREE the instant a bolt is away — firing no longer locks it (the old beam
+   * pinned the turret to the shot for its whole lifetime). Fire at a mite, then retire that
+   * target and drop a new one off-axis: the barrel swings onto the newcomer WHILE the first
+   * bolt is still travelling. */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 2, 7);                                            /* turret east */
   mite_reset(&W, 0, 5, 7);                                            /* due east -> fire east at once */
   W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
   sim_tick(&W);
-  check(W.tank_tracer[0] > 0, "the beam is live just after firing");
-  uint16_t locked = W.tank_turret[0];
-  mite_reset(&W, 1, 2, 4);                                            /* a target due north now appears */
-  int held = 1;
-  for (int i = 0; i < LASER_TICKS - 1; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) held = 0; }
-  check(held && W.tank_turret[0] == locked, "the turret cannot turn while the laser is active");
-  int resumed = 0;
-  for (int i = 0; i < 30 && !resumed; i++) { sim_tick(&W); if (W.tank_turret[0] != locked) resumed = 1; }
-  check(resumed, "once the beam fades the turret is free to turn again");
+  check(W.tank_proj_live[0], "a bolt is in flight just after firing");
+  uint16_t fired = W.tank_turret[0];                                  /* the aim it fired along */
+  W.mite_resp[0] = 300;                                               /* retire that target (the bolt flies on) */
+  mite_reset(&W, 1, 2, 3);                                            /* a new target appears to the north */
+  int turned_live = 0;
+  for (int i = 0; i < 8 && !turned_live; i++) { sim_tick(&W);
+    if (W.tank_proj_live[0] && W.tank_turret[0] != fired) turned_live = 1; }
+  check(turned_live, "the turret swings toward a new target while the bolt is still travelling (no lock)");
 
-  /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it */
+  /* multiple bolts aloft: a fast fire period + a slow bolt let a tank keep several shots
+   * travelling at once, capped at PROJ_MAX. The bolt is so slow it piles up near the muzzle
+   * without reaching the (in-sight, pinned) target inside the window, so firing never stalls
+   * on the target dying — only on the slot cap. */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 1, 7);
+  mite_reset(&W, 0, 7, 7);                                /* in sight east, before the col-8 wall */
+  W.fire_period = 3; W.proj_speed = 16; W.mite_speed = 0; W.mite_respawn = 300;
+  int maxlive = 0;
+  for (int i = 0; i < 24; i++) { sim_tick(&W);
+    int live = 0; for (int s = 0; s < PROJ_MAX; s++) if (W.tank_proj_live[s]) live++;
+    if (live > maxlive) maxlive = live; }
+  check(maxlive >= 2, "a tank keeps several bolts in flight at once (fast fire + slow bolt)");
+  check(maxlive <= PROJ_MAX, "simultaneous bolts are capped at PROJ_MAX");
+
+  /* tanks hold fire through each other: a shot that would pass through another tank is not taken.
+   * Two tanks face a mite parked between them (each in the other's line), so neither fires and the
+   * mite lives; clear one aside and the other shoots. (Direct tanks_fire + exact positions, so the
+   * aim is axis-clean and the corridor check is exercised precisely.) */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 1, 7);                                  /* shooter, turret east */
+  place_tank(&W, 1, 7, 7);                                  /* friendly beyond the mite */
+  W.tank_turret[1] = (uint16_t)((uint32_t)CARD_DI[DIR_W] << ANGLE_SHIFT);   /* aimed back west, at the mite */
+  mite_reset(&W, 0, 4, 7); W.mite_xy[0] = xy_pack(4 * SUB + SUB / 2, 7 * SUB + SUB / 2);  /* between, on the line */
+  W.fire_period = 30; W.mite_respawn = 300;
+  mites_build_index(&W);
+  for (int i = 0; i < 10; i++) tanks_fire(&W);
+  check(W.tank_target[0] == TGT_NONE, "the shooter won't lock a mite whose only shot is blocked by the friendly");
+  check(!W.tank_proj_live[0] && !W.tank_proj_live[1 * PROJ_MAX] && W.mite_resp[0] == 0,
+        "neither tank fires through the other — the mite between them survives");
+  place_tank(&W, 1, 7, 2);                                  /* move the friendly out of the line */
+  tanks_fire(&W);
+  check(W.tank_proj_live[0], "with the friendly clear, the shooter takes the shot");
+
+  /* re-targeting: when the most-hittable mite's shot is blocked by a friendly, the turret picks a
+   * different, unblocked mite instead of locking the blocked one. */
+  sim_init(&W); gossip_setup(&W, 2);
+  for (int c = 2; c <= 8; c++) clear_wall(&W, c, 7);       /* open the east row */
+  for (int r = 4; r <= 7; r++) clear_wall(&W, 5, r);       /* open a north column at col 5 */
+  place_tank(&W, 0, 5, 7);                                  /* shooter, turret east */
+  place_tank(&W, 1, 7, 7);                                  /* a friendly 2 cells east, in the line */
+  mite_reset(&W, 0, 8, 7);                                  /* mite A: east, past the friendly (blocked) */
+  mite_reset(&W, 1, 5, 4);                                  /* mite B: north, clear */
+  W.fire_period = 30; W.mite_speed = 0;
+  mites_build_index(&W); tanks_fire(&W);
+  check(W.tank_target[0] == 1, "the turret skips the blocked east mite and targets the clear north one");
+  place_tank(&W, 1, 7, 2);                                  /* clear the east line */
+  tanks_fire(&W);
+  check(W.tank_target[0] == 0, "with the line clear, the east mite (least rotation) is targeted again");
+
+  /* run-over: a MOVING tank squashes a mite under its (cell-sized) footprint; a STILL tank
+   * doesn't, and a mite a cell away (outside the footprint) survives either way. */
+  sim_init(&W); gossip_setup(&W, 2);
+  place_tank(&W, 0, 5, 7);
+  mite_reset(&W, 0, 5, 7);                                  /* a mite directly under the tank */
+  mite_reset(&W, 1, 6, 7);                                  /* a mite one cell over (outside the footprint) */
+  W.fire_period = 0;                                        /* no firing — isolate the run-over */
+  mites_build_index(&W); tanks_fire(&W);                    /* tank still (vxy 0 from place_tank) */
+  check(W.mite_resp[0] == 0, "a still tank does not crush the mite under it");
+  W.tank_vxy[0] = xy_pack(16, 0);                           /* now the tank is moving */
+  mites_build_index(&W); tanks_fire(&W);
+  check(W.mite_resp[0] > 0, "a moving tank runs over the mite under it");
+  check(W.mite_resp[1] == 0, "a mite a cell away is outside the tank's footprint and survives");
+
+  /* a bolt splashing on a wall spawns an impact effect (FX_IMPACT) at the wall. */
+  sim_init(&W); gossip_setup(&W, 1);
+  place_tank(&W, 0, 5, 7);                                  /* turret east; cols 8..11 are walls */
+  mite_reset(&W, 0, 6, 7);                                  /* a target east, so it fires toward the wall */
+  W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
+  int impact = 0, shake = 0;
+  for (int i = 0; i < 30 && !(impact && shake); i++) { sim_tick(&W);
+    for (uint32_t f = 0; f < N_FX; f++) if (W.fx_t[f] && W.fx_kind[f] == FX_IMPACT) impact = 1;
+    for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++) if (W.wall_shake_t[e]) shake = 1; }
+  check(impact, "a bolt striking a wall spawns an impact effect");
+  check(shake, "a bolt striking a wall shakes that wall segment");
+
+  /* the death cry: a kill teaches nearby mites the firing tank's cell + hunt it. Pin the mites
+   * so the bolt connects, and step until it lands. */
   sim_init(&W); gossip_setup(&W, 2);
   place_tank(&W, 0, 2, 7);
   mite_reset(&W, 0, 5, 7);                                /* the target (closest, lowest index) */
   mite_reset(&W, 1, 5, 8);                                /* a peer within 2x sensing range (=4) */
-  W.mite_sense = 2; W.fire_period = 30; W.mite_respawn = 300;
-  sim_tick(&W);
-  check(W.mite_resp[0] > 0, "the closest in-sight mite is the one shot");
+  W.mite_sense = 2; W.fire_period = 30; W.mite_respawn = 300; W.mite_speed = 0;
+  int cry = 0; for (int i = 0; i < 6 && !cry; i++) { sim_tick(&W); if (W.mite_resp[0]) cry = 1; }
+  check(cry, "the closest in-sight mite is the one the bolt destroys");
   check(get_rec_cell(&W, 1) == (uint16_t)wcell(2, 7), "death cry: a nearby mite learns the firing tank's cell");
   check(W.mite_mode[1] == MM_HUNT && W.mite_dest[1] == (uint16_t)wcell(2, 7),
         "death cry: the nearby mite turns to hunt the attacker");
@@ -746,8 +846,8 @@ static void t_tanks_fire(void) {
   /* respawn: a killed mite revives at its nest after the timeout, once (cap permitting) */
   sim_init(&W); gossip_setup(&W, 1);
   place_tank(&W, 0, 2, 7); mite_reset(&W, 0, 5, 7);
-  W.fire_period = 30; W.mite_respawn = 10;
-  int died = 0; for (int i = 0; i < 5 && !died; i++) { sim_tick(&W); if (W.mite_resp[0]) died = 1; }
+  W.fire_period = 30; W.mite_respawn = 10; W.mite_speed = 0;   /* pin so the bolt connects */
+  int died = 0; for (int i = 0; i < 6 && !died; i++) { sim_tick(&W); if (W.mite_resp[0]) died = 1; }
   check(died, "the mite dies when shot (short respawn set)");
   /* move the tank far away so the mite isn't instantly re-killed the moment it
    * revives at its nest (a tank camping a nest legitimately suppresses it). */
@@ -786,12 +886,13 @@ static void t_tanks_fire(void) {
  * ==========================================================================*/
 
 /* The chapter's CONTRACT, pinned as a literal: a fixed seed + scripted inputs run
- * for K ticks must produce the SAME full sim state as chapter 3. This value was
- * captured by running the identical scripted_run + sim_state_hash against
- * chapter-3's sources (tools/golden). If it ever moves, presentation leaked into
- * the model and the chapter has failed its own thesis. */
+ * for K ticks must produce the SAME full sim state as chapter 3. The sim sources are
+ * kept byte-identical to chapter 3 (re-synced as chapter 3 gained the piercing-bolt
+ * combat, mite flocking, multi-bolt + wall sparks, and the finer turret), so this hash
+ * is exactly what chapter 3's sources produce. If it ever moves, presentation leaked
+ * into the model and the chapter has failed its own thesis. */
 #define HASH_TICKS        1500
-#define CH3_GOLDEN_HASH   0xFB9DAC47u
+#define CH3_GOLDEN_HASH   0xFBBBD266u
 
 /* fold the WHOLE deterministic sim state — movement, routing, turrets, the FX ring,
  * the swarm SoA + gossip records, the shared route fields, the RNG, the frame. */
@@ -801,12 +902,16 @@ static uint32_t sim_state_hash(const World* w) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     MIX(w->tank_xy[t]); MIX(w->tank_ang[t]); MIX(w->tank_vxy[t]); MIX(w->tank_hit[t]);
     MIX(w->tank_turret[t]); MIX(w->tank_cooldown[t]); MIX(w->tank_target[t]);
-    MIX(w->tank_shot_cell[t]); MIX(w->tank_tracer[t]);
+    for (uint32_t s = 0; s < PROJ_MAX; s++) { uint32_t pb = t * PROJ_MAX + s;
+      MIX(w->tank_proj_live[pb]); MIX(w->tank_proj_xy[pb]); MIX(w->tank_proj_dir[pb]);
+      MIX(w->tank_proj_dist[pb]); MIX(w->tank_proj_tgt[pb]); }
     MIX(w->tstate[t]); MIX(w->phas[t]); MIX(w->pstatus[t]); MIX(w->pgoal[t]);
     MIX(w->pdest_screen[t]); MIX(w->pdest_cell[t]);
   }
-  for (uint32_t i = 0; i < N_FX; i++) { MIX(w->fx_xy[i]); MIX(w->fx_t[i]); }
+  for (uint32_t i = 0; i < N_FX; i++) { MIX(w->fx_xy[i]); MIX(w->fx_t[i]); MIX(w->fx_kind[i]); }
   MIX(w->fx_head);
+  for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++) { MIX(w->wall_shake_cell[e]); MIX(w->wall_shake_t[e]); }
+  MIX(w->wall_shake_head);
   for (uint32_t m = 0; m < N_MITES; m++) {
     MIX(w->mite_xy[m]); MIX(w->mite_ang[m]); MIX(w->mite_vxy[m]); MIX(w->mite_hit[m]);
     MIX(w->mite_mode[m]); MIX(w->mite_dest[m]); MIX(w->mite_cell[m]); MIX(w->mite_tgt[m]);

@@ -22,7 +22,7 @@ uploaded once at startup.
 | `M_HULL`    | tapered box | `K_HULL` | tank bodies (oriented by `tank_ang`) |
 | `M_TURRET`  | tapered dome (frustum) | `K_TURRET` | tank turrets (oriented by `tank_turret`) |
 
-Translucent FX (the laser glow/core and the destruction bursts) draw as `M_CUBE` in the
+Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.
 
 ## The binding point — where external art drops in

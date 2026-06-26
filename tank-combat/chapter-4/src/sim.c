@@ -12,7 +12,12 @@ static void place(World* w, uint32_t t, uint32_t wcx, uint32_t wcy, uint32_t di)
   w->tank_ang[t] = (uint16_t)(di << ANGLE_SHIFT);
   w->tank_in[t] = 0; w->tank_vxy[t] = 0; w->tank_hit[t] = 0;
   w->tank_turret[t] = w->tank_ang[t]; w->tank_cooldown[t] = 0;
-  w->tank_target[t] = TGT_NONE; w->tank_shot_cell[t] = 0; w->tank_tracer[t] = 0;
+  w->tank_target[t] = TGT_NONE;
+  for (uint32_t s = 0; s < PROJ_MAX; s++) {
+    uint32_t b = t * PROJ_MAX + s;
+    w->tank_proj_live[b] = 0; w->tank_proj_xy[b] = 0; w->tank_proj_dir[b] = 0;
+    w->tank_proj_dist[b] = 0; w->tank_proj_tgt[b] = TGT_NONE;
+  }
 }
 
 void sim_init(World* w) {
@@ -33,6 +38,8 @@ void sim_init(World* w) {
   w->frame = 0;
   for (uint32_t i = 0; i < N_FX; i++) w->fx_t[i] = 0;   /* no destruction bursts yet */
   w->fx_head = 0;
+  for (uint32_t i = 0; i < WALL_SHAKE_MAX; i++) w->wall_shake_t[i] = 0;   /* no wall shakes yet */
+  w->wall_shake_head = 0;
   w->move_speed = 16;         /* subcells per tick (16 ticks per cell) */
   w->turn_rate  = 1024;       /* body angle units/tick: ~16 ticks per 90 degrees */
   w->turret_rate = 2048;      /* turret angle units/tick: ~8 ticks per 90 degrees (swings independently) */
@@ -43,10 +50,11 @@ void sim_init(World* w) {
   w->mite_turn  = 2048;       /* nimble: ~8 ticks per 90 degrees */
   w->mite_sense = 2;          /* sense a tank within two cells (Chebyshev) */
   w->mite_cap   = MITE_CAP;   /* at most 4 mite centres per cell */
-  w->mite_phunt = 80;         /* 80% hunt the sighting on adopting a record; 20% carry it home */
+  w->mite_phunt = 100;        /* 100% hunt the sighting on adopting a record (no carry-home) */
   w->mite_seed  = 1337;       /* the editable swarm seed */
   w->fire_period  = 30;       /* tank shots every 30 ticks = 2/sec (0 = firing off) */
   w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */
+  w->proj_speed   = PROJ_SPEED_DEFAULT;  /* slow bolt: 1 cell/tick (page-tunable) */
 
   /* the four nests (home cells), spread across the world on open ring cells. Nest 0
    * sits in screen (1,1), NOT in screen (0,0) where all four tanks start — so revived

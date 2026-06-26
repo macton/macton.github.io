@@ -191,14 +191,14 @@
     <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
     <span class="swatch" style="background:#f5e15a;border-radius:50%"></span> manual (a yellow spike; drive it: W/S/A/D or the pad) →
-    unselected. Drive a tank through the swarm and watch a sighting spread — 80%
-    <b>hunt</b> it while 20% carry it <b>home</b> to a nest:
+    unselected. Drive a tank through the swarm and watch a sighting spread — by default they all
+    <b>hunt</b> it, but lower <b>P(hunt)</b> and some carry it <b>home</b> to a nest:
     <span class="swatch" style="background:#e05c3c"></span> hunting ·
     <span class="swatch" style="background:#e6926e"></span><span class="swatch" style="background:#dae66e"></span><span class="swatch" style="background:#6ee692"></span><span class="swatch" style="background:#6eaae6"></span><span class="swatch" style="background:#e66eda"></span> homing (briefly, in its nest’s colour — one per screen) ·
     <span class="swatch" style="background:#609a8a"></span> wandering.
-    Each tank’s <b>turret</b> aims and fires a <b>laser</b>
-    (<span class="swatch" style="background:#ff6040"></span> beam, drawn in the translucent pass) that
-    destroys mites along the line (<span class="swatch" style="background:#fff0be"></span> burst); each
+    Each tank’s <b>turret</b> aims and fires a <b>piercing bolt</b>
+    (<span class="swatch" style="background:#ff6040"></span> a travelling streak, drawn in the translucent pass) that
+    pierces every mite on its line (<span class="swatch" style="background:#fff0be"></span> burst); each
     kill’s <b>death cry</b> tells nearby mites where the shot came from. The
     <span class="tag">low-poly art</span> toggle above swaps the placeholder cubes for baked meshes —
     a render-only change that touches neither the projection nor the simulation.
@@ -270,7 +270,7 @@
     (new render state, a texture in the pass; chapter 3 had none). The <strong>perspective matrix
     writes real depth</strong> (<code>clip.z/w</code>), so the GPU resolves occlusion — no
     per-instance CPU sort — and a taller, nearer block correctly hides what's behind it. The
-    <strong>translucent</strong> FX — the laser glow and the destruction bursts — draw in a
+    <strong>translucent</strong> FX — the bolt streaks and the destruction bursts — draw in a
     <strong>second pass after</strong> the opaque one, with depth-test on but depth-write off,
     <strong>painter-sorted back-to-front</strong> by a small key: since the camera leans south and
     looks down, &ldquo;nearer&rdquo; grows with <code>+y</code> (south) and <code>+z</code> (height),
@@ -340,7 +340,7 @@
     determinism chapter 3 earned is exactly what makes the chapter-4 contract testable. Edit the
     seed to re-scatter the swarm and tune the rest live:</p>
     <div class="fig">
-      <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay, turret turn</p>
+      <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay, turret turn, bolt speed</p>
       <div id="w-mite-tunables"></div>
     </div>
 
@@ -369,11 +369,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.25-211015"></script>
+  <script src="version.js?v=2026.06.26-002330"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.25-211015");</script>
+  <script type="module">import("./app.js?v=2026.06.26-002330");</script>
 </body>
 </html>

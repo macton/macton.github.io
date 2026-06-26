@@ -49,19 +49,32 @@ struct World {
   uint8_t  tank_hit[N_TANKS];   /* last tick's blocked-axis bitmask (bit0 x, bit1 y) */
 
   /* ---- per-tank turret/firing (the body heading drives movement; the turret
-   *      aims independently and fires a laser that mows down the line) --------- */
+   *      aims independently and fires projectile bolts that pierce the swarm). The
+   *      turret is freed the moment a bolt is fired, so it tracks the next target while
+   *      earlier bolts are still in flight — up to PROJ_MAX live bolts per tank, in a
+   *      flat pool indexed t*PROJ_MAX + slot. -------------------------------------- */
   uint16_t tank_turret  [N_TANKS];  /* turret aim angle (Q5.11), separate from the body heading */
   uint16_t tank_cooldown[N_TANKS];  /* ticks until the next shot (0 = ready) */
   uint16_t tank_target  [N_TANKS];  /* targeted mite index, or TGT_NONE */
-  uint16_t tank_shot_cell[N_TANKS]; /* world cell where the last beam ended (wall hit), for drawing */
-  uint8_t  tank_tracer  [N_TANKS];  /* ticks the fired beam is still drawn (LASER_TICKS at fire) */
+  uint32_t tank_proj_xy [N_TANKS * PROJ_MAX];  /* live bolt position, packed subcells x|y<<16 (valid when live) */
+  uint16_t tank_proj_dir[N_TANKS * PROJ_MAX];  /* the bolt's travel heading (Q5.11), fixed at fire */
+  uint16_t tank_proj_dist[N_TANKS * PROJ_MAX]; /* subcells flown so far (expires at PROJ_RANGE*SUB) */
+  uint16_t tank_proj_tgt[N_TANKS * PROJ_MAX];  /* the mite this bolt was aimed at — a guaranteed kill on arrival,
+                                     * since the 32-dir aim can't pin an off-centre mite exactly (else TGT_NONE) */
+  uint8_t  tank_proj_live[N_TANKS * PROJ_MAX]; /* 1 while this bolt slot is in flight, else 0 (free to fire) */
 
-  /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite the
-   *      laser destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
+  /* ---- destruction effects: a fixed ring of expanding/fading bursts, one per mite a
+   *      bolt destroys. Cosmetic only (no gameplay effect), written in tanks_fire and
    *      drawn by render; deterministic (no RNG), so it never perturbs the swarm. ----- */
-  uint32_t fx_xy[N_FX];   /* burst position (packed subcells, the mite's last position) */
+  uint32_t fx_xy[N_FX];   /* burst position (packed subcells: a mite's last spot, or a wall impact) */
   uint16_t fx_t [N_FX];   /* ticks remaining (0 = inactive); set to FX_DURATION on spawn */
+  uint8_t  fx_kind[N_FX]; /* FX_KILL (mite pop) or FX_IMPACT (wall spark) — picks the burst colour */
   uint8_t  fx_head;       /* ring write cursor (wraps; bursts overwrite the oldest) */
+
+  /* a struck wall's brief jolt (cosmetic, like the burst ring): which world cell + ticks left */
+  uint16_t wall_shake_cell[WALL_SHAKE_MAX];
+  uint8_t  wall_shake_t   [WALL_SHAKE_MAX];
+  uint8_t  wall_shake_head;
 
   /* ---- per-tank interaction + routing (every tank can path) -------------- */
   uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
@@ -146,6 +159,7 @@ struct World {
   uint16_t mite_seed;            /* the editable seed (re-seeds rng and re-scatters the swarm) */
   uint16_t fire_period;          /* tank shot interval in ticks (0 = firing off); 30 = 2/sec at 60 ticks/sec */
   uint16_t mite_respawn;         /* ticks a killed mite stays dead before reviving at its nest (300 = 5 s) */
+  uint16_t proj_speed;           /* bolt travel per tick in subcells (256 = 1 cell/tick); slow default ~2.25 cells */
 };
 
 _Static_assert(GRID_W <= 32, "a screen-grid row must fit in one uint32_t");

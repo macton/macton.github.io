@@ -68,7 +68,7 @@ pan/zoom is just a different matrix, not a rebuild. Depth is the matrix's own
 
 Opaque geometry draws with a **depth buffer** (a new texture in the pass): the
 **perspective matrix writes real depth** (`clip.z/w`), the GPU resolves occlusion, no
-CPU sort. Translucent FX (laser glow, bursts) draw in a **second pass** — depth-test on,
+CPU sort. Translucent FX (bolt streaks, bursts) draw in a **second pass** — depth-test on,
 write off, **painter-sorted back-to-front** by a small key: since the camera leans south
 and looks down, "nearer" grows with `+y` (south) and `+z` (height) — `view.h`, tested.
 

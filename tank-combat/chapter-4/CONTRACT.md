@@ -48,7 +48,7 @@ model and the chapter has failed its own thesis.
   **perspective matrix writes real depth** (`clip.z/w`); the GPU resolves occlusion, no
   CPU sort. A **depth texture** is added to the render pass — new *render* state, not
   sim state.
-- **Translucent** FX (laser glow, destruction bursts) draw in a **second pass** after
+- **Translucent** FX (bolt streaks, destruction bursts) draw in a **second pass** after
   the opaque one, depth-test on / depth-write off, **painter-sorted back-to-front** by
   the `view.h` key. Because the camera leans south and looks down, "nearer" grows with
   `+y` (south) and `+z` (height) and is flat in `x`: `view_depth_key(wx,wy,wz) = wy + wz`.

@@ -722,6 +722,9 @@ function mountWidgets(wasm, view, C) {
     const fire    = numField("fire rate (shots/sec, 0=off)", 0, 20, 0.5, rateOf());
     const respawn = numField("respawn delay (sec)", 0.5, 120, 0.5, respOf());
     const trate   = numField("turret turn (ang/tick)", 64, 8000, 64, wasm.turret_rate());
+    // bolt speed shown in cells/tick (sim stores subcells/tick; 256 = 1 cell). Slow default ~2.25.
+    const boltOf  = () => Math.round(wasm.proj_speed() / 64) / 4;
+    const bolt    = numField("bolt speed (cells/tick)", 0.25, 6, 0.25, boltOf());
     const size  = numField("mite radius (subcells)", C.MR, C.MR, 1, C.MR); size.input.disabled = true;
     seed.input.onchange  = () => wasm.set_seed(parseInt(seed.input.value) | 0);
     sense.input.onchange = () => wasm.set_mite_sense(parseInt(sense.input.value) | 0);
@@ -732,7 +735,8 @@ function mountWidgets(wasm, view, C) {
     fire.input.onchange    = () => { const r = parseFloat(fire.input.value) || 0; wasm.set_fire_period(r > 0 ? Math.max(1, Math.round(60 / r)) : 0); };
     respawn.input.onchange = () => { const s = parseFloat(respawn.input.value) || 0; wasm.set_mite_respawn(Math.max(1, Math.round(s * 60))); };
     trate.input.onchange   = () => wasm.set_turret_rate(parseInt(trate.input.value) | 0);
-    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, trate.wrap, size.wrap);
+    bolt.input.onchange    = () => { const c = parseFloat(bolt.input.value) || 0; wasm.set_proj_speed(Math.max(16, Math.round(c * 256))); };
+    tc.append(seed.wrap, sense.wrap, cap.wrap, phunt.wrap, speed.wrap, turn.wrap, fire.wrap, respawn.wrap, trate.wrap, bolt.wrap, size.wrap);
 
     // nests are structural: one per screen except the tank start (0,0), at each screen
     // centre. That's C.NEST of them — too many to expose as x/y fields, so just note it.
@@ -745,7 +749,7 @@ function mountWidgets(wasm, view, C) {
     updaters.push(() => { sync(seed, () => wasm.mite_seed()); sync(sense, () => wasm.mite_sense());
       sync(cap, () => wasm.mite_cap()); sync(phunt, () => wasm.mite_phunt());
       sync(speed, () => wasm.mite_speed()); sync(turn, () => wasm.mite_turn());
-      sync(fire, rateOf); sync(respawn, respOf); sync(trate, () => wasm.turret_rate()); });
+      sync(fire, rateOf); sync(respawn, respOf); sync(trate, () => wasm.turret_rate()); sync(bolt, boltOf); });
   }
   return api;
 }

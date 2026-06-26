@@ -100,20 +100,35 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
  * Each tank's turret turns at a fixed rate toward the mite it has line of sight to
  * that is MOST LIKELY TO BE HIT — the one closest to the turret's current direction
  * (least rotation), found over the per-cell index — and fires at a fixed rate once
- * it has swung onto the target; one shot kills the mite, which revives (memory wiped)
- * at its nest after a timeout. A kill is a "death cry": every mite within 2x sensing
- * range of the dead one learns the firing tank's cell (record + hunt), so the swarm
- * turns on its attackers — emergent escalation from the same gossip. */
+ * it has swung onto the target. The shot is a PROJECTILE: a bolt that travels from the
+ * muzzle along the firing heading, destroying every mite it passes through and PIERCING
+ * on (it does not stop on a kill) until it meets a wall (or flies its max range), then
+ * expires. The turret is freed the instant the bolt leaves the muzzle, so it can swing
+ * onto the next target while the shot is still in flight (one bolt per tank at a time).
+ * A kill is a "death cry": every mite within 2x sensing range of the dead one learns the
+ * firing tank's cell (record + hunt), so the swarm turns on its attackers — emergent
+ * escalation from the same gossip. */
 #define TARGET_MAX_R 12         /* turret search radius, in cells */
 #define TGT_NONE     0xFFFFu    /* tank has no target */
-#define LASER_MAX    64         /* max beam length in cells (it stops at the first wall) */
-#define BEAM_HW      40         /* laser kill half-width, subcells (< SUBQ, so off-line mites dodge) */
-#define LASER_TICKS  6          /* ticks a fired beam stays drawn (~0.1 s at 60 ticks/s) */
+#define PROJ_RANGE   64         /* max bolt flight in cells before it expires (also stops at a wall) */
+#define PROJ_HW      40         /* bolt kill half-width, subcells (< SUBQ, so off-line mites dodge) */
+#define PROJ_MAX     4          /* a tank can have up to this many bolts in flight at once */
+#define PROJ_SPEED_DEFAULT SUB  /* default bolt travel per tick in subcells: 1 cell/tick — a slow,
+                                 * deliberate bolt. Live-tunable on the page as `w->proj_speed`. (A far
+                                 * open-field shot can still be in flight when the next would fire; the
+                                 * single-bolt-per-tank slot then paces the cadence to the bolt's flight.) */
 
-/* destruction effects: a small fixed ring of expanding/fading bursts, one per mite the
- * laser destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */
+/* destruction effects: a small fixed ring of expanding/fading bursts, one per mite a
+ * bolt destroys — pure cosmetic, written by tanks_fire, drawn by render (no allocation). */
 #define N_FX         256        /* effect ring capacity (bursts overwrite the oldest) */
 #define FX_DURATION  8          /* ticks a burst is drawn before it expires */
+#define FX_KILL      0          /* burst kind: a destroyed mite (a white pop) */
+#define FX_IMPACT    1          /* burst kind: a bolt splashing on a wall (a hot orange spark) */
+
+/* a struck wall jolts briefly: a small ring of (cell, timer), cosmetic like the burst ring. */
+#define WALL_SHAKE_MAX  32      /* max wall segments shaking at once */
+#define WALL_SHAKE_DUR  6       /* ticks a struck wall shakes */
+#define WALL_SHAKE_AMP  12      /* peak shake offset in subcells (slight) */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u

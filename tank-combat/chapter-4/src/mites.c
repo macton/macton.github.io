@@ -259,10 +259,68 @@ void mites_update_fields(World* w) {
  * picks the one with the least field-distance to the destination (the route), or
  * — if the destination's field overflowed the table — the least toroidal distance
  * (greedy fallback). If none qualify, hold. Reserves the chosen cell (tally++). */
+/* ---- flocking: when a mite is NOT cleanly pathing (its preferred sub-segment is
+ * blocked) or is wandering, it steers by sampling the mites in its 3x3 neighbourhood —
+ * basic boids on the grid: COHESION toward them, SEPARATION from the close ones,
+ * ALIGNMENT to their headings — voting for a cardinal, then cap-gated like any step.
+ * Integer + deterministic (no RNG unless it is utterly alone). Weights are tunable. */
+#ifndef FLOCK_COH
+#define FLOCK_COH 1          /* pull toward neighbours (light — strong cohesion just re-bunches) */
+#endif
+#ifndef FLOCK_SEP
+#define FLOCK_SEP 2          /* push off neighbours within FLOCK_SEP_RANGE subcells */
+#endif
+#ifndef FLOCK_ALI
+#define FLOCK_ALI 4          /* match neighbours' heading (dominant — makes the swarm flow in streams) */
+#endif
+#ifndef FLOCK_SEP_RANGE
+#define FLOCK_SEP_RANGE SUB  /* "close" = within one cell (subcells) */
+#endif
+
+static inline int iabs_(int x) { return x < 0 ? -x : x; }
+/* the wrapped (shortest signed) toroidal delta on an axis of length `span` subcells */
+static inline int tor_sub(int d, int span) { return d > span / 2 ? d - span : (d < -span / 2 ? d + span : d); }
+/* the cardinal (N/E/S/W) pointing along the larger axis of a delta; -1 if coincident */
+static inline int card_toward(int rdx, int rdy) {
+  if (rdx == 0 && rdy == 0) return -1;
+  if (iabs_(rdx) >= iabs_(rdy)) return rdx > 0 ? DIR_E : DIR_W;
+  return rdy > 0 ? DIR_S : DIR_N;                       /* world y increases downward (S = +y) */
+}
+/* a 32-dir heading rounded to its nearest cardinal index (cardinals sit at dir 0/8/16/24) */
+static inline int card_of_dir(uint32_t dir) { return (int)((((dir + 4) >> 3) + 1) & 3u); }
+
+/* the field's (or greedy) preferred next cardinal among the OPEN neighbours of `mc`
+ * (cap ignored — this is the direction the mite *wants*), or -1 if boxed by walls. */
+static int preferred_card(World* w, uint16_t dest, uint32_t mc) {
+  int cx = wc_x(mc), cy = wc_y(mc), best_d = -1;
+  int slot = find_field(w, dest);
+  if (slot >= 0) {
+    uint32_t ds = cell_screen(dest), dc = cell_local(dest);
+    const uint16_t* pg = w->field_pg + (uint32_t)slot * N_EDGE_MAX;
+    uint32_t best = RM_INF;
+    for (uint8_t d = 0; d < 4; d++) {
+      int nx = wrap_wcx(cx + CARD_DCX[d]), ny = wrap_wcy(cy + CARD_DCY[d]);
+      if (cell_is_wall(w->grid, nx, ny)) continue;
+      uint32_t nc = (uint32_t)wc_pack(nx, ny);
+      uint32_t rem = route_remaining_pg(w, pg, ds, dc, cell_screen(nc), cell_local(nc));
+      if (rem < best) { best = rem; best_d = (int)d; }
+    }
+  } else {                                              /* overflow: greedy toroidal */
+    int best = 0x7FFFFFFF;
+    for (uint8_t d = 0; d < 4; d++) {
+      int nx = wrap_wcx(cx + CARD_DCX[d]), ny = wrap_wcy(cy + CARD_DCY[d]);
+      if (cell_is_wall(w->grid, nx, ny)) continue;
+      int dd = cell_manhattan((uint32_t)wc_pack(nx, ny), dest);
+      if (dd < best) { best = dd; best_d = (int)d; }
+    }
+  }
+  return best_d;
+}
+
 static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
   int cx = wc_x(mc), cy = wc_y(mc);
   uint8_t bit = (uint8_t)(1u << seg_of(m));
-  uint8_t vd[4]; uint16_t vc[4]; int nv = 0;
+  uint8_t vd[4]; uint16_t vc[4]; int nv = 0;                 /* open + cap-free neighbours */
   for (uint8_t d = 0; d < 4; d++) {
     int nx = wrap_wcx(cx + CARD_DCX[d]), ny = wrap_wcy(cy + CARD_DCY[d]);
     if (cell_is_wall(w->grid, nx, ny)) continue;
@@ -275,28 +333,42 @@ static uint8_t pick_step(World* w, uint32_t m, uint32_t mc, int cap) {
 
   uint8_t mode = w->mite_mode[m];
   uint16_t dest = w->mite_dest[m];
-  int bi = 0;
-  if (mode == MM_WANDER || dest == REC_EMPTY || dest == mc) {
-    bi = (int)(xs32(&w->rng) % (uint32_t)nv);                        /* wander / local idle at the dest */
-  } else {
-    int slot = find_field(w, dest);
-    if (slot >= 0) {                                                 /* navigate the shared route field */
-      uint32_t ds = cell_screen(dest), dc = cell_local(dest);
-      const uint16_t* pg = w->field_pg + (uint32_t)slot * N_EDGE_MAX;
-      uint32_t best = RM_INF; bi = -1;
-      for (int i = 0; i < nv; i++) {
-        uint32_t rem = route_remaining_pg(w, pg, ds, dc, cell_screen(vc[i]), cell_local(vc[i]));
-        if (rem < best) { best = rem; bi = i; }                      /* first (lowest d) wins ties */
-      }
-      if (bi < 0) bi = (int)(xs32(&w->rng) % (uint32_t)nv);          /* no route via any open neighbour */
-    } else {                                                         /* overflow: greedy toroidal fallback */
-      int best = 0x7FFFFFFF;
-      for (int i = 0; i < nv; i++) {
-        int dd = cell_manhattan(vc[i], dest);
-        if (dd < best) { best = dd; bi = i; }
+  int bi = -1;
+
+  /* pathing AND the sub-segment it wants is free -> just take it (the route-field step). */
+  if (mode != MM_WANDER && dest != REC_EMPTY && dest != mc) {
+    int pref = preferred_card(w, dest, mc);
+    if (pref >= 0) for (int i = 0; i < nv; i++) if (vd[i] == pref) { bi = i; break; }
+  }
+
+  /* any other case (preferred blocked, or wandering) -> basic flocking off the 3x3. */
+  if (bi < 0) {
+    int vote[4] = { 0, 0, 0, 0 }, nsamp = 0;
+    int mx = xy_lo(w->mite_xy[m]), my = xy_hi(w->mite_xy[m]);
+    for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+      uint32_t nc = (uint32_t)wc_pack(wrap_wcx(cx + dx), wrap_wcy(cy + dy));
+      for (uint8_t s = 0; s < MITE_CAP; s++) {
+        uint32_t p = w->mite_list[nc * MITE_CAP + s];
+        if (p == REC_EMPTY || p == m) continue;        /* the index holds only live mites */
+        int rdx = tor_sub(xy_lo(w->mite_xy[p]) - mx, BIG_W * SUB);
+        int rdy = tor_sub(xy_hi(w->mite_xy[p]) - my, BIG_H * SUB);
+        int ct = card_toward(rdx, rdy);
+        if (ct >= 0) {
+          vote[ct] += FLOCK_COH;                                            /* cohesion */
+          if (iabs_(rdx) + iabs_(rdy) < FLOCK_SEP_RANGE) vote[(ct + 2) & 3] += FLOCK_SEP; /* separation */
+        }
+        vote[card_of_dir((uint32_t)(w->mite_ang[p] >> ANGLE_SHIFT))] += FLOCK_ALI;        /* alignment */
+        nsamp++;
       }
     }
+    if (nsamp == 0) {
+      bi = (int)(xs32(&w->rng) % (uint32_t)nv);         /* utterly alone: fall back to a random wander step */
+    } else {
+      bi = 0; int best = vote[vd[0]];
+      for (int i = 1; i < nv; i++) if (vote[vd[i]] > best) { best = vote[vd[i]]; bi = i; }  /* best available cardinal; ties -> lowest */
+    }
   }
+
   w->mite_tgt[m] = vc[bi];
   g_tally[vc[bi]] |= bit;
   return vd[bi];

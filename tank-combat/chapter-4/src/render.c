@@ -47,8 +47,8 @@ static const uint32_t COL_NEST[NEST_COUNT] = {
   RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
   RGBA(110, 170, 230, 255), RGBA(110, 122, 230, 255), RGBA(146, 110, 230, 255), RGBA(194, 110, 230, 255),
   RGBA(230, 110, 218, 255), RGBA(230, 110, 170, 255), RGBA(230, 110, 122, 255) };
-static const uint32_t COL_LASER_GLOW = RGBA(255,  96,  64, 120);   /* wide outer glow (translucent) */
-static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 235);   /* thin bright core */
+static const uint32_t COL_BOLT_GLOW = RGBA(255,  96,  64, 170);   /* the bolt's hot trailing streak */
+static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright leading head */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
 
 /* per-kind heights + footprints, in subcells (render-only — z lives nowhere in the
@@ -62,7 +62,7 @@ static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 235);   /* thin brigh
 #define TURRET_H   (SUB / 4)        /* 64, on top of the hull */
 #define BARREL_H   (SUB / 6)        /* ~42 */
 #define NEST_H     (SUB + SUB / 2)  /* 384: a tall pylon */
-#define LASER_H    (SUB / 8)        /* 32: a thin beam */
+#define BOLT_H     (SUB / 8)        /* 32: a thin bolt */
 #define FLOOR_HALF (SUB / 2 - 4)    /* inset a hair so cell edges read */
 #define WALL_HALF  (SUB / 2)        /* fills the cell footprint */
 #define MITE_HALF  40
@@ -83,10 +83,15 @@ static const uint32_t COL_LASER_CORE = RGBA(255, 244, 224, 235);   /* thin brigh
 #define HOVER_HALF (SUB / 2 - 6)    /* the cursor-cell highlight, near cell-sized */
 #define VIS_MARGIN (2 * SUB)        /* grow the visible box so edge walls/units don't pop */
 
-static uint32_t burst_colour(int age) {     /* bright flash -> fully transparent over its life */
+static uint32_t burst_colour(int age) {     /* a mite popping: a white-gold flash -> transparent */
   int n = FX_DURATION - 1; if (n < 1) n = 1; if (age > n) age = n;
   int a = 230 + (0 - 230) * age / n;
   return RGBA(255, 232, 150, a);
+}
+static uint32_t burst_colour_impact(int age) {  /* a bolt splashing on a wall: a hot orange flash */
+  int n = FX_DURATION - 1; if (n < 1) n = 1; if (age > n) age = n;
+  int a = 230 + (0 - 230) * age / n;
+  return RGBA(255, 170, 78, a);
 }
 static uint32_t mite_colour(const World* w, uint32_t m) {
   uint8_t mode = w->mite_mode[m];
@@ -125,7 +130,17 @@ static uint32_t emit_terrain(const World* w, Inst* out, uint32_t k, int want_wal
       int wall = cell_is_wall(w->grid, cx, cy);
       if (wall != want_wall) continue;
       int px = cx * SUB + SUB / 2, py = cy * SUB + SUB / 2;
-      if (want_wall) k = push(out, k, px, py, WALL_H / 2, WALL_HALF, WALL_HALF, WALL_H / 2, 16384, 0, COL_WALL);
+      if (want_wall) {
+        int jx = 0, jy = 0;   /* a recently-struck wall jolts: a small, fast-decaying jitter */
+        uint16_t cell = (uint16_t)wc_pack(cx, cy);
+        for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++)
+          if (w->wall_shake_t[e] && w->wall_shake_cell[e] == cell) {
+            int tt = w->wall_shake_t[e], amp = (WALL_SHAKE_AMP * tt) / WALL_SHAKE_DUR;
+            jx = (tt & 1) ? amp : -amp; jy = (tt & 2) ? amp : -amp;   /* flips each tick: a buzz */
+            break;
+          }
+        k = push(out, k, px + jx, py + jy, WALL_H / 2, WALL_HALF, WALL_HALF, WALL_H / 2, 16384, 0, COL_WALL);
+      }
       else           k = push(out, k, px, py, FLOOR_H / 2, FLOOR_HALF, FLOOR_HALF, FLOOR_H / 2, 16384, 0, COL_FLOOR);
     }
   return k;
@@ -173,9 +188,8 @@ static uint32_t emit_tank_part(const World* w, Inst* out, uint32_t k, int part, 
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int px = xy_lo(w->tank_xy[t]), py = xy_hi(w->tank_xy[t]);
     if (!in_box(b, px, py)) continue;
-    uint32_t bi = w->tank_ang[t]    >> ANGLE_SHIFT;
-    uint32_t ti = w->tank_turret[t] >> ANGLE_SHIFT;
-    int tco = dir_cos(ti), tsi = dir_sin(ti);
+    uint32_t bi = w->tank_ang[t] >> ANGLE_SHIFT;                              /* body on the 32-dir table */
+    int tco = fine_cos(w->tank_turret[t]), tsi = fine_sin(w->tank_turret[t]);  /* barrel at the fine turret angle */
     if (part == K_HULL)
       k = push(out, k, px, py, FLOOR_H + HULL_H / 2, HULL_HX, HULL_HY, HULL_H / 2,
                dir_cos(bi), dir_sin(bi), COL_BODY[t]);
@@ -205,24 +219,26 @@ static uint32_t emit_dest(const World* w, Inst* out, uint32_t k, const Box* b) {
   return k;
 }
 
-/* the translucent FX: laser beams (glow + core) and destruction bursts, all drawn
- * as cubes in the second pass — depth-tested, not depth-written, painter-sorted. */
+/* the translucent FX: piercing bolts in flight (a hot streak + a bright head) and
+ * destruction bursts, all drawn as cubes in the second pass — depth-tested, not
+ * depth-written, painter-sorted. */
 static uint32_t emit_fx(const World* w, Inst* out, uint32_t k, const Box* b) {
-  for (uint32_t t = 0; t < N_TANKS; t++) {
-    if (!w->tank_tracer[t]) continue;
-    int tx = xy_lo(w->tank_xy[t]), ty = xy_hi(w->tank_xy[t]);
-    if (!in_box(b, tx, ty)) continue;
-    uint32_t ti = w->tank_turret[t] >> ANGLE_SHIFT; int tco = dir_cos(ti), tsi = dir_sin(ti);
-    int scx = wc_x(w->tank_shot_cell[t]) * SUB + SUB / 2, scy = wc_y(w->tank_shot_cell[t]) * SUB + SUB / 2;
-    int ddx = scx - tx; if (ddx >  ARENA_W_SUB / 2) ddx -= ARENA_W_SUB; if (ddx < -ARENA_W_SUB / 2) ddx += ARENA_W_SUB;
-    int ddy = scy - ty; if (ddy >  ARENA_H_SUB / 2) ddy -= ARENA_H_SUB; if (ddy < -ARENA_H_SUB / 2) ddy += ARENA_H_SUB;
-    int len = (ddx * tco + ddy * tsi) >> TRIG_SHIFT;   /* beam length along the turret to the wall */
-    if (len <= 0) continue;
-    int half = len / 2;
-    int mx = tx + ((tco * half) >> TRIG_SHIFT), my = ty + ((tsi * half) >> TRIG_SHIFT);
-    int cz = FLOOR_H + HULL_H;                          /* at turret height */
-    k = push(out, k, mx, my, cz, half, 16, LASER_H / 2, tco, tsi, COL_LASER_GLOW);
-    k = push(out, k, mx, my, cz, half,  5, LASER_H / 4, tco, tsi, COL_LASER_CORE);
+  for (uint32_t bb = 0; bb < N_TANKS * PROJ_MAX; bb++) {   /* up to PROJ_MAX live bolts per tank */
+    if (!w->tank_proj_live[bb]) continue;
+    /* the bolt spawns at the tank centre, so its first stretch is still inside the barrel;
+     * only the length the head has flown BEYOND the barrel tip (87 + 56 subcells) is drawn,
+     * the streak's tail clipped there. While still in the barrel, the bolt isn't drawn. */
+    int beyond = (int)w->tank_proj_dist[bb] - (87 + 56);
+    if (beyond <= 0) continue;
+    int bx = xy_lo(w->tank_proj_xy[bb]), by = xy_hi(w->tank_proj_xy[bb]);
+    if (!in_box(b, bx, by)) continue;
+    int co = fine_cos(w->tank_proj_dir[bb]), si = fine_sin(w->tank_proj_dir[bb]);  /* bolt at the fine turret angle */
+    int seg = w->proj_speed; if (seg > beyond) seg = beyond;   /* clip the tail at the barrel tip */
+    int half = seg / 2;                                        /* the streak trails back over the swept segment */
+    int mx = bx - ((co * half) >> TRIG_SHIFT), my = by - ((si * half) >> TRIG_SHIFT);
+    int cz = FLOOR_H + HULL_H;                                 /* the bolt flies at turret height */
+    k = push(out, k, mx, my, cz, half, 12, BOLT_H / 2, co, si, COL_BOLT_GLOW);   /* trailing glow streak */
+    k = push(out, k, bx, by, cz, 24,    9, BOLT_H / 4, co, si, COL_BOLT_CORE);   /* bright leading head */
   }
   for (uint32_t i = 0; i < N_FX; i++) {
     if (!w->fx_t[i]) continue;
@@ -230,7 +246,9 @@ static uint32_t emit_fx(const World* w, Inst* out, uint32_t k, const Box* b) {
     if (!in_box(b, px, py)) continue;
     int age = FX_DURATION - (int)w->fx_t[i];            /* 0 (fresh) .. FX_DURATION-1 */
     int half = 22 + age * 9;                            /* expands as it fades */
-    k = push(out, k, px, py, FLOOR_H + half, half, half, half, 16384, 0, burst_colour(age));
+    /* white-gold where a mite died, hot orange where a bolt struck a wall */
+    uint32_t bcol = w->fx_kind[i] == FX_IMPACT ? burst_colour_impact(age) : burst_colour(age);
+    k = push(out, k, px, py, FLOOR_H + half, half, half, half, 16384, 0, bcol);
   }
   return k;
 }
