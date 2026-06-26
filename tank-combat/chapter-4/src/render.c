@@ -106,7 +106,11 @@ static uint32_t push(Inst* out, uint32_t k, int cx, int cy, int cz,
                      int hx, int hy, int hz, int co, int si, uint32_t rgba) {
   if (k >= INST_MAX) return k;
   Inst* o = &out[k];
-  o->wx = (int16_t)cx; o->wy = (int16_t)cy; o->wz = (int16_t)cz; o->hz = (int16_t)hz;
+  /* wx,wy are int32 — the 8x8 arena reaches 40960 subcells, past int16. Store them
+   * WITHOUT a 16-bit cast (the old (int16_t) truncation wrapped the east columns to
+   * large negatives, drawing them as a displaced strip far to the west). The remaining
+   * fields are int16 and small (heights/half-extents in subcells, facing in Q14). */
+  o->wx = (int32_t)cx; o->wy = (int32_t)cy; o->wz = (int16_t)cz; o->hz = (int16_t)hz;
   o->hx = (int16_t)hx; o->hy = (int16_t)hy; o->co = (int16_t)co; o->si = (int16_t)si; o->rgba = rgba;
   return k + 1;
 }

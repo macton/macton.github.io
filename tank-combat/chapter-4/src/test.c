@@ -998,6 +998,18 @@ static void t_render_visibility(void) {
   check(terrainW == (uint32_t)N_WORLD_CELLS, "zoomed out, the whole world emits one block per cell (all 4800)");
   check(nW <= INST_MAX, "the whole-world view fits the capacity bound");
 
+  /* Regression: the 8x8 arena reaches 40960 subcells, PAST int16's 32767, so wx,wy are
+   * int32 and must be stored WITHOUT a 16-bit cast. A leftover (int16_t) truncation in
+   * push() wrapped the east columns (x>32767) to large negatives, drawing them as a
+   * displaced strip far to the west. Assert every emitted placement keeps its true world
+   * coordinate (a small ±SUB margin allows a box centre — e.g. a barrel — to poke just
+   * past an edge). With the bug a wx hit ~-32752, far outside this band. */
+  int coords_sane = 1;
+  for (uint32_t i = 0; i < nW; i++)
+    if (g_a[i].wx < -SUB || g_a[i].wx > ARENA_W_SUB + SUB ||
+        g_a[i].wy < -SUB || g_a[i].wy > ARENA_H_SUB + SUB) { coords_sane = 0; break; }
+  check(coords_sane, "every emitted placement keeps its true world coordinate (no int16 wrap)");
+
   DrawList dz; build_view(&W, g_b, &dz, 0, 0, GRID_W * SUB - 1, GRID_H * SUB - 1, REC_EMPTY); /* one screen */
   uint32_t terrainZ = dz.opaque[K_FLOOR] + dz.opaque[K_WALL];
   check(terrainZ > 0 && terrainZ < N_WORLD_CELLS, "zoomed in, terrain is culled to the visible cells");
