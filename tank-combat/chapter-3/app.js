@@ -40,7 +40,21 @@ const STATE = ["unselected", "auto-path", "manual"];
 const STATUS = ["idle", "routing", "arrived", "no path"];
 const MODE = ["wander", "hunt", "home"];
 // nest colours, a hue wheel, one per screen but (0,0) (match COL_NEST in render.c)
-const NESTC = [[230,146,110],[230,194,110],[218,230,110],[170,230,110],[122,230,110],[110,230,146],[110,230,194],[110,218,230],[110,170,230],[110,122,230],[146,110,230],[194,110,230],[230,110,218],[230,110,170],[230,110,122]];
+// a nest's colour: a hue wheel by index (mirrors render.c's nest_colour) so the homing tint
+// matches between the main view and the minimap. Computed, not tabulated (there are 63 nests).
+function nestColour(n, NEST) {
+  const h6 = (((n * 6 * 256 / NEST) | 0) % (6 * 256));
+  const seg = h6 >> 8, f = h6 & 255;
+  const up = 110 + ((145 * f / 255) | 0), dn = 110 + ((145 * (255 - f) / 255) | 0);
+  switch (seg) {
+    case 0:  return [255, up, 110];
+    case 1:  return [dn, 255, 110];
+    case 2:  return [110, 255, up];
+    case 3:  return [110, dn, 255];
+    case 4:  return [up, 110, 255];
+    default: return [255, 110, dn];
+  }
+}
 const sdir = (a, b, n) => (a === b ? 0 : ((b - a + n) % n === 1 ? 1 : -1));  // toroidal one-step
 
 async function main() {
@@ -65,7 +79,7 @@ async function main() {
   const mem = () => wasm.memory.buffer;
   const view = {
     grid: () => new Uint32Array(mem(), wasm.grid_ptr(), C.NS * C.GH),
-    xy:   () => new Int16Array(mem(), wasm.tank_xy_ptr(), C.NT * 2),
+    xy:   () => new Uint16Array(mem(), wasm.tank_xy_ptr(), C.NT * 2),   // positions are unsigned subcells (8x8 world > int16)
     ang:  () => new Uint16Array(mem(), wasm.tank_angle_ptr(), C.NT),
     tstate: () => new Uint8Array(mem(), wasm.tstate_ptr(), C.NT),
     pdScreen: () => new Uint8Array(mem(), wasm.pdest_screen_ptr(), C.NT),
@@ -73,7 +87,7 @@ async function main() {
     phas:     () => new Uint8Array(mem(), wasm.phas_ptr(), C.NT),
     pstatus:  () => new Uint8Array(mem(), wasm.pstatus_ptr(), C.NT),
     // the swarm
-    mxy:   () => new Int16Array(mem(), wasm.mite_xy_ptr(), C.NM * 2),
+    mxy:   () => new Uint16Array(mem(), wasm.mite_xy_ptr(), C.NM * 2),  // positions are unsigned subcells (8x8 world > int16)
     mang:  () => new Uint16Array(mem(), wasm.mite_angle_ptr(), C.NM),
     mmode: () => new Uint8Array(mem(), wasm.mite_mode_ptr(), C.NM),
     mdest: () => new Uint16Array(mem(), wasm.mite_dest_ptr(), C.NM),
@@ -237,6 +251,7 @@ function buildTouchPad(map) {
 // population at the world scale while the viewport stays on one screen.
 function makeMiniMap(container, onPick, R) {
   const { wasm, view, C } = R;
+  container.style.gridTemplateColumns = `repeat(${C.SX}, 1fr)`;   // one column per screen column (8x8 world)
   const BODY = [[242,158,41],[77,179,230],[120,205,120],[196,140,235]];
   const BG = [22,24,30], WALL = [70,75,90], MITE = [96,150,138], MITE_HUNT = [224,110,80], NESTB = [255,245,210];
   const canvases = [], ctxs = [], imgs = [];
@@ -254,7 +269,7 @@ function makeMiniMap(container, onPick, R) {
         for (let cx = 0; cx < C.GW; cx++) put(img, cx, cy, ((w >> cx) & 1) ? WALL : BG); } }
     for (let m = 0; m < C.NM; m++) { if (resp[m]) continue;             // dead mites aren't on the board
       const wcx = mxy[2*m] >> 8, wcy = mxy[2*m+1] >> 8;
-      const md = mmode[m], c = md === 1 ? MITE_HUNT : md === 2 ? NESTC[m % C.NEST] : MITE;
+      const md = mmode[m], c = md === 1 ? MITE_HUNT : md === 2 ? nestColour(m % C.NEST, C.NEST) : MITE;
       put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, c); }
     for (let n = 0; n < C.NEST; n++) { const wcx = nest[n] % C.BW, wcy = (nest[n] / C.BW) | 0; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, NESTB); }
     for (let t = 0; t < C.NT; t++) { const wcx = xy[2*t] >> 8, wcy = xy[2*t+1] >> 8; put(imgs[scr(wcx, wcy)], wcx % C.GW, wcy % C.GH, BODY[t]); }

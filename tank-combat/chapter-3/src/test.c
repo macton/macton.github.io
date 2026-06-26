@@ -619,7 +619,7 @@ static void t_mite_nests_fields(void) {
 
   /* the distinct-destination peak is measured and stays within N_FIELDS */
   sim_init(&W);
-  int corners[4][2] = {{1,7},{78,7},{1,52},{78,52}};
+  int corners[4][2] = {{1,7},{158,7},{1,112},{158,112}};   /* the four corners of the 160x120 world */
   for (int t = 0; t < N_TANKS; t++) sim_set_dest(&W, t, corners[(t+1)%4][0], corners[(t+1)%4][1]);
   for (int i = 0; i < 6000; i++) {
     for (int t = 0; t < N_TANKS; t++) if (W.pstatus[t] == PS_ARRIVED || W.pstatus[t] == PS_NOPATH)

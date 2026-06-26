@@ -1,7 +1,7 @@
 # Chapter 3 contract — the swarm
 
 The explicit promises chapter 3 makes, so they can be relied on and tested. The
-tests in `src/test.c` enforce them (117 checks). Chapter 3 **inherits chapter 1's
+tests in `src/test.c` enforce them (128 checks). Chapter 3 **inherits chapter 1's
 movement contract** and **chapter 2's pathing/viewport contract**
 ([../chapter-2/CONTRACT.md](../chapter-2/CONTRACT.md)) unchanged — the four tanks
 still route themselves exactly as before. The rename of the shared transforms to
@@ -10,7 +10,7 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## The pool
 
-- **A fixed pool of `N_MITES` (= 1000) mites**, spawned at init and alive for the
+- **A fixed pool of `N_MITES` (= 4096) mites**, spawned at init and alive for the
   whole chapter — flat structure-of-arrays, statically sized, **no dynamic
   allocation**. *(tested: the index counts sum to `N_MITES`.)*
 - **Spawn is deterministic and legal.** From the seed, mites scatter across **open,
@@ -25,13 +25,13 @@ the inherited tests still pass and the baked escape table is byte-identical.
   `REC_EMPTY`), and `mite_cnt[cell]` is the number of occupied sub-segments. Each mite
   occupies its own slot, `seg_of(m) = (m >> 2) & 3`. *(tested.)* It is the swarm's `O(N)`
   acceleration structure — "which mites are within one cell of me" is reading a 3×3
-  neighbourhood, not a 1000×1000 scan.
+  neighbourhood, not a 4096×4096 scan.
 
 ## The crowding cap
 
 - **At most one mite per (cell, sub-segment)** — so ≤ `mite_cap` (≤ 4) mites per cell —
   after every tick. A mite is assigned a sub-segment by index (`(m >> 2) & 3` — decoupled
-  from `nest_of = m % 15` (15 not a multiple of 4), so a nest's mites spread over all four
+  from `nest_of = m % 63` (63 not a multiple of 4), so a nest's mites spread over all four
   segments and revive in parallel rather than one at a time), moves into it
   (parking a quarter-cell off the cell centre, which spreads the swarm out), and enters a
   cell only if its own sub-segment there is free. Enforced by a deterministic in-order
@@ -79,10 +79,10 @@ the inherited tests still pass and the baked escape table is byte-identical.
 
 ## Nests & shared route fields
 
-- **Every mite belongs to one of `NEST_COUNT = 15` nests**, `nest_of(i) = i % 15` — one
-  per screen except the tanks' start screen (0,0) — partitioning the swarm into fifteen
-  balanced groups (floor/ceil of `N_MITES/15`). Spreading the homes across the screens
-  spreads the spawn/revival load over fifteen screens' exits instead of piling it out
+- **Every mite belongs to one of `NEST_COUNT = 63` nests**, `nest_of(i) = i % 63` — one
+  per screen except the tanks' start screen (0,0) — partitioning the swarm into sixty-three
+  balanced groups (floor/ceil of `N_MITES/63`). Spreading the homes across the screens
+  spreads the spawn/revival load over sixty-three screens' exits instead of piling it out
   through one screen's two or three border openings. *(tested.)*
 - **A hunting/homing mite navigates the path tables, not a greedy heuristic.** A homing
   mite reaches its nest cell; a hunting mite reaches within one cell of its recorded
@@ -92,8 +92,8 @@ the inherited tests still pass and the baked escape table is byte-identical.
   pathing returns for that destination — the field *is* the tank route, keyed by
   destination instead of by tank. *(tested.)*
 - **The field table is sized from a measured peak.** In normal play the distinct
-  active-destination count peaks at ~19 (the 15 resident nests plus the few sighting
-  cells the gossip has converged on), and `N_FIELDS = 64` holds it with headroom; the live
+  active-destination count peaks at ~81 (the 63 resident nests plus the few sighting
+  cells the gossip has converged on), and `N_FIELDS = 128` holds it with headroom; the live
   count and peak are shown on the page. If the count ever exceeds `N_FIELDS`, the overflow
   mites steer greedily that tick — **no crash, no cap break**. *(tested: the peak stays
   within `N_FIELDS`; a forced overflow holds the cap and stays deterministic.)*

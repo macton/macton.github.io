@@ -9,21 +9,19 @@ cd "$(dirname "$0")"
 # Regenerate the host-baked data (escape table + world map), committed + compiled in.
 ./gen.sh
 
-# Linear memory is sized statically (no dynamic allocation). The dominant term is
-# still chapter 2's path tables; chapter 3 adds the swarm and its index:
-#   Level-1 distances  16 * 45150 * 1  ~= 706 KB   (1 byte/pair; in-screen distances
+# Linear memory is sized statically (no dynamic allocation). The 8x8 world (64
+# screens, 4096 mites) makes the Level-1 distance tables the dominant term:
+#   Level-1 distances  64 * 45150 * 1  ~= 2.76 MB  (1 byte/pair; in-screen distances
 #                                          provably <= 229, see grid_paths.h)
-#   Level-2 dist2/nexthop              ~=  48 KB
-#   per-cell mite index (cnt u8 + list u16*4, 4800 cells) ~= 43 KB  (rebuilt each tick)
-#   mite pool SoA + double-buffered records (1000)        ~= 35 KB
-#   mites.c BFS/scatter/tally scratch (file-static)       ~= 29 KB
-#   instance buffer (2 screens + up to N_MITES quads)     ~= 43 KB
-#   combat state (per-tank turret/cooldown/target + mite_resp[1000]) ~= 2 KB
-#   trace scratch, World scalars, 128 KB stack
-# Measured high-water mark (__heap_base) ~1.04 MiB (1,088,408 bytes) — chapter 2's
-# 1 MiB no longer holds it (the mite pool, its per-cell index, and the bigger
-# instance buffer push it over), so the linear memory is raised to 2 MiB (32
-# pages, ~1.9x headroom). Still all static, integer, allocation-free.
+#   Level-2 dist2/nexthop (255 edge pts) ~= 195 KB
+#   per-cell mite index (cnt u8 + list u16*4, 19200 cells) ~= 173 KB (rebuilt each tick)
+#   mite pool SoA + double-buffered records (4096)         ~= 135 KB
+#   shared route fields (128 * pg[255] u16)               ~=  65 KB
+#   mites.c BFS/scatter/tally scratch (file-static)       ~= 115 KB
+#   instance buffer (2 screens + up to N_MITES quads)     ~=  86 KB
+#   trace scratch, combat/fx state, World scalars, 128 KB stack
+# Total static high-water mark ~3.7 MiB, so the linear memory is raised to 8 MiB
+# (128 pages, ~2x headroom). Still all static, integer, allocation-free.
 clang \
   --target=wasm32 \
   -nostdlib \
@@ -32,8 +30,8 @@ clang \
   -fno-builtin \
   -Wall -Wextra \
   -Wl,--no-entry \
-  -Wl,--initial-memory=2097152 \
-  -Wl,--max-memory=2097152 \
+  -Wl,--initial-memory=8388608 \
+  -Wl,--max-memory=8388608 \
   -Wl,-z,stack-size=131072 \
   -Wl,--stack-first \
   -o game.wasm \

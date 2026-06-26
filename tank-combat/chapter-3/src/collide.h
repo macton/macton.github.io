@@ -9,7 +9,7 @@
  * so one collision routine serves both sizes — size is data, not a fork.
  *
  * Chapter 2: the world is one big BIG_W x BIG_H toroidal grid, organised as a
- * 4x4 block of 20x15 screen-grids. `grid` is the flat screen-major bitset
+ * 8x8 block of 20x15 screen-grids. `grid` is the flat screen-major bitset
  * (one uint32_t per screen-row, bit c == column c); `cell_is_wall` resolves a
  * world cell to its screen and wraps at the big-grid edge — so a body's
  * footprint and the steer's neighbour probes cross inner screen borders and the

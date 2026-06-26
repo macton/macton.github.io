@@ -5,12 +5,12 @@
  * wasm boundary (wasm.c) and the renderer (render.c) sit on top of it.
  *
  * NUMBERS ARE INTEGER FIXED POINT (see defs.h / dirtab.h):
- *   positions/sizes  subcells, 256 == 1 cell (Q8.8), int16_t
+ *   positions/sizes  subcells, 256 == 1 cell (Q8.8), unsigned 16-bit
  *   heading          uint16_t Q5.11 (top 5 bits = 1 of 32 directions)
  *   grid             one uint32_t per screen-row, bit c == column c (1 = wall)
  * Fixed timestep: one sim_tick == one frame; per-tick deltas are the data.
  *
- * CHAPTER 2: a 4x4 world and self-pathing tanks. All tanks are identical; each
+ * CHAPTER 2: an 8x8 world and self-pathing tanks. All tanks are identical; each
  * carries a per-tank interaction state (UNSELECTED / AUTOPATH / MANUAL) and may
  * have a destination it routes to. The big pathing tables (Level 1 per-screen
  * distances, Level 2 edge-point next-hop) live here because they are simulation
@@ -78,7 +78,7 @@ struct World {
 
   /* ---- per-tank interaction + routing (every tank can path) -------------- */
   uint8_t  tstate      [N_TANKS];   /* TS_* (unselected/autopath/manual) */
-  uint8_t  pdest_screen[N_TANKS];   /* destination screen (0..15) */
+  uint8_t  pdest_screen[N_TANKS];   /* destination screen (0..63) */
   uint16_t pdest_cell  [N_TANKS];   /* destination local cell (0..N_CELLS-1) */
   uint8_t  phas        [N_TANKS];   /* 1 if a destination is set */
   uint8_t  pgoal       [N_TANKS];   /* cardinal currently followed (DIR_*) or DIR_NONE */

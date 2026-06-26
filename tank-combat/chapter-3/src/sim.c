@@ -56,24 +56,16 @@ void sim_init(World* w) {
   w->mite_respawn = 300;      /* a killed mite revives at its nest after 300 ticks = 5 s */
   w->proj_speed   = PROJ_SPEED_DEFAULT;  /* slow bolt: 1 cell/tick (page-tunable) */
 
-  /* the four nests (home cells), spread across the world on open ring cells. Nest 0
-   * sits in screen (1,1), NOT in screen (0,0) where all four tanks start — so revived
-   * mites don't pop up under a tank. The other three are the far corner screens. */
-  w->nest_cell[ 0] = wc_pack(30,  7);  /* screen (1,0) */
-  w->nest_cell[ 1] = wc_pack(50,  7);  /* screen (2,0) */
-  w->nest_cell[ 2] = wc_pack(70,  7);  /* screen (3,0) */
-  w->nest_cell[ 3] = wc_pack(10, 22);  /* screen (0,1) */
-  w->nest_cell[ 4] = wc_pack(30, 22);  /* screen (1,1) */
-  w->nest_cell[ 5] = wc_pack(50, 22);  /* screen (2,1) */
-  w->nest_cell[ 6] = wc_pack(70, 22);  /* screen (3,1) */
-  w->nest_cell[ 7] = wc_pack(10, 37);  /* screen (0,2) */
-  w->nest_cell[ 8] = wc_pack(30, 37);  /* screen (1,2) */
-  w->nest_cell[ 9] = wc_pack(50, 37);  /* screen (2,2) */
-  w->nest_cell[10] = wc_pack(70, 37);  /* screen (3,2) */
-  w->nest_cell[11] = wc_pack(10, 52);  /* screen (0,3) */
-  w->nest_cell[12] = wc_pack(29, 51);  /* screen (1,3) */
-  w->nest_cell[13] = wc_pack(51, 51);  /* screen (2,3) */
-  w->nest_cell[14] = wc_pack(69, 53);  /* screen (3,3) */
+  /* one nest (home cell) per screen EXCEPT the tank start screen (0,0): NEST_COUNT = 63.
+   * Nest n belongs to screen n+1, so screen 0 has none and revived mites never pop up under a
+   * starting tank. Each sits on the bottom-ring centre, local (GRID_W/2, GRID_H-2) — a cell the
+   * map generator always re-opens, so every nest is open and reachable. */
+  for (uint32_t n = 0; n < NEST_COUNT; n++) {
+    uint32_t s = n + 1;                                  /* screens 1..N_SCREENS-1 */
+    uint32_t sx = s % SCREENS_X, sy = s / SCREENS_X;
+    w->nest_cell[n] = wc_pack((int32_t)(sx * GRID_W + GRID_W / 2),
+                              (int32_t)(sy * GRID_H + GRID_H - 2));
+  }
 
   /* Build the rarely-changing path tables once: Level 1, then Level 2 on top, then
    * each tank's remaining-distance vector (empty until a destination is set). */

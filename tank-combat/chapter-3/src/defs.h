@@ -1,9 +1,9 @@
 /* defs.h — shared vocabulary: fixed sizes, input bits, exact-width types.
  * These are constraints the whole module exploits, not parameters to expose.
  *
- * Chapter 2 grows chapter 1's single 20x15 screen into a 4x4 arrangement of
- * screen-grids. Mechanically the world is ONE big (4*GRID_W)x(4*GRID_H)
- * toroidal grid; the 4x4 screen split is an organisation for display,
+ * Chapter 2 grows chapter 1's single 20x15 screen into an 8x8 arrangement of
+ * screen-grids. Mechanically the world is ONE big (8*GRID_W)x(8*GRID_H)
+ * toroidal grid; the 8x8 screen split is an organisation for display,
  * scrolling, and the two-level pathing (see grid_paths.h / edge_paths.h). */
 #ifndef TANK_DEFS_H
 #define TANK_DEFS_H
@@ -15,12 +15,12 @@
 #define GRID_H      15
 #define N_CELLS     (GRID_W * GRID_H)   /* 300 cells per screen */
 
-/* ---- the 4x4 world of screen-grids --------------------------------------- */
-#define SCREENS_X   4
-#define SCREENS_Y   4
-#define N_SCREENS   (SCREENS_X * SCREENS_Y)        /* 16 */
-#define BIG_W       (SCREENS_X * GRID_W)           /* 80 cells wide  */
-#define BIG_H       (SCREENS_Y * GRID_H)           /* 60 cells tall  */
+/* ---- the 8x8 world of screen-grids --------------------------------------- */
+#define SCREENS_X   8
+#define SCREENS_Y   8
+#define N_SCREENS   (SCREENS_X * SCREENS_Y)        /* 64 */
+#define BIG_W       (SCREENS_X * GRID_W)           /* 160 cells wide */
+#define BIG_H       (SCREENS_Y * GRID_H)           /* 120 cells tall */
 
 /* ---- tanks: all identical; each can path itself or be driven ------------- */
 #define N_TANKS     4
@@ -36,8 +36,8 @@
 #define ANGLE_SHIFT 11          /* 65536 >> 11 == 32                         */
 #define SUB         256         /* subcells per grid cell (Q8.8)             */
 #define SUB_SHIFT   8
-#define ARENA_W_SUB (BIG_W * SUB)       /* 20480 < 32768, still fits int16   */
-#define ARENA_H_SUB (BIG_H * SUB)       /* 15360                              */
+#define ARENA_W_SUB (BIG_W * SUB)       /* 40960 — a position is UNSIGNED 16-bit (< 65536) */
+#define ARENA_H_SUB (BIG_H * SUB)       /* 30720                              */
 #define TANK_R      92          /* collision half-extent, subcells (~0.36c)  */
 #define TRIG_SHIFT  14          /* the DIR_COS table is Q14                   */
 
@@ -49,7 +49,7 @@
  * with the tank path tables through a SHARED route field (edge_paths.h). Across
  * 1000 mites the distinct destinations are few (the nests + a handful of recent
  * sightings), so a handful of shared fields serve the whole swarm. */
-#define N_MITES     1000        /* fixed pool, all alive for the whole chapter */
+#define N_MITES     (4 * 1024)  /* 4096: fixed pool, all alive for the whole chapter */
 #define MITE_R      (SUB / 8)   /* collision half-extent = 32 subcells; diameter ~= a quarter cell */
 
 /* The crowding cap: a cell is quartered into MITE_CAP=4 sub-segments (a 2x2 grid),
@@ -73,23 +73,23 @@ static inline int popcount4(uint32_t b) { return (int)((b & 1u) + ((b >> 1) & 1u
 
 /* Every mite belongs to one of NEST_COUNT home cells, assigned by index. A nest
  * is a destination a mite can path home to (the 20% that carry a sighting home).
- * There is one nest per screen EXCEPT the tank start screen (0,0) — 15 of the 16
+ * There is one nest per screen EXCEPT the tank start screen (0,0) — 63 of the 64
  * screens. Spreading the homes across all the screens spreads the spawn/revival
  * load: with a single screenful of nests every revived mite funnelled out through
  * that one screen's two or three border openings; one nest per screen gives each
- * its own exits and roughly N_MITES/15 residents. */
-#define NEST_COUNT  15
+ * its own exits and roughly N_MITES/63 residents. */
+#define NEST_COUNT  63
 static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 
 /* The shared route-field table: a fixed pool of remaining-distance fields keyed by
  * destination cell (the NEST_COUNT resident nests + cached tank-sighting goals).
  * Sized from a MEASURED peak distinct-destination count, not a guess: across
- * representative scenarios (idle / roaming / fleeing tanks, several simultaneous
- * sightings) the high-water mark is ~22 (see test.c's peak test), so 64 gives ~3x
- * headroom. If the live count ever exceeds N_FIELDS those mites fall back to greedy
- * steering that tick (overflow is a safety net, not a crash). 64 fields * (a
- * pg[N_EDGE_MAX] u16 vector) ~= 16 KB. */
-#define N_FIELDS    64
+ * representative scenarios. Slots 0..NEST_COUNT-1 are the 63 resident nests, so the
+ * pool must exceed NEST_COUNT with headroom for the live tank-sighting goals; 128
+ * leaves ~65 sighting slots. If the live count ever exceeds N_FIELDS those mites fall
+ * back to greedy steering that tick (overflow is a safety net, not a crash). 128
+ * fields * (a pg[N_EDGE_MAX] u16 vector) ~= 65 KB. */
+#define N_FIELDS    128
 
 /* a mite's movement mode (its record + mode pick the destination, then the field) */
 #define MM_WANDER   0           /* no destination: drunk walk over the open cell graph */
@@ -202,13 +202,16 @@ static inline int at_cell_centre(uint32_t cur_di, int ox, int oy) {
   }
 }
 
-/* Two int16 always-together values packed in one uint32_t (low = a, high = b).
- * One named owner of the layout, so call sites pack/unpack by intent, not by
- * ad-hoc shifts. Used for tank_xy (position) and tank_vxy (last applied move). */
+/* Two always-together 16-bit values packed in one uint32_t (low = a, high = b).
+ * One named owner of the layout, so call sites pack/unpack by intent, not by ad-hoc
+ * shifts. Used for tank_xy/mite_xy (a POSITION — unsigned subcells in [0, ARENA_*_SUB),
+ * which for the 8x8 world reaches 40960, past int16, so the readers are unsigned) and
+ * for tank_vxy (the last applied move — a small signed delta, but only ever tested for
+ * != 0, never decoded, so the unsigned read is harmless there). */
 static inline uint32_t xy_pack(int32_t a, int32_t b) {
   return (uint32_t)(uint16_t)(int16_t)a | ((uint32_t)(uint16_t)(int16_t)b << 16);
 }
-static inline int32_t xy_lo(uint32_t p) { return (int16_t)(uint16_t)(p & 0xFFFFu); }
-static inline int32_t xy_hi(uint32_t p) { return (int16_t)(uint16_t)(p >> 16); }
+static inline int32_t xy_lo(uint32_t p) { return (int32_t)(uint16_t)(p & 0xFFFFu); }
+static inline int32_t xy_hi(uint32_t p) { return (int32_t)(uint16_t)(p >> 16); }
 
 #endif

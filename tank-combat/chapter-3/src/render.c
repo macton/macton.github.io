@@ -26,13 +26,24 @@ static const uint32_t COL_MANUAL   = RGBA(245, 225, 90, 255);
 static const uint32_t COL_MITE_IDLE     = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD= RGBA(150,  64,  74, 255);
-/* the nests (one per screen but (0,0)), drawn on the map and used to tint mites homing to
- * each — a hue wheel so adjacent screens read as different colours (match NESTC in app.js) */
-static const uint32_t COL_NEST[NEST_COUNT] = {
-  RGBA(230, 146, 110, 255), RGBA(230, 194, 110, 255), RGBA(218, 230, 110, 255), RGBA(170, 230, 110, 255),
-  RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
-  RGBA(110, 170, 230, 255), RGBA(110, 122, 230, 255), RGBA(146, 110, 230, 255), RGBA(194, 110, 230, 255),
-  RGBA(230, 110, 218, 255), RGBA(230, 110, 170, 255), RGBA(230, 110, 122, 255) };
+/* a nest's colour (one per screen but (0,0)): a hue wheel by index so adjacent nests read as
+ * different colours — drawn on the map and used to tint mites homing to each. Computed (not a
+ * table) since there are NEST_COUNT=63 of them; app.js's nestColour mirrors this exactly. */
+static uint32_t nest_colour(uint32_t n) {
+  uint32_t h6 = (n * 6u * 256u / NEST_COUNT) % (6u * 256u);   /* hue*6 in Q8: segment.frac */
+  int seg = (int)(h6 >> 8), f = (int)(h6 & 255u);
+  int up = 110 + 145 * f / 255, dn = 110 + 145 * (255 - f) / 255;   /* ramp channels 110..255 */
+  int r, g, b;
+  switch (seg) {
+    case 0:  r = 255; g = up;  b = 110; break;
+    case 1:  r = dn;  g = 255; b = 110; break;
+    case 2:  r = 110; g = 255; b = up;  break;
+    case 3:  r = 110; g = dn;  b = 255; break;
+    case 4:  r = up;  g = 110; b = 255; break;
+    default: r = 255; g = 110; b = dn;  break;
+  }
+  return RGBA(r, g, b, 255);
+}
 static const uint32_t COL_BOLT_GLOW = RGBA(255,  96,  64, 255);   /* the bolt's hot trailing streak */
 static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright leading head */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
@@ -59,7 +70,7 @@ static uint32_t fx_colour_impact(int age) {
 
 static uint32_t mite_colour(const World* w, uint32_t m) {
   uint8_t mode = w->mite_mode[m];
-  if (mode == MM_HOME) return COL_NEST[nest_of(m)];                          /* carrying it home */
+  if (mode == MM_HOME) return nest_colour(nest_of(m));                       /* carrying it home */
   if (mode == MM_HUNT)
     return (w->frame - w->mite_rec_time[w->rec_buf][m]) < MITE_AGE_HOT ? COL_MITE_HUNT_HOT : COL_MITE_HUNT_COLD;
   return COL_MITE_IDLE;                                                      /* wander (no belief) */
@@ -130,7 +141,7 @@ static uint32_t build_screen(const World* w, Inst* out, uint32_t k,
     int nwx = wc_x(w->nest_cell[n]), nwy = wc_y(w->nest_cell[n]);
     if ((uint32_t)((nwy / GRID_H) * SCREENS_X + (nwx / GRID_W)) != screen) continue;
     int lx = ox + (nwx % GRID_W) * SUB + SUB / 2, ly = oy + (nwy % GRID_H) * SUB + SUB / 2;
-    k = push(out, k, lx, ly, 116, 116, 16384, 0, COL_NEST[n]);
+    k = push(out, k, lx, ly, 116, 116, 16384, 0, nest_colour(n));
   }
 
   /* the mites on THIS screen only — build instances for what the camera shows, so

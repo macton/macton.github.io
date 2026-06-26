@@ -1,7 +1,7 @@
 # Tank Combat — Chapter 3: The Swarm
 
 Chapter 3 of *Data-Oriented Design, by picture* (the book index is one level up).
-It adds an **enemy faction** to [chapter 2](../chapter-2/)'s 4×4 world: **a thousand
+It adds an **enemy faction** to [chapter 2](../chapter-2/)'s 8×8 world: **a thousand
 mites** that wander, copy the last place they saw a tank on contact, and converge on
 it. **The point of the project is to demonstrate a data-oriented approach** — here
 the lesson is **scale**: one entity is easy, a thousand is a *data layout*. The
@@ -34,18 +34,18 @@ shooter, so thinning the swarm also enrages it.
 
 A **mite** is a **quarter-cell driven body** (`MITE_R = SUB/8 = 32` subcells, so its
 diameter is about a quarter cell) on the *same* grid as the tanks. There are exactly
-`N_MITES = 1000`, spawned at init and alive for the whole chapter — a **fixed pool**:
+`N_MITES = 4096`, spawned at init and alive for the whole chapter — a **fixed pool**:
 flat structure-of-arrays, statically sized, **no allocation**. A mite shares the
 tanks' turn and move transforms and collides only with **walls** (its own smaller
 radius); it does **not** physically collide with tanks or with other mites. Where it
 has a destination it **navigates with the path tables** (via a shared route field,
 below) rather than owning a route; with no destination it **wanders**.
 
-Every mite belongs to one of **`NEST_COUNT = 15` nests** (`nest_of(i) = i % 15`) —
+Every mite belongs to one of **`NEST_COUNT = 63` nests** (`nest_of(i) = i % 63`) —
 **one per screen except the tanks' start screen (0,0)**, each on the open cell nearest
 its screen centre. A nest is a home a mite can path back to. Spreading the homes over
-fifteen screens (rather than crowding a few) spreads the spawn/revival load across
-fifteen screens' worth of exits instead of piling it out through one screen's two or
+sixty-three screens (rather than crowding a few) spreads the spawn/revival load across
+sixty-three screens' worth of exits instead of piling it out through one screen's two or
 three border openings — which is what let the revival logic stay dead simple (revive,
 wander, re-acquire) with no jam to dissolve.
 
@@ -75,7 +75,7 @@ spectrum** from the path tables, which rebuild only on a (rare) wall edit.
 
 Each cell is quartered into **`MITE_CAP` (= 4) sub-segments** (a 2×2 grid). A mite is
 assigned to one by index — `seg_of(m) = (m >> 2) & 3`, **decoupled** from `nest_of(m) =
-m % 15` (15 is not a multiple of 4, so a nest's members fan out across all four
+m % 63` (63 is not a multiple of 4, so a nest's members fan out across all four
 sub-segments instead of all wanting the same one — which would serialize revival to one
 at a time) — and **parks at
 that sub-segment's centre** (a quarter-cell off the cell centre), so the swarm spreads out
@@ -129,16 +129,16 @@ tanks path exactly as before and the field *is* the tank route keyed by destinat
 
 Because the swarm shares destinations, the set of *distinct* active destinations is
 small — the 15 nests plus the recent sighting cells the gossip converges on — even
-though 1000 mites move. So a fixed table of `N_FIELDS` fields, keyed by destination:
+though 4096 mites move. So a fixed table of `N_FIELDS` fields, keyed by destination:
 
 - The **15 nest fields stay resident** (re-folded only on a wall edit).
 - A **tank-goal field is folded the first tick its cell becomes an active
   destination and reused while active**; its slot is freed once no mite wants it.
 - **`N_FIELDS` is sized from a measured peak, not a guess.** Instrumenting the distinct
-  active-destination count puts the high-water mark at **~19** in normal play (the 15
+  active-destination count puts the high-water mark at **~81** in normal play (the 15
   resident nests plus the few sighting cells the gossip has converged on), so
-  `N_FIELDS = 64` holds it with headroom — the prove/measure/detect discipline the Level-1
-  byte got, applied to a runtime peak. The page shows the live **active / 64** count
+  `N_FIELDS = 128` holds it with headroom — the prove/measure/detect discipline the Level-1
+  byte got, applied to a runtime peak. The page shows the live **active / 128** count
   and the running **peak**, and a test asserts the peak stays within `N_FIELDS`.
 - **Overflow → greedy fallback.** If the live count ever exceeds `N_FIELDS`, those
   mites steer greedily (toroidal distance) that tick — no crash, no cap break (tested).
@@ -169,7 +169,7 @@ All randomness — every wander direction and every hunt/home roll — comes fro
 processed in index order. The whole swarm is a **pure function of the seed and the
 inputs**: same seed + same inputs ⇒ identical state, pinned by a state-hash test
 (including under overflow, and with combat on). The seed is editable on the page; the
-fifteen nests are fixed, one per screen.
+sixty-three nests are fixed, one per screen.
 
 ### Combat — the tanks shoot back (`tanks_fire.c`)
 
@@ -228,8 +228,8 @@ it revives only if the nest cell has a free slot once current occupancy **and in
 reservations** are counted (the same tally `mites_step` uses), else it waits a tick.
 Reviving happens right after the index is built (step 1b) so the revived mite is an
 ordinary live mite for the rest of the tick. There is **one nest per screen except the
-tanks' start screen (0,0)** — fifteen homes — so revived mites never pop up under a barrel,
-and the spawn load is spread over fifteen screens' exits, not piled out one screen's. That
+tanks' start screen (0,0)** — sixty-three homes — so revived mites never pop up under a barrel,
+and the spawn load is spread over sixty-three screens' exits, not piled out one screen's. That
 spread is what keeps this revival dead simple: a busy nest cell just makes the mite wait a
 tick — with the load shared, that almost never happens, so no neighbourhood-fallback or
 jam-detector machinery is needed. Firing draws **no randomness**, so the swarm stays a pure
@@ -274,7 +274,7 @@ New in chapter 3:
 the shared `at_cell_centre`) and the combat vocabulary (`TARGET_MAX_R`, `TGT_NONE`,
 `PROJ_RANGE`, `PROJ_HW`, `PROJ_SPEED_DEFAULT`, `N_FX`, `FX_DURATION`).
 `sim.h`'s `World` gains the mite pool (SoA, incl. `mite_dest` and `mite_resp`), the
-double-buffered records, the per-cell index, the fifteen nests, the shared route-field
+double-buffered records, the per-cell index, the sixty-three nests, the shared route-field
 table, the field active/peak counters, the per-tank turret/cooldown/target + in-flight
 **bolt** state (`tank_proj_xy`/`dir`/`dist`/`tgt`/`live`), the **destruction-effect ring**
 (`fx_xy`/`fx_t`), the PRNG, and the mite + combat tunables (`fire_period`, `mite_respawn`,
@@ -282,30 +282,30 @@ table, the field active/peak counters, the per-tank turret/cooldown/target + in-
 `render.c` draws only the mites the camera shows (cost scales with visibility), tinted
 by role (wander/hunt/home-by-nest), skips dead mites, draws each tank's turret on
 `tank_turret` (separate from the body), each in-flight **bolt** (a hot streak + bright head)
-and the **bursts** (white mite-kills, orange wall impacts), with struck **walls jolting** briefly, plus the fifteen nest markers; the minimap (`app.js`) shows the
+and the **bursts** (white mite-kills, orange wall impacts), with struck **walls jolting** briefly, plus the sixty-three nest markers; the minimap (`app.js`) shows the
 whole live swarm and the nests (it skips the dead too).
 
 ## Memory budget (static, no dynamic allocation)
 
-The wasm linear memory is **2 MiB** (raised from chapter 2's 1 MiB in the first
-increment); measured high-water mark (`__heap_base`) ≈ **1.04 MiB** (1,093,584 bytes).
+The wasm linear memory is **8 MiB** (raised for the 8×8 world: the Level-1 distance
+tables alone are 64 × 45,150 ≈ 2.76 MiB); the static high-water mark is ≈ **3.7 MiB**.
 Everything is static, integer, allocation-free.
 
 | data | size |
 |------|------|
-| Level-1 distances `l1dist[16 · 45150]` (inherited) | ~706 KB |
-| Level-2 `dist2` + `nexthop` (inherited) | ~48 KB |
-| mite per-cell index: `mite_cnt[4800]` (u8) + `mite_list[4800·4]` (u16) | ~43 KB |
-| mite SoA: `xy`,`vxy`,`ang`,`in`,`hit`,`mode`,`dest`,`cell`,`tgt`,`resp` × 1000 | ~21 KB |
-| records (double-buffered): `rec_cell` (u16) + `rec_time` (u32), ×2 | ~12 KB |
-| shared route fields: `field_pg[64 · 128]` (u16) + `field_dest[64]` | ~16 KB |
+| Level-1 distances `l1dist[64 · 45150]` (64 screens) | ~2.76 MB |
+| Level-2 `dist2` + `nexthop` (255 edge points) | ~195 KB |
+| mite per-cell index: `mite_cnt[19200]` (u8) + `mite_list[19200·4]` (u16) | ~173 KB |
+| mite SoA: `xy`,`vxy`,`ang`,`in`,`hit`,`mode`,`dest`,`cell`,`tgt`,`resp` × 4096 | ~86 KB |
+| records (double-buffered): `rec_cell` (u16) + `rec_time` (u32), ×2 | ~49 KB |
+| shared route fields: `field_pg[128 · 255]` (u16) + `field_dest[128]` | ~65 KB |
 | combat: per-tank turret/cooldown/target + in-flight bolts (4 slots × 4 tanks) + effect ring `fx_xy`/`fx_t`[256] | ~2 KB |
-| `mites.c` BFS/scatter/tally/dest-mark scratch (file-static) | ~34 KB |
-| instance buffer (2 screens + up to `N_MITES` mite quads + nests) | ~43 KB |
-| 15 nests, PRNG state, mite + combat tunables, 128 KB stack | — |
+| `mites.c` BFS/scatter/tally/dest-mark scratch (file-static) | ~115 KB |
+| instance buffer (2 screens + up to `N_MITES` mite quads + nests) | ~86 KB |
+| 63 nests, PRNG state, mite + combat tunables, 128 KB stack | — |
 
 Each structure is sized to its real domain: the index count is one byte (cap ≤ 4),
-the record is one cell + one timestamp, a mite index is a `uint16` (1000 < 0xFFFF),
+the record is one cell + one timestamp, a mite index is a `uint16` (4096 < 0xFFFF),
 the route table is sized to a *measured* peak, the cap tally is one byte.
 
 ## Build
@@ -339,7 +339,7 @@ older, older never overwrites newer, a newer *empty* propagates); the **behaviou
 (sense → hunt, arrive erase/refresh, the 80/20 hunt/home split at the `P_HUNT`
 boundaries and statistically, a newer record interrupts a homing mite and re-rolls, a
 mite that reaches its nest **reverts to wander** with its record cleared — so homed mites
-don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into fifteen balanced groups; a homing mite
+don't pile up nest-coloured); the **nests & shared fields** (`nest_of` partitions the swarm into sixty-three balanced groups; a homing mite
 reaches its nest; a hunting mite reaches its recorded cell; **a mite's shared-field
 route equals the tank pathing ground truth** for the same destination; the
 **distinct-destination peak is measured and stays within `N_FIELDS`** — ~32 with combat

@@ -56,9 +56,9 @@
   #camlabel { position: absolute; top: 8px; right: 8px; z-index: 5; font: inherit; font-size: 12px; color: var(--acc);
               background: #0f1115cc; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
   #camlabel:hover { border-color: var(--acc); }
-  /* screen picker overlay (a 4x4 map of the world) */
-  #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
-            gap: 6px; padding: 44px; background: #0c0e12ee; align-content: center; }
+  /* screen picker overlay (an 8x8 map of the world) */
+  #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(8, 1fr);
+            gap: 4px; padding: 24px; background: #0c0e12ee; align-content: center; }
   .mmcell { width: 100%; aspect-ratio: 20 / 15; image-rendering: pixelated; display: block;
             background: #14161b; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
   .mmcell:hover { border-color: var(--acc); }
@@ -116,8 +116,8 @@
   .pool { font-family: ui-monospace, monospace; font-size: 12px; background:#000; border-radius:6px; padding:8px 10px; }
   .pool .hd { color:#c7ccd4; } .pool .rowm { color: var(--dim); white-space: pre; }
 
-  /* minimap of the 4x4 world */
-  #w-minimap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-width: 220px; }
+  /* minimap of the 8x8 world */
+  #w-minimap { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-width: 420px; }
 </style>
 </head>
 <body>
@@ -161,7 +161,7 @@
   <article>
     <p>This is chapter three of an interactive book about
     <a href="https://github.com/macton/nagent/blob/master/context/data-oriented-design.md">data-oriented design</a>.
-    Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a 4×4 toroidal
+    Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a 8×8 toroidal
     grid of screens and gave the tanks self-routing. Chapter 3 adds an <strong>enemy
     faction</strong>: <strong>a thousand mites</strong> that wander, copy the last place they
     saw a tank on contact, and converge on it. As before, every structure below is
@@ -173,18 +173,18 @@
     shared knowledge that is just <strong>timestamped data copied on contact</strong> with no
     central manager, and — the payoff — <strong>a handful of shared route fields</strong>
     standing in for a thousand per-unit routes. The four tanks keep routing exactly as before:
-    <strong>4 routed units beside 1000 that share a few routes — the algorithm matched to the
+    <strong>4 routed units beside 4096 that share a few routes — the algorithm matched to the
     need.</strong></p>
 
     <h2>The world &amp; the tanks (recap)</h2>
-    <p>The world is chapter 2's single <code>80×60</code> toroidal grid, organised as 4×4
+    <p>The world is chapter 2's single <code>160×120</code> toroidal grid, organised as 8×8
     screens; the viewport shows one screen and follows the selected tank. The tanks still
     route themselves along precomputed path tables. New here is everything swarming around
     them. The minimap shows the <strong>whole world</strong> — walls, tanks, routes, and the
     entire swarm as downsampled dots — so you can watch the mites pool and stream while the
     viewport stays on one screen:</p>
     <div class="fig">
-      <p class="cap">the 4×4 world · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is the viewport · click a screen to view it</p>
+      <p class="cap">the 8×8 world · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is the viewport · click a screen to view it</p>
       <div id="w-minimap"></div>
       <div id="w-stats" style="margin-top:10px"></div>
       <div id="w-controls" style="margin-top:8px"></div>
@@ -199,7 +199,7 @@
 
     <h2>A thousand mites in a fixed pool</h2>
     <p>A mite is a <strong>quarter-cell body</strong> on the same grid as the tanks. There are
-    exactly <code>N_MITES = 1000</code>, spawned at init and alive for the whole chapter — a
+    exactly <code>N_MITES = 4096</code>, spawned at init and alive for the whole chapter — a
     <strong>fixed pool</strong>: flat structure-of-arrays, statically sized, <em>no
     allocation</em>. <em>Where there's one, there's many</em>: a mite is never updated alone;
     each transform is one batch over the whole pool. A mite shares the tanks' turn and move
@@ -213,7 +213,7 @@
 
     <h2>The grid you already have is the index</h2>
     <p>A swarm needs to know, cheaply, <em>which mites are near a given mite</em> and <em>how
-    many are in each cell</em>. Scanning 1000×1000 pairs every tick is the naive answer. The
+    many are in each cell</em>. Scanning 4096×4096 pairs every tick is the naive answer. The
     data-oriented one: <strong>the uniform grid is the acceleration structure.</strong> Once a
     tick we bin every mite into a per-cell <strong>count</strong> and a short <strong>list</strong>
     of the (≤4) occupants — <code>O(N)</code> — and then “who is within one cell of me” is just
@@ -277,23 +277,23 @@
     <p>A hunting or homing mite has a <strong>destination</strong> — its recorded tank cell, or
     its nest — and it navigates with the very same path tables the tanks built. But it does
     <strong>not</strong> own a route. <em>What is the minimal routing data the swarm depends
-    on?</em> Across 1000 mites the <em>distinct</em> destinations in flight are few — the
-    <strong>fifteen nests</strong> plus the handful of recent sighting cells the gossip is
+    on?</em> Across 4096 mites the <em>distinct</em> destinations in flight are few — the
+    <strong>sixty-three nests</strong> plus the handful of recent sighting cells the gossip is
     converging on — so we keep a small fixed table of <strong>shared route fields</strong>
     (<code>N_FIELDS</code>), each a remaining-distance vector keyed by a destination cell, and
-    many mites read the same field. The fifteen nest fields stay resident; a sighting field is
+    many mites read the same field. The sixty-three nest fields stay resident; a sighting field is
     folded the first tick it is wanted and freed when no mite wants it. Turning a destination
     into the input byte is exactly the tanks' path-follow — <strong>one movement model, two
     input sources</strong> — through the shared <code>agent_turn</code>/<code>agent_move</code>.</p>
-    <p>Every mite belongs to one of <strong>fifteen nests</strong> (by index, <code>i % 15</code>),
+    <p>Every mite belongs to one of <strong>sixty-three nests</strong> (by index, <code>i % 63</code>),
     drawn on the map and used to tint the homing mites. <strong>How big is the table?</strong>
     Not a guess: instrumenting the distinct active-destination count puts the high-water mark at
-    <strong>~19</strong> — the fifteen resident nests plus the few sighting cells the gossip has
-    converged on — so <code>N_FIELDS = 64</code> holds it with headroom, the same
+    <strong>~81</strong> — the sixty-three resident nests plus the few sighting cells the gossip has
+    converged on — so <code>N_FIELDS = 128</code> holds it with headroom, the same
     prove/measure/detect discipline the Level-1 byte got, applied to a runtime peak. If the live
     count ever exceeds the table, those mites steer greedily that tick — a safety net, never a
     crash. The counters above show the live
-    <strong>active / 64</strong> routes and the running <strong>peak</strong>: a thousand movers
+    <strong>active / 128</strong> routes and the running <strong>peak</strong>: a thousand movers
     served by a handful of routes is the chapter's payoff. Beside them the four tanks each
     compute their own exact route — same world, the cost matched to the need.</p>
     <p>The step itself asks one question: <em>is the mite cleanly pathing?</em> If it is hunting or
@@ -331,8 +331,8 @@
     A destroyed mite <strong>revives — its memory wiped — at its nest</strong> after a timeout (default
     <strong>5 s</strong>), respecting the same crowding cap as spawning (a full nest just waits a tick),
     so no rule the swarm obeys is broken by combat. There is <strong>one nest per screen except the
-    tanks' start screen (0,0)</strong> — fifteen homes — so revived mites never pop up under a barrel,
-    and the spawn load is <strong>spread across fifteen screens' worth of exits</strong> rather than
+    tanks' start screen (0,0)</strong> — sixty-three homes — so revived mites never pop up under a barrel,
+    and the spawn load is <strong>spread across sixty-three screens' worth of exits</strong> rather than
     piling out through one screen's two or three border openings (which knotted the swarm at the few
     nests). Spreading the homes is what lets the revival stay dead simple — revive, wander, re-acquire
     from the live gossip — with no jam to dissolve.</p>
@@ -352,7 +352,7 @@
     <strong>single integer PRNG</strong> (xorshift32) seeded in the world and advanced as mites
     are processed in index order. So the whole swarm is a <strong>pure function of the seed and
     the inputs</strong>: same seed ⇒ identical play, pinned by a state-hash test. Edit the seed
-    to re-scatter the swarm and tune the rest live (the fifteen nests are fixed, one per screen):</p>
+    to re-scatter the swarm and tune the rest live (the sixty-three nests are fixed, one per screen):</p>
     <div class="fig">
       <p class="cap">the editable seed and the tunables · sensing range, cap, P(hunt), mite speed/turn, fire rate, respawn delay, turret turn</p>
       <div id="w-mite-tunables"></div>
