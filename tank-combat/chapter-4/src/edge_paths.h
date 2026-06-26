@@ -26,10 +26,10 @@
 #include "defs.h"
 #include "grid_paths.h"
 
-/* Static caps, sized to the curated world with headroom for live edits. The
- * default map's centred one-cell gaps give 4 edge points per screen = 64 total;
- * 128 leaves room to open more border cells before the (documented) cap. */
-#define N_EDGE_MAX        128
+/* Static caps, sized to the curated world with headroom for live edits. Edge-point
+ * ids are stored in a uint8 (with 0xFF as the "none" sentinel), so the cap is 255.
+ * The 8x8 map's opening budget is tuned (tools/gen_map.c) to stay well under it. */
+#define N_EDGE_MAX        255
 #define EP_PER_SCREEN_MAX 70     /* one screen's perimeter: 2*GRID_W + 2*GRID_H */
 #define D2_INF            0xFFFFu /* unreachable in the edge-point graph */
 

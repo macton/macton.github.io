@@ -74,7 +74,7 @@
   .scrollbtn.sl { left: 8px; top: 50%; transform: translateY(-50%); }
   .scrollbtn.sr { right: 8px; top: 50%; transform: translateY(-50%); }
   /* #camlabel (the screen badge) now lives in #toolbar, styled by the toolbar rules */
-  /* screen picker overlay (a 4x4 map of the world) */
+  /* screen picker overlay (a 8x8 map of the world) */
   #picker { position: absolute; inset: 0; z-index: 3; display: none; grid-template-columns: repeat(4, 1fr);
             gap: 6px; padding: 44px; background: #0c0e12ee; align-content: center; }
   .mmcell { width: 100%; aspect-ratio: 20 / 15; image-rendering: pixelated; display: block;
@@ -134,8 +134,8 @@
   .pool { font-family: ui-monospace, monospace; font-size: 12px; background:#000; border-radius:6px; padding:8px 10px; }
   .pool .hd { color:#c7ccd4; } .pool .rowm { color: var(--dim); white-space: pre; }
 
-  /* minimap of the 4x4 world */
-  #w-minimap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-width: 220px; }
+  /* minimap of the 8x8 world */
+  #w-minimap { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; max-width: 340px; }
 
   /* render-only view controls (presentation, never touch the simulation) */
   #viewctl { max-width: 720px; margin: 8px auto 0; padding: 7px 11px; display: flex; flex-wrap: wrap;
@@ -151,7 +151,7 @@
   <header>
     <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 4</div>
     <h1>The View</h1>
-    <p class="sub">The same world, the same tanks, the same thousand mites — redrawn as a
+    <p class="sub">The same world, the same tanks, the same 4096 mites — redrawn as a
     <b>top-down perspective 3-D</b> scene. The simulation does not change by a single byte; only the
     picture does. The view is a projection you can replace wholesale.</p>
   </header>
@@ -183,7 +183,7 @@
   </div>
   <div id="status">loading…</div>
   <div id="help">
-    The main view is <b>top-down perspective 3-D</b> and shows the <b>whole 4×4 world</b> as one
+    The main view is <b>top-down perspective 3-D</b> and shows the <b>whole 8×8 world</b> as one
     connected map; the minimap below stays <b>flat top-down</b> — the same data drawn two ways. <b>Drag</b> to
     pan, <b>shift- or right-drag</b> (or a <b>two-finger drag</b>) to <b>orbit &amp; tilt</b>, <b>pinch</b> or
     <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b> sliders above are live;
@@ -207,8 +207,8 @@
   <article>
     <p>This is chapter four of an interactive book about
     <a href="https://github.com/macton/nagent/blob/master/context/data-oriented-design.md">data-oriented design</a>.
-    Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a 4×4 toroidal grid of
-    screens with self-routing tanks; chapter 3 added <strong>a thousand mites</strong> that gossip
+    Chapter 1 was two tanks on a grid of walls; chapter 2 grew the world to a toroidal grid of
+    screens with self-routing tanks; chapter 3 widened it to 8×8 and added <strong>thousands of mites</strong> that gossip
     and swarm. Chapter 4 changes <strong>nothing about the simulation</strong> and
     <strong>everything about the picture</strong>: the same world, redrawn in <strong>top-down
     perspective 3-D</strong>. As before, every structure below is <em>live</em> — it reads the running
@@ -245,12 +245,12 @@
     dragging to pan, shift- / right- / two-finger-dragging to orbit and tilt, pinching/scrolling to
     zoom, sliding <strong>pitch</strong> or <strong>fov</strong>, and following a tank are all just a
     different matrix: the camera is a uniform, not a rebuild — a fact the native test pins (the same view
-    rebuilds the identical bytes). The whole <strong>4×4 world is one connected map</strong>
-    (placements are world positions, so all sixteen screens sit in their natural layout); the free
+    rebuilds the identical bytes). The whole <strong>8×8 world is one connected map</strong>
+    (placements are world positions, so all sixty-four screens sit in their natural layout); the free
     camera shows any part, and the host hands the renderer the <strong>visible box</strong> (its
     four screen corners cast back onto the ground) so it emits only the cells and units in view —
-    the whole world when zoomed out, a handful of cells when zoomed in, never the 4800-cell world
-    or the 1000-strong pool wholesale. The minimap below is the same idea taken literally: the
+    the whole world when zoomed out, a handful of cells when zoomed in, never the 19200-cell world
+    or the 4096-strong pool wholesale. The minimap below is the same idea taken literally: the
     <strong>same sim data drawn two ways at once</strong> — perspective above, flat top-down here.</p>
     <p class="note">Clicking is unchanged from chapter 2 — tap a tank to cycle it, tap a cell to
     send the auto-path tank there — but the 3-D view makes it legible with <strong>render-only</strong>
@@ -259,7 +259,7 @@
     <strong>destination</strong> beacon, and the <strong>routed path</strong> drawn cell by cell
     from the same tables the tank follows. None of it touches the simulation.</p>
     <div class="fig">
-      <p class="cap">the 4×4 world, TOP-DOWN · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is where the camera looks · click a screen to jump there</p>
+      <p class="cap">the 8×8 world, TOP-DOWN · walls, tanks, live routes, and the whole swarm (dots) · the outlined screen is where the camera looks · click a screen to jump there</p>
       <div id="w-minimap"></div>
       <div id="w-stats" style="margin-top:10px"></div>
       <div id="w-controls" style="margin-top:8px"></div>
@@ -300,7 +300,7 @@
     The frequency-of-change spectrum is the whole story here — the <strong>assets load once</strong>,
     the world <strong>geometry rebuilds on a wall edit</strong> (rare), the <strong>projection runs
     every frame</strong> (constant), and the renderer <strong>scales with what is visible</strong>,
-    not with the 4800-cell world or the 1000-strong pool (it emits only the cells and units inside
+    not with the 19200-cell world or the 4096-strong pool (it emits only the cells and units inside
     the camera's visible box — everything when zoomed out, a few cells when zoomed in: the test pins
     both ends).</p>
 
@@ -369,11 +369,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.26-002330"></script>
+  <script src="version.js?v=2026.06.26-175739"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.26-002330");</script>
+  <script type="module">import("./app.js?v=2026.06.26-175739");</script>
 </body>
 </html>

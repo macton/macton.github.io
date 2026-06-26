@@ -37,8 +37,8 @@ clang \
   -fno-builtin \
   -Wall -Wextra \
   -Wl,--no-entry \
-  -Wl,--initial-memory=2097152 \
-  -Wl,--max-memory=2097152 \
+  -Wl,--initial-memory=8388608 \
+  -Wl,--max-memory=8388608 \
   -Wl,-z,stack-size=131072 \
   -Wl,--stack-first \
   -o game.wasm \

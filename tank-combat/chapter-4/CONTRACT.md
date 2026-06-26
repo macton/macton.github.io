@@ -18,13 +18,13 @@ model and the chapter has failed its own thesis.
   `tanks_path.c`, `agent_turn`/`agent_move`, `collide.c`, the path tables, the
   per-cell index, the gossip, the route fields, the RNG: unchanged.
 - **The chapter-3 sim/gossip/cap/combat/determinism tests pass unchanged** — same
-  checks, same counts (115 of them).
+  checks, same counts (127 of them).
 - A regression pins the contract: `scripted_run` runs a fixed seed + scripted inputs
   (auto-path + manual tanks, two wall edits, a mid-run re-seed) for `HASH_TICKS`
   ticks, and `sim_state_hash` folds the **whole** sim state — movement, routing,
   turrets, the FX ring, the swarm SoA + gossip records, the shared route fields, the
   RNG, the frame. The result must equal the golden literal `CH3_GOLDEN_HASH =
-  0xFB9DAC47`, captured by running the identical routine against chapter-3's sources.
+  0x5786043F`, captured by running the identical routine against chapter-3's sources.
 
 ## The projection (`view.h` + a host-built MVP)
 
@@ -68,15 +68,15 @@ model and the chapter has failed its own thesis.
   third dimension — reusing facing (`co/si`) and tint (`rgba`).
 - The **kind/mesh id is not a per-instance field** (the shader never reads it). It is
   the **draw grouping**: instances are emitted contiguously by kind, and the host
-  draws one range per kind. `INST_MAX` ≈ 6500 (the whole world in view).
-- **Render scales with visibility** (tested): the whole **4×4 world is one connected
-  map** (placements are world positions, all sixteen screens in their natural layout).
+  draws one range per kind. `INST_MAX` ≈ 24000 (the whole 8×8 world in view).
+- **Render scales with visibility** (tested): the whole **8×8 world is one connected
+  map** (placements are world positions, all sixty-four screens in their natural layout).
   A **free camera** — drag to pan, shift/right/two-finger-drag to orbit and tilt,
   pinch/scroll to zoom — shows any part; the host
   passes the **visible world-space box** and render emits only the cells and the
   tanks/mites/nests/FX inside it. Zoomed out, that is the whole world (one block per
   cell); zoomed in, it is a handful of cells and the few mites in view — never the
-  4800-cell world or the 1000-strong pool wholesale.
+  19200-cell world or the 4096-strong pool wholesale.
 
 ## Interaction overlays (render-only)
 

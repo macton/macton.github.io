@@ -17,8 +17,8 @@ uploaded once at startup.
 | mesh (`mesh_data.h`) | geometry | bound to kind | used for |
 |---|---|---|---|
 | `M_CUBE`    | unit box | every kind (placeholder pass) + `K_FLOOR`, `K_WALL`, `K_BARREL` (asset pass) | floors (thin slab), walls (full cube), barrels, and the placeholder for all kinds |
-| `M_PYLON`   | tapered tower (frustum) | `K_NEST` | the 15 nest markers |
-| `M_PYRAMID` | square pyramid | `K_MITE` | the thousand mites (a little spike) |
+| `M_PYLON`   | tapered tower (frustum) | `K_NEST` | the 63 nest markers |
+| `M_PYRAMID` | square pyramid | `K_MITE` | the 4096 mites (a little spike) |
 | `M_HULL`    | tapered box | `K_HULL` | tank bodies (oriented by `tank_ang`) |
 | `M_TURRET`  | tapered dome (frustum) | `K_TURRET` | tank turrets (oriented by `tank_turret`) |
 

@@ -1,8 +1,8 @@
 # Tank Combat — Chapter 4: The View (top-down perspective)
 
 Chapter 4 of *Data-Oriented Design, by picture* (the book index is one level up). It
-takes [chapter 3](../chapter-3/)'s world — the 4×4 toroidal grid, the four self-routing
-tanks, the thousand gossiping mites, the combat — and **redraws it in top-down perspective 3-D**,
+takes [chapter 3](../chapter-3/)'s world — the 8×8 toroidal grid, the four self-routing
+tanks, the 4096 gossiping mites, the combat — and **redraws it in top-down perspective 3-D**,
 changing **nothing about the simulation**. The same seed and inputs produce the same
 play, down to a byte: the chapter's whole point is that a clean **one-way
 sim/render dependency** lets you replace the *view* wholesale while the *model* sits
@@ -39,7 +39,7 @@ zoom — and while following, those adjust the follow rather than dropping it.
 ## The thesis, stated as a test
 
 For a fixed seed + scripted inputs run for *K* ticks, the **full sim state-hash equals
-chapter 3's** — golden value `0xFB9DAC47`, captured from chapter-3's own sources and
+chapter 3's** — golden value `0x5786043F`, captured from chapter-3's own sources and
 pinned in `test.c`. Every chapter-3 sim test still passes unchanged. That is the
 contract; see [`CONTRACT.md`](CONTRACT.md).
 
@@ -90,13 +90,13 @@ flips between the two passes live. See [`ASSETS.md`](ASSETS.md).
 
 ### The connected world & the instance layout (`render.h`)
 
-The whole **4×4 world is one connected map**: placements are world positions (anchor =
-the world origin), so all sixteen screens sit in their natural layout. A **free camera**
+The whole **8×8 world is one connected map**: placements are world positions (anchor =
+the world origin), so all sixty-four screens sit in their natural layout. A **free camera**
 — drag to pan, shift/right/two-finger-drag to orbit and tilt, pinch or scroll to zoom —
 shows any part; the host hands the renderer the
 **visible box** and it emits only the cells and units inside it, so render still **scales
 with visibility**: the whole world when zoomed out, a handful of cells when zoomed in,
-never the 4800-cell world or the 1000-strong pool wholesale.
+never the 19200-cell world or the 4096-strong pool wholesale.
 
 Chapter 3's instance was a 16-byte 2-D quad `{cx,cy, hx,hy, co,si, rgba}`. Chapter 4's
 is a 20-byte 3-D box `{wx,wy, wz,hz, hx,hy, co,si, rgba}` — exactly **+wz +hz**,
@@ -137,16 +137,17 @@ app.js           the perspective WebGPU renderer (2 pipelines, depth, mesh bind,
 
 The **sim** memory is inherited from chapter 3 unchanged. New **render** memory:
 
-- **instance buffer** — 20-byte 3-D `Inst` × `INST_MAX` (~6500) ≈ **130 KB** (worst
-  case: the whole world in view — every cell, the whole swarm, tanks, FX, and the
-  overlays; the free camera culls to far fewer when zoomed in).
+- **instance buffer** — 20-byte 3-D `Inst` × `INST_MAX` (~24000) ≈ **480 KB** (worst
+  case: the whole 8×8 world in view — every cell, the whole 4096-strong swarm, tanks,
+  FX, and the overlays; the free camera culls to far fewer when zoomed in).
 - **baked meshes** — `src/mesh_data.c`, 162 vertices × 8 bytes ≈ **1.3 KB**, loaded
   once.
 - the **depth buffer** is a viewport-sized GPU texture (`depth24plus`), **not** wasm
   linear memory.
 
-The wasm high-water mark is unchanged from chapter 3 (~1.04 MiB), so the linear memory
-stays **2 MiB** (32 pages). Still all static, integer, allocation-free.
+The 8×8 world (4096 mites, 19200 cells) inherits chapter 3's larger footprint, so the
+linear memory is **8 MiB** (128 pages) — chapter 3's budget plus the instance buffer.
+Still all static, integer, allocation-free.
 
 ## Build
 
@@ -166,10 +167,10 @@ linear (uniform) camera, and the emit-for-visible bound. `render.c` is plain C o
 ## Verified
 
 - Chapter 4 builds freestanding to wasm and natively; `test.sh` passes all 134 checks.
-- The sim state-hash after the scripted run equals chapter 3's golden `0xFB9DAC47`.
+- The sim state-hash after the scripted run equals chapter 3's golden `0x5786043F`.
 - The first pass renders from primitives only (the unit cube); the second pass swaps in
   baked low-poly meshes via the kind→mesh table; neither pass touches the sim.
-- The page shows the world, the tanks, and the thousand mites in top-down perspective 3-D,
+- The page shows the world, the tanks, and the 4096 mites in top-down perspective 3-D,
   depth-correct and flat-shaded, with the top-down minimap beside it and the chapter-3
   debug widgets live in context.
 

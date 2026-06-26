@@ -888,11 +888,11 @@ static void t_tanks_fire(void) {
 /* The chapter's CONTRACT, pinned as a literal: a fixed seed + scripted inputs run
  * for K ticks must produce the SAME full sim state as chapter 3. The sim sources are
  * kept byte-identical to chapter 3 (re-synced as chapter 3 gained the piercing-bolt
- * combat, mite flocking, multi-bolt + wall sparks, and the finer turret), so this hash
- * is exactly what chapter 3's sources produce. If it ever moves, presentation leaked
- * into the model and the chapter has failed its own thesis. */
+ * combat, mite flocking, multi-bolt + wall sparks, the finer turret, and the 8x8 world
+ * of 4096 mites), so this hash is exactly what chapter 3's sources produce. If it ever
+ * moves, presentation leaked into the model and the chapter has failed its own thesis. */
 #define HASH_TICKS        1500
-#define CH3_GOLDEN_HASH   0xFBBBD266u
+#define CH3_GOLDEN_HASH   0x5786043Fu
 
 /* fold the WHOLE deterministic sim state — movement, routing, turrets, the FX ring,
  * the swarm SoA + gossip records, the shared route fields, the RNG, the frame. */

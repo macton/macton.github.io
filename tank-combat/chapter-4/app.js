@@ -552,6 +552,7 @@ function buildTouchPad(map) {
 // red, homing = the nest's colour, wandering = teal); click a screen to view it.
 function makeMiniMap(container, onPick, R) {
   const { wasm, view, C } = R;
+  container.style.gridTemplateColumns = `repeat(${C.SX}, 1fr)`;   // the world's screen layout (8x8)
   const BODY = [[242,158,41],[77,179,230],[120,205,120],[196,140,235]];
   const BG = [22,24,30], WALL = [70,75,90], MITE = [96,150,138], MITE_HUNT = [224,110,80], NESTB = [255,245,210];
   const canvases = [], ctxs = [], imgs = [];
