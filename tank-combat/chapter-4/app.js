@@ -104,7 +104,8 @@ const STATE = ["unselected", "auto-path", "manual"];
 const STATUS = ["idle", "routing", "arrived", "no path"];
 const MODE = ["wander", "hunt", "home"];
 // nest colours, a hue wheel, one per screen but (0,0) (match COL_NEST in render.c)
-const NESTC = [[230,146,110],[230,194,110],[218,230,110],[170,230,110],[122,230,110],[110,230,146],[110,230,194],[110,218,230],[110,170,230],[110,122,230],[146,110,230],[194,110,230],[230,110,218],[230,110,170],[230,110,122]];
+// one distinct tint per nest (NEST_COUNT on the 8x8 map); a full hue wheel, matches COL_NEST in render.c
+const NESTC = [[230,146,110],[230,157,110],[230,169,110],[230,180,110],[230,192,110],[230,203,110],[230,215,110],[230,226,110],[223,230,110],[211,230,110],[200,230,110],[188,230,110],[177,230,110],[165,230,110],[154,230,110],[143,230,110],[131,230,110],[120,230,110],[110,230,112],[110,230,123],[110,230,135],[110,230,146],[110,230,157],[110,230,169],[110,230,180],[110,230,192],[110,230,203],[110,230,215],[110,230,226],[110,223,230],[110,211,230],[110,200,230],[110,188,230],[110,177,230],[110,165,230],[110,154,230],[110,143,230],[110,131,230],[110,120,230],[112,110,230],[123,110,230],[135,110,230],[146,110,230],[157,110,230],[169,110,230],[180,110,230],[192,110,230],[203,110,230],[215,110,230],[226,110,230],[230,110,223],[230,110,211],[230,110,200],[230,110,188],[230,110,177],[230,110,165],[230,110,154],[230,110,143],[230,110,131],[230,110,120],[230,112,110],[230,123,110],[230,135,110]];
 
 async function main() {
   const VERSION = (typeof window !== "undefined" && window.TANK_VERSION) || "dev";
@@ -263,7 +264,12 @@ async function main() {
     const topA = Math.max(3 * DEG, (HALF_PI - pitch) - fov / 2);
     const far = (dist * cp) / Math.sin(topA) + dist + (C.BW + C.BH);
     const proj = m4perspective(fov, canvas.width / canvas.height, Math.max(0.5, dist * 0.05), far);
-    const mvp = m4mul(m4mul(proj, view), m4scale(1 / C.SUB));   // subcells -> clip
+    // The sim grid is y-DOWN (+y = south), so a plain north-up perspective camera would
+    // mirror east/west versus the flat minimap. Reflect clip-x to put east on the right,
+    // matching the minimap. (Pipelines cull nothing, so the flipped winding is harmless;
+    // the inverse below stays consistent, so pick/pan/hover need no special-casing.)
+    const flipX = [-1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1];
+    const mvp = m4mul(flipX, m4mul(m4mul(proj, view), m4scale(1 / C.SUB)));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
   }
@@ -337,7 +343,8 @@ async function main() {
   // tilts pitch (drag up = more oblique / more 3-D, drag down = flatter / more overhead).
   // Render-only, exactly like pan and zoom — it only rebuilds the MVP uniform.
   function rotateBy(dx, dy) {
-    yaw += dx * 0.005;
+    yaw -= dx * 0.005;          // clip-x is reflected (east on the right), so negate to keep
+                                // drag-right swinging the view the natural way
     pitch = clampPitch(pitch - dy * 0.005);
     const pd = (pitch / DEG).toFixed(0);
     if (pR) pR.value = pd; if (pV) pV.textContent = pd + "°";

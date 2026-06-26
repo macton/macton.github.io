@@ -41,12 +41,25 @@ static const uint32_t COL_HOVER    = RGBA(255, 255, 255, 140);   /* translucent 
 static const uint32_t COL_MITE_IDLE      = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT  = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD = RGBA(150,  64,  74, 255);
-/* the nests (one per screen but the tank start), a hue wheel (matches NESTC in app.js) */
+/* the nests (NEST_COUNT of them on the 8x8 map), a full hue wheel — one distinct tint per
+ * nest (matches NESTC in app.js). S=(230-110)/230, V=230/255, hues evenly spaced. */
 static const uint32_t COL_NEST[NEST_COUNT] = {
-  RGBA(230, 146, 110, 255), RGBA(230, 194, 110, 255), RGBA(218, 230, 110, 255), RGBA(170, 230, 110, 255),
-  RGBA(122, 230, 110, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 194, 255), RGBA(110, 218, 230, 255),
-  RGBA(110, 170, 230, 255), RGBA(110, 122, 230, 255), RGBA(146, 110, 230, 255), RGBA(194, 110, 230, 255),
-  RGBA(230, 110, 218, 255), RGBA(230, 110, 170, 255), RGBA(230, 110, 122, 255) };
+  RGBA(230, 146, 110, 255), RGBA(230, 157, 110, 255), RGBA(230, 169, 110, 255), RGBA(230, 180, 110, 255),
+  RGBA(230, 192, 110, 255), RGBA(230, 203, 110, 255), RGBA(230, 215, 110, 255), RGBA(230, 226, 110, 255),
+  RGBA(223, 230, 110, 255), RGBA(211, 230, 110, 255), RGBA(200, 230, 110, 255), RGBA(188, 230, 110, 255),
+  RGBA(177, 230, 110, 255), RGBA(165, 230, 110, 255), RGBA(154, 230, 110, 255), RGBA(143, 230, 110, 255),
+  RGBA(131, 230, 110, 255), RGBA(120, 230, 110, 255), RGBA(110, 230, 112, 255), RGBA(110, 230, 123, 255),
+  RGBA(110, 230, 135, 255), RGBA(110, 230, 146, 255), RGBA(110, 230, 157, 255), RGBA(110, 230, 169, 255),
+  RGBA(110, 230, 180, 255), RGBA(110, 230, 192, 255), RGBA(110, 230, 203, 255), RGBA(110, 230, 215, 255),
+  RGBA(110, 230, 226, 255), RGBA(110, 223, 230, 255), RGBA(110, 211, 230, 255), RGBA(110, 200, 230, 255),
+  RGBA(110, 188, 230, 255), RGBA(110, 177, 230, 255), RGBA(110, 165, 230, 255), RGBA(110, 154, 230, 255),
+  RGBA(110, 143, 230, 255), RGBA(110, 131, 230, 255), RGBA(110, 120, 230, 255), RGBA(112, 110, 230, 255),
+  RGBA(123, 110, 230, 255), RGBA(135, 110, 230, 255), RGBA(146, 110, 230, 255), RGBA(157, 110, 230, 255),
+  RGBA(169, 110, 230, 255), RGBA(180, 110, 230, 255), RGBA(192, 110, 230, 255), RGBA(203, 110, 230, 255),
+  RGBA(215, 110, 230, 255), RGBA(226, 110, 230, 255), RGBA(230, 110, 223, 255), RGBA(230, 110, 211, 255),
+  RGBA(230, 110, 200, 255), RGBA(230, 110, 188, 255), RGBA(230, 110, 177, 255), RGBA(230, 110, 165, 255),
+  RGBA(230, 110, 154, 255), RGBA(230, 110, 143, 255), RGBA(230, 110, 131, 255), RGBA(230, 110, 120, 255),
+  RGBA(230, 112, 110, 255), RGBA(230, 123, 110, 255), RGBA(230, 135, 110, 255) };
 static const uint32_t COL_BOLT_GLOW = RGBA(255,  96,  64, 170);   /* the bolt's hot trailing streak */
 static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright leading head */
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */

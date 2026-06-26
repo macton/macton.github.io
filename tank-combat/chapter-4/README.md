@@ -159,12 +159,12 @@ GitHub Pages serves it with no build step.
 
 ## Testing
 
-`./test.sh` builds natively (no wasm, no GPU) and runs **147 checks**: every chapter-3
-sim test unchanged (127), then the chapter-4 render tests (20) — the
+`./test.sh` builds natively (no wasm, no GPU) and runs **148 checks**: every chapter-3
+sim test unchanged (127), then the chapter-4 render tests (21) — the
 sim-hash-equals-chapter-3 thesis, the translucent depth key, the host-uniform camera, the
-linear (uniform) camera, the emit-for-visible bound, and that every emitted placement
-keeps its true (un-truncated) world coordinate. `render.c` is plain C over the
-`World`, so it is exercised on the host with no browser.
+linear (uniform) camera, the emit-for-visible bound, that every emitted placement keeps
+its true (un-truncated) world coordinate, and that every nest gets a colour. `render.c`
+is plain C over the `World`, so it is exercised on the host with no browser.
 
 ## Verified
 

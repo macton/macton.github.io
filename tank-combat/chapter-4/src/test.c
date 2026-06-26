@@ -1010,6 +1010,14 @@ static void t_render_visibility(void) {
         g_a[i].wy < -SUB || g_a[i].wy > ARENA_H_SUB + SUB) { coords_sane = 0; break; }
   check(coords_sane, "every emitted placement keeps its true world coordinate (no int16 wrap)");
 
+  /* Regression: COL_NEST must cover ALL NEST_COUNT nests (63 on the 8x8 map). A short
+   * table left the later nests transparent-black. Every emitted nest must carry colour. */
+  uint32_t nest0 = dw.opaque[K_FLOOR] + dw.opaque[K_WALL];
+  int nests_coloured = (dw.opaque[K_NEST] == (uint32_t)NEST_COUNT);
+  for (uint32_t i = nest0; i < nest0 + dw.opaque[K_NEST]; i++)
+    if ((g_a[i].rgba & 0x00FFFFFFu) == 0) nests_coloured = 0;
+  check(nests_coloured, "every nest gets a colour (COL_NEST covers all NEST_COUNT)");
+
   DrawList dz; build_view(&W, g_b, &dz, 0, 0, GRID_W * SUB - 1, GRID_H * SUB - 1, REC_EMPTY); /* one screen */
   uint32_t terrainZ = dz.opaque[K_FLOOR] + dz.opaque[K_WALL];
   check(terrainZ > 0 && terrainZ < N_WORLD_CELLS, "zoomed in, terrain is culled to the visible cells");
