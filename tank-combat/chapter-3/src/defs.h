@@ -127,8 +127,8 @@ static inline uint32_t nest_of(uint32_t mite) { return mite % NEST_COUNT; }
 
 /* a struck wall jolts briefly: a small ring of (cell, timer), cosmetic like the burst ring. */
 #define WALL_SHAKE_MAX  32      /* max wall segments shaking at once */
-#define WALL_SHAKE_DUR  6       /* ticks a struck wall shakes */
-#define WALL_SHAKE_AMP  12      /* peak shake offset in subcells (slight) */
+#define WALL_SHAKE_DUR  12      /* ticks a struck wall shakes */
+#define WALL_SHAKE_AMP  24      /* peak shake offset in subcells */
 
 /* tank/mite input bitfield (shared: both flow through agent_turn/agent_move) */
 #define IN_FWD   1u
