@@ -63,9 +63,10 @@ model and the chapter has failed its own thesis.
 
 ## Instances & visibility (`render.h`)
 
-- One instance is a **box**, 20 bytes, all integer: `int16 wx,wy,wz,hz,hx,hy,co,si` +
-  `uint32 rgba`. Growth from chapter 3's 16-byte quad is exactly **+wz +hz** — the
-  third dimension — reusing facing (`co/si`) and tint (`rgba`).
+- One instance is a **box**, 24 bytes, all integer: `int32 wx,wy` + `int16 wz,hz,hx,hy,co,si`
+  + `uint32 rgba`. `wx,wy` are **int32** because the 8×8 arena reaches 40960 subcells,
+  past int16. Growth from chapter 3's 16-byte quad is the third dimension (**+wz +hz**)
+  plus the widened coordinates, reusing facing (`co/si`) and tint (`rgba`).
 - The **kind/mesh id is not a per-instance field** (the shader never reads it). It is
   the **draw grouping**: instances are emitted contiguously by kind, and the host
   draws one range per kind. `INST_MAX` ≈ 24000 (the whole 8×8 world in view).

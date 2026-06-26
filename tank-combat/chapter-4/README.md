@@ -99,7 +99,8 @@ with visibility**: the whole world when zoomed out, a handful of cells when zoom
 never the 19200-cell world or the 4096-strong pool wholesale.
 
 Chapter 3's instance was a 16-byte 2-D quad `{cx,cy, hx,hy, co,si, rgba}`. Chapter 4's
-is a 20-byte 3-D box `{wx,wy, wz,hz, hx,hy, co,si, rgba}` — exactly **+wz +hz**,
+is a 24-byte 3-D box `{wx,wy(int32), wz,hz, hx,hy, co,si, rgba}` — the third dimension
+(**+wz +hz**) plus **int32 `wx,wy`** (the 8×8 arena reaches 40960 subcells, past int16),
 reusing facing and tint. The **kind/mesh id is not stored per instance** (nothing in
 the shader reads it); it lives in the **draw grouping** — instances are emitted
 contiguously by kind, the host draws one range per kind.
@@ -119,7 +120,7 @@ A tap selects/sends, a drag pans, two fingers (or the wheel) zoom.
 ```
 src/
   view.h         NEW  the translucent depth key (the projection is a host-side perspective MVP)
-  render.h       the instance layout (20-byte 3-D box), the kinds, the DrawList
+  render.h       the instance layout (24-byte 3-D box), the kinds, the DrawList
   render.c       reads the World, emits 3-D placements grouped by kind (no sim writes)
   mesh_data.h    NEW  the baked-mesh table interface (M_CUBE, M_PYLON, ...)
   mesh_data.c    GENERATED  the baked low-poly vertex buffers (tools/gen_meshes.c)
@@ -137,7 +138,7 @@ app.js           the perspective WebGPU renderer (2 pipelines, depth, mesh bind,
 
 The **sim** memory is inherited from chapter 3 unchanged. New **render** memory:
 
-- **instance buffer** — 20-byte 3-D `Inst` × `INST_MAX` (~24000) ≈ **480 KB** (worst
+- **instance buffer** — 24-byte 3-D `Inst` × `INST_MAX` (~24000) ≈ **576 KB** (worst
   case: the whole 8×8 world in view — every cell, the whole 4096-strong swarm, tanks,
   FX, and the overlays; the free camera culls to far fewer when zoomed in).
 - **baked meshes** — `src/mesh_data.c`, 162 vertices × 8 bytes ≈ **1.3 KB**, loaded

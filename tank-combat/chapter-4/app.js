@@ -131,7 +131,7 @@ async function main() {
   const mem = () => wasm.memory.buffer;
   const view = {
     grid: () => new Uint32Array(mem(), wasm.grid_ptr(), C.NS * C.GH),
-    xy:   () => new Int16Array(mem(), wasm.tank_xy_ptr(), C.NT * 2),
+    xy:   () => new Uint16Array(mem(), wasm.tank_xy_ptr(), C.NT * 2),  // positions are unsigned (8x8 arena > int16)
     ang:  () => new Uint16Array(mem(), wasm.tank_angle_ptr(), C.NT),
     tstate: () => new Uint8Array(mem(), wasm.tstate_ptr(), C.NT),
     pdScreen: () => new Uint8Array(mem(), wasm.pdest_screen_ptr(), C.NT),
@@ -139,7 +139,7 @@ async function main() {
     phas:     () => new Uint8Array(mem(), wasm.phas_ptr(), C.NT),
     pstatus:  () => new Uint8Array(mem(), wasm.pstatus_ptr(), C.NT),
     // the swarm
-    mxy:   () => new Int16Array(mem(), wasm.mite_xy_ptr(), C.NM * 2),
+    mxy:   () => new Uint16Array(mem(), wasm.mite_xy_ptr(), C.NM * 2),  // positions are unsigned (8x8 arena > int16)
     mang:  () => new Uint16Array(mem(), wasm.mite_angle_ptr(), C.NM),
     mmode: () => new Uint8Array(mem(), wasm.mite_mode_ptr(), C.NM),
     mdest: () => new Uint16Array(mem(), wasm.mite_dest_ptr(), C.NM),
@@ -179,9 +179,9 @@ async function main() {
     { arrayStride: C.MVSTRIDE, stepMode: "vertex", attributes: [
       { shaderLocation: 0, offset: 0, format: "snorm8x4" }, { shaderLocation: 1, offset: 4, format: "snorm8x4" } ] },
     { arrayStride: C.STRIDE, stepMode: "instance", attributes: [
-      { shaderLocation: 2, offset: 0, format: "sint16x2" }, { shaderLocation: 3, offset: 4, format: "sint16x2" },
-      { shaderLocation: 4, offset: 8, format: "sint16x2" }, { shaderLocation: 5, offset: 12, format: "sint16x2" },
-      { shaderLocation: 6, offset: 16, format: "unorm8x4" } ] },
+      { shaderLocation: 2, offset: 0, format: "sint32x2" }, { shaderLocation: 3, offset: 8, format: "sint16x2" },
+      { shaderLocation: 4, offset: 12, format: "sint16x2" }, { shaderLocation: 5, offset: 16, format: "sint16x2" },
+      { shaderLocation: 6, offset: 20, format: "unorm8x4" } ] },
   ];
   // opaque pass: z-buffered, flat-shaded. translucent FX pass: depth-tested but not
   // written, alpha-blended (render.c already painter-sorted the range).

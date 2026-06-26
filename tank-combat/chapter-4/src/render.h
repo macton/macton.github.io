@@ -9,22 +9,23 @@
  * shader projects them, so the camera stays a uniform, not a rebuild.
  *
  * One instance is a box: a centre, a half-extent, a facing (rotation about the
- * vertical axis), and a tint. 20 bytes, all integer, GPU-native layout:
- *   int16  wx, wy   (subcells)   off 0   box centre, camera-local x/y
- *   int16  wz, hz   (subcells)   off 4   centre height + half-height
- *   int16  hx, hy   (subcells)   off 8   half-extent x/y
- *   int16  co, si   (Q14)        off 12  facing (cos, sin)
- *   uint32 rgba                  off 16  tint, packed RGBA8888
- * Growth from chapter 3's 16-byte 2-D quad is exactly +wz +hz — the third
- * dimension — reusing co/si (facing) and rgba (tint). The "kind/mesh id" is NOT a
+ * vertical axis), and a tint. 24 bytes, all integer, GPU-native layout:
+ *   int32  wx, wy   (subcells)   off 0   box centre x/y — int32 because the 8x8
+ *                                        arena reaches 40960 subcells, past int16
+ *   int16  wz, hz   (subcells)   off 8   centre height + half-height
+ *   int16  hx, hy   (subcells)   off 12  half-extent x/y
+ *   int16  co, si   (Q14)        off 16  facing (cos, sin)
+ *   uint32 rgba                  off 20  tint, packed RGBA8888
+ * Growth from chapter 3's 16-byte 2-D quad is the third dimension (+wz +hz) plus the
+ * int32 world coordinates, reusing co/si (facing) and rgba (tint). The "kind/mesh id" is NOT a
  * per-instance field: nothing in the shader reads it (the mesh is bound per draw),
  * so storing it per instance would be dead weight. It lives instead in the DRAW
  * GROUPING below — instances are emitted contiguously by kind and the host draws
  * one range per kind, binding that kind's mesh (placeholder cube, or a baked
  * low-poly mesh in the asset pass). Same instances, different mesh: late-bound art.
  *
- * The whole 4x4 world is one connected map: placements are WORLD positions (anchor =
- * the world origin), so all sixteen screens sit in their natural layout and the host
+ * The whole 8x8 world is one connected map: placements are WORLD positions (anchor =
+ * the world origin), so all sixty-four screens sit in their natural layout and the host
  * camera (free pan + zoom) shows whatever part. The view is rebuilt every frame (the
  * camera, the swarm, and the FX all move), but only for what the camera SHOWS — the
  * cells and the tanks/mites/nests/FX inside the visible world-space box the host
@@ -41,7 +42,7 @@
 
 #include "sim.h"
 
-typedef struct { int16_t wx, wy, wz, hz, hx, hy, co, si; uint32_t rgba; } Inst;
+typedef struct { int32_t wx, wy; int16_t wz, hz, hx, hy, co, si; uint32_t rgba; } Inst;
 
 /* mesh kinds — the slot a draw call binds its mesh by. The opaque kinds emit
  * first, in this order, each as a contiguous instance range (z-buffered, flat
