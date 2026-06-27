@@ -304,3 +304,64 @@ uint32_t build_view(const World* w, Inst* out, DrawList* dl,
   sort_translucent(out + opaque_end, dl->translucent);
   return k;
 }
+
+/* ---- the deferred point lights (one per mite / per FX) ------------------------------
+ * A light is an Inst used as a light VOLUME: a cube of half-extent = radius centred on the
+ * light, rgba = colour, ALPHA = intensity (the shader scales it up into HDR). The host draws
+ * the volume additively and reads the G-buffer inside it, so each light pays only for the
+ * pixels it covers. Radii in subcells; SUB = 256 = one cell. */
+#define MITE_LIGHT_R   300         /* a faint ~1-cell glow under each mite */
+#define BURST_LIGHT_R  720         /* an explosion floods a few cells */
+#define BOLT_LIGHT_R   340         /* the bolt's travelling hot point */
+
+static uint32_t push_light(Inst* out, uint32_t k, int cx, int cy, int cz, int radius, uint32_t rgba) {
+  if (k >= LIGHT_MAX) return k;
+  Inst* o = &out[k];
+  o->wx = (int32_t)cx; o->wy = (int32_t)cy; o->wz = (int16_t)cz; o->hz = (int16_t)radius;
+  o->hx = (int16_t)radius; o->hy = (int16_t)radius; o->co = 16384; o->si = 0; o->rgba = rgba;   /* axis-aligned cube */
+  return k + 1;
+}
+/* pack a colour's RGB with an intensity into the alpha byte (the light shader reads a as the
+ * HDR intensity scale, so a bright FX can push the lit pixel well past 1.0). */
+static uint32_t light_rgba(uint32_t col, int intensity) {
+  if (intensity < 0) intensity = 0; if (intensity > 255) intensity = 255;
+  return (col & 0x00FFFFFFu) | ((uint32_t)intensity << 24);
+}
+
+uint32_t build_lights(const World* w, Inst* out, int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy1) {
+  Box b;                                           /* the visible box, grown + clamped (as build_view) */
+  b.x0 = wx0 - VIS_MARGIN; if (b.x0 < 0) b.x0 = 0;
+  b.y0 = wy0 - VIS_MARGIN; if (b.y0 < 0) b.y0 = 0;
+  b.x1 = wx1 + VIS_MARGIN; if (b.x1 > ARENA_W_SUB - 1) b.x1 = ARENA_W_SUB - 1;
+  b.y1 = wy1 + VIS_MARGIN; if (b.y1 > ARENA_H_SUB - 1) b.y1 = ARENA_H_SUB - 1;
+
+  uint32_t k = 0;
+  /* a faint light per visible mite, in its CURRENT role colour — hunters burn a little hotter */
+  for (uint32_t m = 0; m < N_MITES; m++) {
+    if (w->mite_resp[m]) continue;                                 /* dead mites cast no light */
+    int px = xy_lo(w->mite_xy[m]), py = xy_hi(w->mite_xy[m]);
+    if (!in_box(&b, px, py)) continue;
+    uint8_t mode = w->mite_mode[m];
+    int inten = mode == MM_HUNT ? 72 : mode == MM_HOME ? 56 : 38;
+    k = push_light(out, k, px, py, FLOOR_H + MITE_H / 2, MITE_LIGHT_R, light_rgba(mite_colour(w, m), inten));
+  }
+  /* a bright, fading light per visible burst (a mite popping / a bolt striking a wall) */
+  for (uint32_t i = 0; i < N_FX; i++) {
+    if (!w->fx_t[i]) continue;
+    int px = xy_lo(w->fx_xy[i]), py = xy_hi(w->fx_xy[i]);
+    if (!in_box(&b, px, py)) continue;
+    int n = FX_DURATION > 1 ? FX_DURATION - 1 : 1, age = FX_DURATION - (int)w->fx_t[i];   /* 0 fresh .. n old */
+    int inten = 235 - age * 215 / n;                                /* a hot flash that decays */
+    uint32_t col = w->fx_kind[i] == FX_IMPACT ? RGBA(255, 150, 60, 0) : RGBA(255, 226, 150, 0);
+    k = push_light(out, k, px, py, FLOOR_H + 48, BURST_LIGHT_R, light_rgba(col, inten));
+  }
+  /* a travelling hot point light per bolt in flight (only the part beyond the barrel tip) */
+  for (uint32_t bb = 0; bb < N_TANKS * PROJ_MAX; bb++) {
+    if (!w->tank_proj_live[bb]) continue;
+    if ((int)w->tank_proj_dist[bb] - (87 + 56) <= 0) continue;
+    int bx = xy_lo(w->tank_proj_xy[bb]), by = xy_hi(w->tank_proj_xy[bb]);
+    if (!in_box(&b, bx, by)) continue;
+    k = push_light(out, k, bx, by, FLOOR_H + HULL_H, BOLT_LIGHT_R, light_rgba(RGBA(255, 120, 70, 0), 150));
+  }
+  return k;
+}

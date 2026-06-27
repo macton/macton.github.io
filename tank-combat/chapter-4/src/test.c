@@ -1111,6 +1111,32 @@ static void t_render_overlays(void) {
   check(n <= INST_MAX, "with overlays the instance count still fits the cap");
 }
 
+/* the deferred point lights: a light VOLUME per visible mite + FX, built each frame, culled
+ * to the visible box — so the host draws only the lights it can see, additively. */
+static void t_lights(void) {
+  printf("the deferred point lights track the swarm + FX (one volume per visible mite / effect):\n");
+  sim_init(&W);
+  for (int i = 0; i < 60; i++) sim_tick(&W);
+  uint32_t nL = build_lights(&W, g_a, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1);   /* whole world in view */
+  check(nL > 0 && nL <= (uint32_t)LIGHT_MAX, "lights are emitted and fit the cap");
+  uint32_t alive = 0; for (uint32_t m = 0; m < N_MITES; m++) if (!W.mite_resp[m]) alive++;
+  check(nL >= alive, "at least one light per alive mite (the whole swarm in view)");
+
+  int shape = 1, lit = 1;
+  for (uint32_t i = 0; i < nL; i++) {
+    if (g_a[i].hx <= 0 || g_a[i].hy <= 0 || g_a[i].hz <= 0) shape = 0;            /* a positive-radius volume */
+    if (g_a[i].wx < 0 || g_a[i].wx >= ARENA_W_SUB || g_a[i].wy < 0 || g_a[i].wy >= ARENA_H_SUB) shape = 0;
+    if ((g_a[i].rgba >> 24) == 0) lit = 0;                                        /* intensity packed in alpha */
+  }
+  check(shape, "every light is a positive-radius volume at a valid world position");
+  check(lit, "every light carries an intensity (packed in alpha)");
+
+  uint32_t nZ = build_lights(&W, g_b, 0, 0, GRID_W * SUB - 1, GRID_H * SUB - 1);  /* one screen */
+  check(nZ <= nL, "zoomed in emits no more lights than the whole world (culled to the box)");
+  uint32_t nL2 = build_lights(&W, g_b, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1);
+  check(nL2 == nL && memcmp(g_b, g_a, nL * sizeof(Inst)) == 0, "build_lights is a pure function of the world");
+}
+
 int main(void) {
   t_level1();
   t_byte_fit();
@@ -1135,6 +1161,7 @@ int main(void) {
   t_render_visibility();
   t_static_map();
   t_render_overlays();
+  t_lights();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;
 }

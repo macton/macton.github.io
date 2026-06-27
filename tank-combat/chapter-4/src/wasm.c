@@ -31,6 +31,9 @@ static World    g_world;
 static Inst     g_inst[INST_MAX];
 static DrawList g_dl;
 static uint32_t g_inst_count;
+/* the deferred point lights (one per visible mite / FX), rebuilt every frame with the view */
+static Inst     g_lights[LIGHT_MAX];
+static uint32_t g_light_count;
 /* the visible world-space box (subcells) + the cursor cell — all render-only. The
  * host owns the free pan/zoom camera and passes the box it can see; the wasm just
  * builds it. Defaults to the whole world. */
@@ -48,6 +51,7 @@ static uint32_t  g_static_inst_count, g_static_run_count, g_static_version;
 
 static void rebuild(void) {
   g_inst_count = build_view(&g_world, g_inst, &g_dl, g_wx0, g_wy0, g_wx1, g_wy1, g_hover);
+  g_light_count = build_lights(&g_world, g_lights, g_wx0, g_wy0, g_wx1, g_wy1);
 }
 static void rebuild_static(void) {
   g_static_inst_count = build_static_map(g_world.grid, g_world.nest_cell,
@@ -163,6 +167,11 @@ EXPORT(selected)    uint32_t selected(void)    { return g_world.selected; }
 EXPORT(inst_count)  uint32_t inst_count(void)  { return g_inst_count; }
 EXPORT(inst_max)    uint32_t inst_max(void)    { return INST_MAX; }
 EXPORT(inst_stride) uint32_t inst_stride(void) { return (uint32_t)sizeof(Inst); }
+/* the deferred point lights — same Inst layout (a light volume: centre + radius + colour),
+ * rebuilt each frame; the host uploads light_count of them and draws them additively. */
+EXPORT(light_ptr)   Inst*    light_ptr(void)    { return g_lights; }
+EXPORT(light_count) uint32_t light_count(void)  { return g_light_count; }
+EXPORT(light_max)   uint32_t light_max(void)    { return LIGHT_MAX; }
 EXPORT(frame)       uint32_t frame(void)       { return g_world.frame; }
 
 /* ---- chapter-4 RENDER exports (all render-side; sim exports above unchanged) ---

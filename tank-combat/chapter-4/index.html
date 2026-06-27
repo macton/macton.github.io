@@ -302,9 +302,15 @@
     thousand small lights would mean re-lighting every triangle a thousand times; as a screen pass,
     each light only pays for the pixels it actually reaches. That is the frequency-of-change argument
     again, in screen space — the geometry is rasterised once, each light is evaluated only where it
-    lands. The environment is the first, global light; the <strong>per-mite and per-FX point
-    lights</strong> coming next are small bright volumes that <strong>additively accumulate</strong>
-    into the same HDR target — which is the whole reason the renderer is deferred.</p>
+    lands.</p>
+    <p>That is what buys the <strong>thousands of dynamic point lights</strong> here: <strong>one per
+    mite</strong> (a faint glow in its role colour) and <strong>one per FX</strong> (a bright, fading
+    flash for a popping mite or a striking bolt). Each is built by the sim each frame, culled to the
+    visible box, and drawn as a tiny cube <strong>volume</strong> that <strong>additively
+    accumulates</strong> into the same HDR target — reading the G-buffer only for the pixels it
+    covers. So the whole glowing swarm costs lit pixels, not four-thousand-lights-times-the-scene.
+    The environment is just the first, global light; the rest are the same idea, localised. None of
+    it touches the model — the simulation still does not know it is lit.</p>
 
     <h2>Assets are late-bound data</h2>
     <p>The second pass swaps the primitive cube for real low-poly meshes <strong>without touching
@@ -400,11 +406,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.27-195149"></script>
+  <script src="version.js?v=2026.06.27-202458"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.27-195149");</script>
+  <script type="module">import("./app.js?v=2026.06.27-202458");</script>
 </body>
 </html>

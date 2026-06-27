@@ -87,4 +87,14 @@ typedef struct {
 uint32_t build_view(const World* w, Inst* out, DrawList* dl,
                     int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy1, uint32_t hover_cell);
 
+/* The DYNAMIC point lights for the DEFERRED renderer: one per visible mite (its mode tint,
+ * a faint glow) and per visible FX (a burst or a bolt — bright, fading). Each reuses the
+ * Inst layout as a light VOLUME: a cube of half-extent = radius centred on the light, with
+ * rgba = colour and ALPHA = intensity. The host draws these as additive volumes that read
+ * the G-buffer, so the cost is the lit pixels, not the light count — the whole point of
+ * deferring. Built each frame (the lights move with the swarm), culled to the visible box.
+ * Emits into out[0..LIGHT_MAX); returns the light count. */
+#define LIGHT_MAX (N_MITES + N_FX + N_TANKS * PROJ_MAX + 8)
+uint32_t build_lights(const World* w, Inst* out, int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy1);
+
 #endif

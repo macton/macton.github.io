@@ -24,8 +24,8 @@ const TICK_DT = 1 / 60;
 const WGSL = `
 struct View { mvp: mat4x4f };                                  // the model-view-projection (subcells -> clip)
 @group(0) @binding(0) var<uniform> view: View;
-struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(1) nrm: vec3f };
-struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // the G-buffer: albedo+mask, encoded normal
+struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(1) nrm: vec3f, @location(2) world: vec3f };
+struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f, @location(2) position: vec4f };   // G-buffer: albedo+mask, normal, world position
 
 @vertex fn vs(
     @location(0) mpos: vec4f, @location(1) mnrm: vec4f,        // baked mesh: pos + normal in [-1,1]
@@ -42,6 +42,7 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // the 
   o.pos = view.mvp * vec4f(world, 1.0);                        // top-down perspective; depth is clip.z/w
   let nx = mnrm.x * c - mnrm.y * s; let ny = mnrm.x * s + mnrm.y * c;
   o.nrm = vec3f(nx, ny, mnrm.z); o.col = mcol * color;         // world-space face normal; mesh colour x tint
+  o.world = world;
   return o;
 }
 // DEFERRED geometry: write the SURFACE into the G-buffer (albedo + world normal) instead of
@@ -50,11 +51,55 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // the 
 // is the whole reason for deferring: lighting scales with lit pixels, not objects x lights.
 @fragment fn fs_gbuffer(i: VOut) -> GOut {
   var o: GOut;
-  o.color  = vec4f(i.col.rgb, 1.0);
-  o.normal = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
+  o.color    = vec4f(i.col.rgb, 1.0);
+  o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
+  o.position = vec4f(i.world, 1.0);                            // world position (subcells), for the point lights
   return o;
 }
 @fragment fn fs_flat(i: VOut) -> @location(0) vec4f { return i.col; }  // forward FX, blended into the lit HDR
+
+// ---- DEFERRED point lights ----------------------------------------------------------
+// One per visible mite / FX (build_lights). Each is drawn as a small cube VOLUME (front
+// faces only, no depth test); for every pixel the volume covers it reads the G-buffer
+// surface, falls off with distance, and ADDS its colour into the HDR. So a light pays only
+// for the pixels it actually covers — a thousand of them stay cheap.
+@group(0) @binding(1) var gColorTex: texture_2d<f32>;
+@group(0) @binding(2) var gNormalTex: texture_2d<f32>;
+@group(0) @binding(3) var gPosTex: texture_2d<f32>;
+struct LVOut {
+  @builtin(position) pos: vec4f,
+  @location(0) @interpolate(flat) center: vec3f,    // light centre (world)
+  @location(1) @interpolate(flat) lcol: vec4f,      // rgb colour, a = radius
+  @location(2) @interpolate(flat) inten: f32,       // intensity (instance alpha)
+};
+@vertex fn vs_light(
+    @location(0) mpos: vec4f,
+    @location(2) wxy: vec2<i32>, @location(3) wzhz: vec2<i32>,
+    @location(4) hxy: vec2<i32>, @location(6) color: vec4f) -> LVOut {
+  let r = f32(hxy.x);                                          // radius == cube half-extent (hx=hy=hz)
+  let local = mpos.xyz * vec3f(r, r, f32(wzhz.y));
+  let world = vec3f(f32(wxy.x) + local.x, f32(wxy.y) + local.y, f32(wzhz.x) + local.z);
+  var o: LVOut;
+  o.pos = view.mvp * vec4f(world, 1.0);
+  o.center = vec3f(f32(wxy.x), f32(wxy.y), f32(wzhz.x));
+  o.lcol = vec4f(color.rgb, r);
+  o.inten = color.a;
+  return o;
+}
+@fragment fn fs_lightvol(i: LVOut) -> @location(0) vec4f {
+  let p = vec2<i32>(i32(i.pos.x), i32(i.pos.y));
+  let alb = textureLoad(gColorTex, p, 0);
+  if (alb.a < 0.5) { discard; }                               // sky: nothing to light
+  let surf = textureLoad(gPosTex, p, 0).xyz;
+  let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
+  let toL = i.center - surf;
+  let dist = length(toL);
+  let r = i.lcol.a;
+  if (dist >= r) { discard; }                                 // outside the light's reach
+  let f = 1.0 - dist / r;
+  let ndl = clamp(dot(n, toL / max(dist, 1.0)), 0.0, 1.0);
+  return vec4f(alb.rgb * i.lcol.rgb * (f * f * ndl * i.inten * 8.0), 1.0);   // additive (one,one); a scales 0..8x in HDR
+}
 `;
 
 // The SCREEN passes live in their own module: their bind group 0 (the light + the G-buffer)
@@ -262,12 +307,12 @@ async function main() {
   // lighting is then a screen pass that reads the G-buffer. That is what makes per-mite /
   // per-FX point lights affordable later: their cost is the lit pixels they cover, not the
   // object count times the light count. For now the screen pass is just the environment.
-  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", HDR = "rgba16float", DEPTH = "depth24plus";
+  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", GBUF_POS = "rgba32float", HDR = "rgba16float", DEPTH = "depth24plus";
 
-  // GEOMETRY: fill the G-buffer (two colour targets) + depth. No lighting here.
+  // GEOMETRY: fill the G-buffer (albedo, normal, world position) + depth. No lighting here.
   const geometryPipe = device.createRenderPipeline({ layout,
     vertex: { module, entryPoint: "vs", buffers: vbuffers },
-    fragment: { module, entryPoint: "fs_gbuffer", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }] },
+    fragment: { module, entryPoint: "fs_gbuffer", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }, { format: GBUF_POS }] },
     primitive: { topology: "triangle-list", cullMode: "none" },
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: "less" } });
   // FORWARD FX: the translucent pass, now blended into the lit HDR, depth-tested against the
@@ -284,8 +329,8 @@ async function main() {
   // the ENVIRONMENT light: a directional sun (xyz dir + .w intensity), its colour, and the
   // hemisphere ambient (sky overhead / ground bounce below). Tunable; uploaded when changed.
   const env = {
-    sunDir: [0.34, 0.48, 0.80], sunI: 1.05, sunCol: [1.0, 0.90, 0.72],   // warm low-ish sun from above, leaning south
-    sky: [0.34, 0.41, 0.54], ground: [0.20, 0.17, 0.16],                 // cool sky ambient overhead, warm ground bounce below
+    sunDir: [0.50, 0.66, 0.40], sunI: 0.62, sunCol: [1.0, 0.66, 0.38],   // EVENING: low, raking, warm amber sun
+    sky: [0.15, 0.17, 0.27], ground: [0.10, 0.08, 0.09],                 // dim dusk-blue sky ambient, dark warm ground — so the point lights carry the scene
   };
   const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
   const envBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -315,21 +360,46 @@ async function main() {
     fragment: { module: screenModule, entryPoint: "fs_tonemap", targets: [{ format }] },
     primitive: { topology: "triangle-list" } });
 
-  // the viewport-sized targets (G-buffer + HDR + depth), rebuilt on resize; the screen-pass
-  // bind groups reference them, so they rebuild together.
-  let gColorTex = null, gNormalTex = null, hdrTex = null, depthTex = null, lightBind = null, tonemapBind = null;
+  // POINT LIGHTS: each light is a cube VOLUME (the mesh cube, instanced from the light buffer),
+  // additively blended into the HDR. Front faces only + no depth test, so the volume just marks
+  // the pixels to light; the fragment reads the G-buffer there. The vs needs the view uniform,
+  // the fs reads the three G-buffer textures — one bind group across both.
+  const lightVolBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+    { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+    { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+  const lightVolPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [lightVolBGL] }),
+    vertex: { module, entryPoint: "vs_light", buffers: vbuffers },
+    fragment: { module, entryPoint: "fs_lightvol", targets: [{ format: HDR, blend: {
+      color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+      alpha: { srcFactor: "one", dstFactor: "one", operation: "add" } } }] },
+    // cull FRONT: the camera's FLIPX reflection inverts winding, so this keeps the volume's
+    // near (camera-side) faces — one fragment per covered pixel, no depth needed.
+    primitive: { topology: "triangle-list", cullMode: "front" } });
+  const lightBuf = device.createBuffer({ size: wasm.light_max() * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+
+  // the viewport-sized targets (G-buffer + HDR + depth), rebuilt on resize; the screen-pass and
+  // light-volume bind groups reference them, so they rebuild together.
+  let gColorTex = null, gNormalTex = null, gPosTex = null, hdrTex = null, depthTex = null, lightBind = null, lightVolBind = null, tonemapBind = null;
   function ensureTargets() {
     if (gColorTex && gColorTex.width === canvas.width && gColorTex.height === canvas.height) return;
-    for (const t of [gColorTex, gNormalTex, hdrTex, depthTex]) if (t) t.destroy();
+    for (const t of [gColorTex, gNormalTex, gPosTex, hdrTex, depthTex]) if (t) t.destroy();
     const size = [canvas.width, canvas.height], RA = GPUTextureUsage.RENDER_ATTACHMENT, TB = GPUTextureUsage.TEXTURE_BINDING;
     gColorTex  = device.createTexture({ size, format: GBUF_COLOR,  usage: RA | TB });
     gNormalTex = device.createTexture({ size, format: GBUF_NORMAL, usage: RA | TB });
+    gPosTex    = device.createTexture({ size, format: GBUF_POS,    usage: RA | TB });
     hdrTex     = device.createTexture({ size, format: HDR,         usage: RA | TB });
     depthTex   = device.createTexture({ size, format: DEPTH,       usage: RA });
     lightBind = device.createBindGroup({ layout: lightBGL, entries: [
       { binding: 0, resource: { buffer: envBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() } ] });
+    lightVolBind = device.createBindGroup({ layout: lightVolBGL, entries: [
+      { binding: 0, resource: { buffer: viewBuf } },
+      { binding: 1, resource: gColorTex.createView() },
+      { binding: 2, resource: gNormalTex.createView() },
+      { binding: 3, resource: gPosTex.createView() } ] });
     tonemapBind = device.createBindGroup({ layout: tonemapBGL, entries: [{ binding: 3, resource: hdrTex.createView() }] });
   }
   function resize() {
@@ -633,15 +703,18 @@ async function main() {
 
     const n = wasm.inst_count();
     device.queue.writeBuffer(instBuf, 0, view.instBytes(n));
+    const nLights = wasm.light_count();   // the deferred point lights (mites + FX), rebuilt each frame
+    if (nLights) device.queue.writeBuffer(lightBuf, 0, new Uint8Array(mem(), wasm.light_ptr(), nLights * C.STRIDE));
     syncStatic();                       // upload-once the baked town (no-op unless it re-baked)
     ensureTargets();
     const enc = device.createCommandEncoder();
 
-    // 1) GEOMETRY -> the G-buffer (albedo + world normal) + depth. The opaque scene, drawn once.
+    // 1) GEOMETRY -> the G-buffer (albedo + world normal + world position) + depth. Drawn once.
     const gpass = enc.beginRenderPass({
       colorAttachments: [
         { view: gColorTex.createView(),  clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
-        { view: gNormalTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
+        { view: gNormalTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
+        { view: gPosTex.createView(),    clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
     gpass.setBindGroup(0, bind); gpass.setVertexBuffer(0, meshBuf); gpass.setPipeline(geometryPipe);
     // the STATIC TOWN: frustum-cull screens, draw the visible runs (no rebuild, no re-emit).
@@ -671,6 +744,18 @@ async function main() {
       colorAttachments: [{ view: hdrTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }] });
     lpass.setPipeline(lightingPipe); lpass.setBindGroup(0, lightBind); lpass.draw(3);
     lpass.end();
+
+    // 2b) POINT LIGHTS -> HDR (additive). Each visible mite / FX is a small cube volume that
+    // lights only the G-buffer pixels it covers, so the swarm's glow scales with lit pixels, not
+    // with the mite count times the scene. One instanced draw over the whole light buffer.
+    if (nLights) {
+      const plpass = enc.beginRenderPass({
+        colorAttachments: [{ view: hdrTex.createView(), loadOp: "load", storeOp: "store" }] });
+      plpass.setPipeline(lightVolPipe); plpass.setBindGroup(0, lightVolBind);
+      plpass.setVertexBuffer(0, meshBuf); plpass.setVertexBuffer(1, lightBuf);
+      const cube = meshTable[C.CUBE]; plpass.draw(cube.cnt, nLights, cube.off, 0);
+      plpass.end();
+    }
 
     // 3) FORWARD FX -> HDR, blended over the lit scene, depth-tested against the geometry.
     const tc = wasm.draw_translucent();
