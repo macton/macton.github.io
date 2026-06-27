@@ -4,7 +4,8 @@
 #define TANK_MAP_MESH_DATA_H
 #include <stdint.h>
 
-#define MAP_MESH_COUNT 16
+#define MAP_MESH_COUNT 32
+#define MAP_LOD1_OFFSET 16   /* the LOD1 (simplified) of town mesh m is m + MAP_LOD1_OFFSET */
 #define MAP_ROAD_BASE 0
 #define MAP_ROAD_N 6
 #define MAP_BUILD_BASE 6

@@ -247,7 +247,7 @@ async function main() {
     MEMPTY: wasm.mite_empty(), NEST: wasm.nest_count(), NF: wasm.n_fields(),
     // chapter-4 render protocol: the kinds + the baked meshes (the projection is a host MVP)
     KOC: wasm.k_opaque_count(), MVSTRIDE: wasm.mesh_vstride(), MVTOTAL: wasm.mesh_vert_total(),
-    MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(),
+    MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(), MLOFF: wasm.map_lod1_offset(),   // LOD1 mesh id = LOD0 id + MLOFF
     // the STATIC TOWN: a run-table stride (the instance stride == inst_stride == STRIDE)
     SRSTRIDE: wasm.static_run_stride(),
   };
@@ -457,6 +457,7 @@ async function main() {
   // back onto the ground. Nothing here touches the simulation.
   let useAssets = true;   // default: show the baked town + meshes; toggle OFF -> the placeholder massing model
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
+  let camEye = [0, 0, 0];   // the eye in world subcells (set by viewWrite) — feeds the LOD distance test
   let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
   const DEG = Math.PI / 180;
@@ -507,9 +508,21 @@ async function main() {
     const mvp = m4mul(flipX, m4mul(m4mul(proj, view), m4scale(1 / C.SUB)));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
+    camEye = [eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB];   // subcells — for the shadow march + the LOD distance
     // append the per-frame camera (eye in subcells) + MVP for the screen-space shadow march
-    device.queue.writeBuffer(envBuf, 80, new Float32Array([
-      eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB, 0, ...mvp ]));
+    device.queue.writeBuffer(envBuf, 80, new Float32Array([ ...camEye, 0, ...mvp ]));
+  }
+  // The LOD distance: at MAX zoom + 56-degree pitch, EVERYTHING visible is highest detail (the
+  // user's reference), so the LOD0/LOD1 split is the eye-to-farthest-visible-ground distance of
+  // that reference view. A town SCREEN closer than this draws the full art; farther draws the
+  // simplified colour-matched massing. Squared (subcells^2) to skip the per-screen sqrt.
+  function lodDist2() {
+    const p = 56 * DEG, f = FOV0, t = Math.tan(f / 2), aspect = canvas.width / canvas.height;
+    const bd = Math.max((C.BH * 0.62) / (t / Math.cos(p)), (C.BW * 0.62) / (t * aspect));
+    const dist = bd / ZMAX, eyeH = dist * Math.cos(p);
+    const topA = Math.max(3 * DEG, (HALF_PI - p) - f / 2), farGround = eyeH / Math.sin(topA);
+    const d = Math.hypot(farGround, eyeH) * C.SUB;
+    return d * d;
   }
   // cast a screen NDC point onto the ground plane (z=0) -> world subcells
   function groundAt(ndcx, ndcy) {
@@ -759,14 +772,22 @@ async function main() {
         { view: gPosTex.createView(),    clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
     gpass.setBindGroup(0, bind); gpass.setVertexBuffer(0, meshBuf); gpass.setPipeline(geometryPipe);
-    // the STATIC TOWN: frustum-cull screens, draw the visible runs (no rebuild, no re-emit).
-    // The asset toggle late-binds the map: OFF flattens every cell to the placeholder cube (a
-    // white massing model — same instances, heights still read road/building/landmark), ON the town.
+    // per-SCREEN LOD: a screen whose nearest point is beyond the LOD distance draws the simplified
+    // colour-matched massing (LOD1), nearer screens the full art (LOD0). Squared distances; the
+    // eye is up at camEye, the screen footprint on the ground.
+    const lod2 = lodDist2(), ez2 = camEye[2] * camEye[2], screenLod1 = [];
+    for (let s = 0; s < C.NS; s++) { const b = screenBox[s];
+      const nx = Math.max(b[0], Math.min(camEye[0], b[2])) - camEye[0], ny = Math.max(b[1], Math.min(camEye[1], b[3])) - camEye[1];
+      screenLod1[s] = (nx * nx + ny * ny + ez2) > lod2; }
+    // the STATIC TOWN: frustum-cull screens, draw the visible runs (no rebuild, no re-emit). The
+    // asset toggle late-binds the map (OFF = the white placeholder cube); within the art, the LOD
+    // swaps the mesh by id + MLOFF for distant screens.
     gpass.setVertexBuffer(1, staticBuf);
     for (const run of staticRuns) {
       const sb = screenBox[run.screen];
       if (box[0] <= sb[2] && box[2] >= sb[0] && box[1] <= sb[3] && box[3] >= sb[1]) {
-        const m = meshTable[useAssets ? run.mesh : C.CUBE]; gpass.draw(m.cnt, run.count, m.off, run.first);
+        const id = useAssets ? (screenLod1[run.screen] ? run.mesh + C.MLOFF : run.mesh) : C.CUBE;
+        const m = meshTable[id]; gpass.draw(m.cnt, run.count, m.off, run.first);
       }
     }
     // the DYNAMIC opaque kinds from their own buffer: one draw per kind, that kind's mesh.

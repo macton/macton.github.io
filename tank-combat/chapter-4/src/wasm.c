@@ -194,6 +194,7 @@ EXPORT(mesh_proc_total)   uint32_t mesh_proc_total(void)           { return MESH
 EXPORT(mesh_vert_total)   uint32_t mesh_vert_total(void)           { return MESH_VERT_TOTAL + MAP_MESH_VERT_TOTAL; }
 EXPORT(mesh_vstride)      uint32_t mesh_vstride(void)              { return MESH_VSTRIDE; }
 EXPORT(mesh_count)        uint32_t mesh_count(void)                { return MESH_TOTAL_COUNT; }
+EXPORT(map_lod1_offset)   uint32_t map_lod1_offset(void)           { return MAP_LOD1_OFFSET; }   /* LOD1 of a town mesh id = id + this */
 EXPORT(mesh_cube)         uint32_t mesh_cube(void)                 { return M_CUBE; }
 EXPORT(mesh_voff)         uint32_t mesh_voff(uint32_t m) {          /* offset into the COMBINED buffer */
   if (m < M_PROC_COUNT) return MESH_VOFF[m];

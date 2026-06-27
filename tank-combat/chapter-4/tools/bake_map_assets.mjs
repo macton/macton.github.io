@@ -59,6 +59,86 @@ function bake(kitDir, name, img, roof) {
   return { name, hz: Math.round(hKen * SUB / 2), verts };
 }
 
+// mean sampled colour over the faces a predicate accepts (n = face normal, czF = face-centre
+// height as a fraction of the model height). Used to colour-match the LOD silhouette.
+function avgFaceColour(E, tris, uv, img, lo, H, pick) {
+  let r = 0, g = 0, b = 0, k = 0;
+  for (const tri of tris) {
+    const P = tri.map(([vi]) => E[vi]);
+    const e1 = [P[1][0]-P[0][0], P[1][1]-P[0][1], P[1][2]-P[0][2]], e2 = [P[2][0]-P[0][0], P[2][1]-P[0][1], P[2][2]-P[0][2]];
+    let n = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]]; const L = Math.hypot(...n) || 1; n = n.map((v) => v/L);
+    const czF = ((P[0][2]+P[1][2]+P[2][2]) / 3 - lo[2]) / Math.max(1e-3, H);
+    if (!pick(n, czF)) continue;
+    for (let i = 0; i < 3; i++) { const ti = tri[i][1]; const c = ti < 0 ? [180,180,180] : sample(img, uv[ti][0], uv[ti][1]); r += c[0]; g += c[1]; b += c[2]; k++; }
+  }
+  return k ? [Math.round(r/k), Math.round(g/k), Math.round(b/k)] : [170,170,170];
+}
+
+// LOD1 — a SIMPLIFIED, COLOUR-MATCHED massing mesh: a box body up to the eave (wall colour) +
+// the MAIN roof shape (flat or gable, roof colour), or a single top quad for flat tiles. It is
+// normalised identically to bake(), so one instance renders LOD0 or LOD1 at the same size. ~40
+// verts vs ~3500, for distant buildings. `roofCol` (when set) matches LOD0's recoloured roof.
+function bakeLOD1(kitDir, name, img, roofCol, group) {
+  const { pos, uv, tris } = parseOBJ(readFileSync(join(kitDir, "Models", "OBJ format", name + ".obj"), "utf8"));
+  const E = pos.map((p) => [p[0], -p[2], p[1]]);
+  let lo = [9,9,9], hi = [-9,-9,-9];
+  for (const p of E) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
+  const hKen = hi[2] - lo[2], hz = Math.round(hKen * SUB / 2);
+  const verts = [];
+  const qv = (px,py,pz, nx,ny,nz, c) => verts.push([qn(px),qn(py),qn(pz),0, qn(nx),qn(ny),qn(nz),0, c[0],c[1],c[2],255]);
+  // emit a flat quad / tri with its OUTWARD normal (forced away from the building's central axis)
+  function face(pts, col) {
+    const a = pts[0], b = pts[1], c = pts[2];
+    const e1 = [b[0]-a[0],b[1]-a[1],b[2]-a[2]], e2 = [c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+    let n = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]]; const L = Math.hypot(...n) || 1; n = n.map((v) => v/L);
+    let cen = [0,0,0]; for (const p of pts) { cen[0]+=p[0]; cen[1]+=p[1]; cen[2]+=p[2]; } cen = cen.map((v) => v/pts.length);
+    if (n[0]*cen[0] + n[1]*cen[1] + n[2]*cen[2] < 0) n = n.map((v) => -v);   // outward from origin (inside the box)
+    for (let i = 1; i + 1 < pts.length; i++) { qv(...pts[0],...n,col); qv(...pts[i],...n,col); qv(...pts[i+1],...n,col); }
+  }
+  // flat tiles (roads/grass): a single top quad in the tile's average colour
+  if (group === "ROAD" || group === "GRASS") {
+    const top = avgFaceColour(E, tris, uv, img, lo, hKen, (n) => n[2] > 0.5);
+    face([[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]], top);
+    return { name, hz, verts };
+  }
+  // buildings/landmark: detect the eave height + roof shape, sample wall/roof colours
+  let roofMinZ = hi[2], rx = [], ry = [];
+  for (const tri of tris) { const P = tri.map(([vi]) => E[vi]);
+    const e1 = [P[1][0]-P[0][0],P[1][1]-P[0][1],P[1][2]-P[0][2]], e2 = [P[2][0]-P[0][0],P[2][1]-P[0][1],P[2][2]-P[0][2]];
+    let n = [e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]]; const L = Math.hypot(...n)||1; n = n.map((v)=>v/L);
+    const czF = ((P[0][2]+P[1][2]+P[2][2])/3 - lo[2]) / hKen;
+    if (n[2] > 0.35 && czF > 0.3) { for (const p of P) { roofMinZ = Math.min(roofMinZ, p[2]); if ((p[2]-lo[2])/hKen > 0.88) { rx.push(p[0]); ry.push(p[1]); } } } }
+  const eaveFrac = Math.min(0.65, Math.max(0.30, (roofMinZ - lo[2]) / hKen)), ez = -1 + 2 * eaveFrac;
+  const fw = hi[0]-lo[0], fd = hi[1]-lo[1];
+  const rxF = rx.length ? (Math.max(...rx)-Math.min(...rx)) / fw : 1, ryF = ry.length ? (Math.max(...ry)-Math.min(...ry)) / fd : 1;
+  const gable = Math.min(rxF, ryF) < 0.25, ridgeX = rxF >= ryF;   // one ridge axis ~a line => pitched; ridge along the wider one
+  const wall = avgFaceColour(E, tris, uv, img, lo, hKen, (n) => Math.abs(n[2]) < 0.35);
+  const roof = roofCol || avgFaceColour(E, tris, uv, img, lo, hKen, (n, czF) => n[2] > 0.35 && czF > 0.3);
+  // box walls up to the eave
+  face([[-1,-1,-1],[1,-1,-1],[1,-1,ez],[-1,-1,ez]], wall);
+  face([[1,-1,-1],[1,1,-1],[1,1,ez],[1,-1,ez]], wall);
+  face([[1,1,-1],[-1,1,-1],[-1,1,ez],[1,1,ez]], wall);
+  face([[-1,1,-1],[-1,-1,-1],[-1,-1,ez],[-1,1,ez]], wall);
+  if (!gable) {                                   // flat roof: a roof-coloured cap + top
+    face([[-1,-1,ez],[1,-1,ez],[1,-1,1],[-1,-1,1]], roof);
+    face([[1,-1,ez],[1,1,ez],[1,1,1],[1,-1,1]], roof);
+    face([[1,1,ez],[-1,1,ez],[-1,1,1],[1,1,1]], roof);
+    face([[-1,1,ez],[-1,-1,ez],[-1,-1,1],[-1,1,1]], roof);
+    face([[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]], roof);
+  } else if (ridgeX) {                            // gable, ridge along X (y=0, z=+1)
+    face([[-1,1,ez],[1,1,ez],[1,0,1],[-1,0,1]], roof);
+    face([[1,-1,ez],[-1,-1,ez],[-1,0,1],[1,0,1]], roof);
+    face([[1,-1,ez],[1,1,ez],[1,0,1]], wall);
+    face([[-1,1,ez],[-1,-1,ez],[-1,0,1]], wall);
+  } else {                                        // gable, ridge along Y (x=0, z=+1)
+    face([[1,-1,ez],[1,1,ez],[0,1,1],[0,-1,1]], roof);
+    face([[-1,1,ez],[-1,-1,ez],[0,-1,1],[0,1,1]], roof);
+    face([[-1,1,ez],[1,1,ez],[0,1,1]], wall);
+    face([[1,-1,ez],[-1,-1,ez],[0,-1,1]], wall);
+  }
+  return { name, hz, verts };
+}
+
 const KITS = { sub: "city-kit-suburban", com: "city-kit-commercial", road: "city-kit-roads", td: "kenney_tower-defense-kit" };
 const dir = (k) => join(ASSETS, KITS[k]);
 const imgs = {}; for (const k of Object.keys(KITS)) imgs[k] = decodePNG(readFileSync(join(dir(k), "Models", "OBJ format", "Textures", "colormap.png")));
@@ -73,9 +153,17 @@ const GROUPS = [
   ["LANDMARK", [["com","building-skyscraper-a"]], false],
 ];
 
-const meshes = []; const bases = {};
-for (const [g, list, roofs] of GROUPS) { bases[g] = meshes.length;
-  list.forEach(([k, name], i) => meshes.push(bake(dir(k), name, imgs[k], roofs ? ROOF[i % ROOF.length] : null))); }
+// Bake each town mesh at TWO levels of detail: LOD0 (the full Kenney art) and LOD1 (a
+// simplified, colour-matched box+roof). They go into one table — LOD0 in [0,N0), LOD1 in
+// [N0,2*N0) — so the LOD1 of mesh m is m + MAP_LOD1_OFFSET. The static map references LOD0 ids;
+// the host swaps to LOD1 for distant screens.
+const meshes0 = [], meshes1 = []; const bases = {};
+for (const [g, list, roofs] of GROUPS) { bases[g] = meshes0.length;
+  list.forEach(([k, name], i) => { const roofCol = roofs ? ROOF[i % ROOF.length] : null;
+    meshes0.push(bake(dir(k), name, imgs[k], roofCol));
+    meshes1.push(bakeLOD1(dir(k), name, imgs[k], roofCol, g)); }); }
+const meshes = meshes0.concat(meshes1);
+const LOD1_OFFSET = meshes0.length;
 
 let voff = [], vcnt = [], hz = [], all = [];
 for (const m of meshes) { voff.push(all.length / 12); vcnt.push(m.verts.length); hz.push(m.hz); for (const v of m.verts) all.push(...v); }
@@ -120,6 +208,7 @@ let h = `/* GENERATED by tools/bake_map_assets.mjs — the TOWN map mesh table +
 h += ` * render.c addresses meshes as BASE + offset; the static-map bake places instances. */\n`;
 h += `#ifndef TANK_MAP_MESH_DATA_H\n#define TANK_MAP_MESH_DATA_H\n#include <stdint.h>\n\n`;
 h += `#define MAP_MESH_COUNT ${N}\n`;
+h += `#define MAP_LOD1_OFFSET ${LOD1_OFFSET}   /* the LOD1 (simplified) of town mesh m is m + MAP_LOD1_OFFSET */\n`;
 for (const [g, list] of GROUPS) { h += `#define MAP_${g}_BASE ${bases[g]}\n`; if (list.length > 1) h += `#define MAP_${g}_N ${list.length}\n`; }
 h += `\nextern const int8_t   MAP_MESH_VERT[];\nextern const uint32_t MAP_MESH_VOFF[MAP_MESH_COUNT];\n`;
 h += `extern const uint32_t MAP_MESH_VCNT[MAP_MESH_COUNT];\nextern const int16_t  MAP_MESH_HZ[MAP_MESH_COUNT];\n`;

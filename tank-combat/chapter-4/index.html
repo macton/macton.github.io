@@ -358,6 +358,22 @@
     sim never knows it became a town — the town is a <em>projection</em> of its walls and nests, the
     same way the camera is a projection of its coordinates.</p>
 
+    <h2>Two levels of detail, picked by distance</h2>
+    <p>A full Kenney building is ~3,500 vertices — windows, eaves, doors. Up close that detail earns
+    its keep; a hundred cells away it is a smear. So each town mesh is baked at <strong>two levels of
+    detail</strong>: the full art (LOD0) and a <strong>simplified, colour-matched massing</strong>
+    (LOD1) — a box wall in the building's dominant colour plus its <em>main roof shape</em> (flat or
+    gable, in the roof's colour), about <strong>40 vertices</strong>. The colours and roof are read
+    straight from the source mesh at bake time, so the cheap version reads as the same building from a
+    distance.</p>
+    <p>Which one draws is, again, just a per-screen decision at the cull. The reference is the
+    closest, most-detailed view — <strong>max zoom at a 56° tilt</strong>; everything visible there is
+    LOD0. That fixes a world distance (the eye-to-farthest-visible-ground of that view), and any town
+    screen beyond it draws LOD1 instead. The <em>same baked instance</em> renders either mesh — the
+    LOD is one integer added to the mesh id — so distant blocks cost forty vertices apiece, not three
+    thousand, and the foreground keeps its windows. Nothing about the instances or the sim changes;
+    the renderer just picks the art that's worth drawing at the size it will be seen.</p>
+
     <h2>The simulation does not know it is drawn</h2>
     <p>Everything below this line is the <strong>model the view reads</strong> — and it is frozen,
     byte-for-byte, from chapter 3. Height, mesh id, the light, the camera, and the depth texture
@@ -423,11 +439,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.27-204409"></script>
+  <script src="version.js?v=2026.06.27-211559"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.27-204409");</script>
+  <script type="module">import("./app.js?v=2026.06.27-211559");</script>
 </body>
 </html>

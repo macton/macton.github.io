@@ -50,10 +50,12 @@ ships in the binary.
 Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.
 
-**Town meshes** — baked from **Kenney CC0** kits into `src/map_mesh_data.c` (16 meshes,
-~400 KB of packed `int8` verts carrying their own palette colour). The committed buffer is
-**CC0** (derived from CC0 source). The *source art is not committed*; the bake reads a
-local download. Kits used:
+**Town meshes** — baked from **Kenney CC0** kits into `src/map_mesh_data.c` (32 meshes:
+16 full-detail **LOD0** + 16 simplified, colour-matched **LOD1** at `MAP_LOD1_OFFSET`;
+~406 KB of packed `int8` verts carrying their own palette colour). Each LOD1 is a box body
++ the building's main roof shape (~40 verts vs ~3,500), so distant town screens draw the
+cheap version. The committed buffer is **CC0** (derived from CC0 source). The *source art is
+not committed*; the bake reads a local download. Kits used:
 
 | group (`map_mesh_data.h`) | source kit (Kenney, **CC0**) | meshes |
 |---|---|---|

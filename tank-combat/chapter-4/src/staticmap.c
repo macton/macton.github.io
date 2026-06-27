@@ -117,8 +117,9 @@ uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
           int i = ly * GRID_W + lx;
           classify(grid, s_nest_at, bx + lx, by + ly, &s_mesh[i], &s_rot[i], &s_rgba[i]);
         }
-      /* emit one contiguous run per town mesh used in this screen */
-      for (int m = 0; m < MAP_MESH_COUNT; m++) {
+      /* emit one contiguous run per town mesh used in this screen (LOD0 only — the LOD1
+       * meshes past MAP_LOD1_OFFSET are never placed here; the host swaps to them by id+offset) */
+      for (int m = 0; m < MAP_LOD1_OFFSET; m++) {
         uint32_t first = ni;
         int hz = MAP_MESH_HZ[m];
         for (int ly = 0; ly < GRID_H; ly++)
