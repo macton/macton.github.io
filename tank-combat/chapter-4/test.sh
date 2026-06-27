@@ -10,7 +10,7 @@ out="$(mktemp)"
 clang -O2 -Wall -Wextra -std=c11 -o "$out" \
   src/test.c src/sim.c src/tanks_path.c src/agent_turn.c src/agent_move.c src/mites.c \
   src/tanks_fire.c src/render.c src/collide.c src/dirtab.c src/escape_table.c \
-  src/grid_paths.c src/edge_paths.c src/map_data.c
+  src/grid_paths.c src/edge_paths.c src/map_data.c src/map_mesh_data.c src/staticmap.c
 "$out"
 status=$?
 rm -f "$out"

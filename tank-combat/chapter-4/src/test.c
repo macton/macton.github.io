@@ -20,6 +20,7 @@
 #include "mites.h"
 #include "tanks_fire.h"
 #include "render.h"
+#include "staticmap.h"
 #include "view.h"
 #include <stdio.h>
 #include <string.h>
@@ -994,34 +995,96 @@ static void t_render_visibility(void) {
   sim_init(&W);
   DrawList dw;
   uint32_t nW = build_view(&W, g_a, &dw, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);  /* whole world */
-  uint32_t terrainW = dw.opaque[K_FLOOR] + dw.opaque[K_WALL];
-  check(terrainW == (uint32_t)N_WORLD_CELLS, "zoomed out, the whole world emits one block per cell (all 4800)");
+  /* the terrain + nests LEFT the per-frame path — they are the static town now, baked once
+   * (build_static_map / t_static_map). So even the whole-world DYNAMIC view is only the
+   * swarm + tanks + overlays, far below the 4800 cells it used to re-emit every frame. */
+  check(nW < (uint32_t)N_WORLD_CELLS, "the dynamic view no longer re-emits the terrain (well under one-per-cell)");
   check(nW <= INST_MAX, "the whole-world view fits the capacity bound");
 
-  /* Regression: the 8x8 arena reaches 40960 subcells, PAST int16's 32767, so wx,wy are
-   * int32 and must be stored WITHOUT a 16-bit cast. A leftover (int16_t) truncation in
-   * push() wrapped the east columns (x>32767) to large negatives, drawing them as a
-   * displaced strip far to the west. Assert every emitted placement keeps its true world
-   * coordinate (a small ±SUB margin allows a box centre — e.g. a barrel — to poke just
-   * past an edge). With the bug a wx hit ~-32752, far outside this band. */
+  /* A box centre (e.g. a barrel or a bolt) may poke a hair past an edge, but never wrap:
+   * the int16-cast push() bug is guarded thoroughly on the static map (it spans the east
+   * columns, wx>32767); here we just confirm the dynamic placements stay in-band. */
   int coords_sane = 1;
   for (uint32_t i = 0; i < nW; i++)
     if (g_a[i].wx < -SUB || g_a[i].wx > ARENA_W_SUB + SUB ||
         g_a[i].wy < -SUB || g_a[i].wy > ARENA_H_SUB + SUB) { coords_sane = 0; break; }
-  check(coords_sane, "every emitted placement keeps its true world coordinate (no int16 wrap)");
+  check(coords_sane, "every dynamic placement keeps its true world coordinate (no int16 wrap)");
 
-  /* Regression: COL_NEST must cover ALL NEST_COUNT nests (63 on the 8x8 map). A short
-   * table left the later nests transparent-black. Every emitted nest must carry colour. */
-  uint32_t nest0 = dw.opaque[K_FLOOR] + dw.opaque[K_WALL];
-  int nests_coloured = (dw.opaque[K_NEST] == (uint32_t)NEST_COUNT);
-  for (uint32_t i = nest0; i < nest0 + dw.opaque[K_NEST]; i++)
-    if ((g_a[i].rgba & 0x00FFFFFFu) == 0) nests_coloured = 0;
-  check(nests_coloured, "every nest gets a colour (COL_NEST covers all NEST_COUNT)");
-
-  DrawList dz; build_view(&W, g_b, &dz, 0, 0, GRID_W * SUB - 1, GRID_H * SUB - 1, REC_EMPTY); /* one screen */
-  uint32_t terrainZ = dz.opaque[K_FLOOR] + dz.opaque[K_WALL];
-  check(terrainZ > 0 && terrainZ < N_WORLD_CELLS, "zoomed in, terrain is culled to the visible cells");
+  DrawList dz; uint32_t nZ = build_view(&W, g_b, &dz, 0, 0, GRID_W * SUB - 1, GRID_H * SUB - 1, REC_EMPTY); /* one screen */
   check(dz.opaque[K_MITE] < N_MITES, "zoomed in, only the mites in the visible box are emitted (<< the pool)");
+  check(nZ <= nW, "zoomed in emits no more instances than the whole world");
+}
+
+/* the STATIC TOWN bake: a pure projection of the frozen map (build_static_map). It must
+ * place exactly one instance per cell, partition cleanly into per-(screen,mesh) runs the
+ * host can frustum-cull, keep the east columns' int32 coordinates, tint each nest's
+ * landmark, and re-bake deterministically when the map changes. */
+static Inst      g_si[STATIC_INST_MAX], g_si2[STATIC_INST_MAX];   /* file-static: too big for the stack */
+static StaticRun g_sr[STATIC_RUN_MAX], g_sr2[STATIC_RUN_MAX];
+static void t_static_map(void) {
+  printf("the STATIC TOWN is a pure, once-baked projection of the frozen map:\n");
+  sim_init(&W);
+  uint32_t nr = 0, ni = build_static_map(W.grid, W.nest_cell, g_si, g_sr, &nr);
+  check(ni == (uint32_t)N_WORLD_CELLS, "every cell becomes exactly one static instance (one per world cell)");
+  check(nr > 0 && nr <= (uint32_t)STATIC_RUN_MAX, "the run table is non-empty and within bound");
+
+  /* the runs partition the instance buffer: contiguous from 0, ordered, non-empty, each
+   * with a valid source screen and a valid TOWN mesh id (offset past the procedural set). */
+  int part = (nr == 0 || g_sr[0].first == 0); uint32_t cover = 0;
+  for (uint32_t r = 0; r < nr; r++) {
+    cover += g_sr[r].count;
+    if (g_sr[r].count == 0) part = 0;
+    if (r + 1 < nr && g_sr[r].first + g_sr[r].count != g_sr[r + 1].first) part = 0;
+    if (g_sr[r].screen >= (uint16_t)N_SCREENS) part = 0;
+    if (g_sr[r].mesh < (uint16_t)M_PROC_COUNT ||
+        g_sr[r].mesh >= (uint16_t)(M_PROC_COUNT + MAP_MESH_COUNT)) part = 0;
+  }
+  check(part, "runs are contiguous, ordered, non-empty, with valid screen + town mesh ids");
+  check(cover == ni, "the runs cover every static instance exactly once");
+
+  /* each run's instances sit inside that run's source-screen world AABB, so the host can
+   * cull whole screens — and every coordinate (wx up to ~40832, past int16) survives. */
+  int boxed = 1, shape_ok = 1; int32_t maxwx = 0;
+  for (uint32_t r = 0; r < nr; r++) {
+    int32_t sx = g_sr[r].screen % SCREENS_X, sy = g_sr[r].screen / SCREENS_X;
+    int32_t x0 = sx * GRID_W * SUB, x1 = x0 + GRID_W * SUB, y0 = sy * GRID_H * SUB, y1 = y0 + GRID_H * SUB;
+    for (uint32_t i = g_sr[r].first; i < g_sr[r].first + g_sr[r].count; i++) {
+      if (g_si[i].wx < x0 || g_si[i].wx >= x1 || g_si[i].wy < y0 || g_si[i].wy >= y1) boxed = 0;
+      if (g_si[i].wx > maxwx) maxwx = g_si[i].wx;
+      if (g_si[i].hx != SUB / 2 || g_si[i].hy != SUB / 2 || g_si[i].hz <= 0) shape_ok = 0;
+    }
+  }
+  check(boxed, "every static instance sits inside its run's screen (clean frustum buckets)");
+  check(shape_ok && maxwx > 32767, "static coords span the arena east-to-west (no int16 wrap), cell-sized footprints");
+
+  /* the treatment: each nest -> exactly one landmark tinted in its hue; and the town has
+   * roads, buildings, and grass (the wall/open/interior split actually fires). */
+  uint32_t LM = (uint32_t)(M_PROC_COUNT + MAP_LANDMARK_BASE), GR = (uint32_t)(M_PROC_COUNT + MAP_GRASS_BASE);
+  uint32_t RD0 = (uint32_t)(M_PROC_COUNT + MAP_ROAD_BASE), RD1 = RD0 + MAP_ROAD_N;
+  uint32_t BD0 = (uint32_t)(M_PROC_COUNT + MAP_BUILD_BASE), BD1 = BD0 + MAP_BUILD_N;
+  uint32_t nlm = 0, nroad = 0, nbuild = 0, ngrass = 0; int lm_coloured = 1;
+  for (uint32_t r = 0; r < nr; r++) {
+    uint32_t m = g_sr[r].mesh, c = g_sr[r].count;
+    if (m == LM) { nlm += c; for (uint32_t i = g_sr[r].first; i < g_sr[r].first + c; i++)
+                                if ((g_si[i].rgba & 0x00FFFFFFu) == 0) lm_coloured = 0; }
+    else if (m == GR) ngrass += c;
+    else if (m >= RD0 && m < RD1) nroad += c;
+    else if (m >= BD0 && m < BD1) nbuild += c;
+  }
+  check(nlm == (uint32_t)NEST_COUNT && lm_coloured, "each nest becomes one landmark, tinted in its hue (COL_NEST)");
+  check(nroad > 0 && nbuild > 0 && ngrass > 0, "the town has roads, buildings, and grass");
+
+  /* the bake is a PURE function of (grid, nests): same map -> byte-identical town. */
+  uint32_t nr2 = 0, ni2 = build_static_map(W.grid, W.nest_cell, g_si2, g_sr2, &nr2);
+  int det = (ni2 == ni && nr2 == nr &&
+             memcmp(g_si2, g_si, ni * sizeof(Inst)) == 0 && memcmp(g_sr2, g_sr, nr * sizeof(StaticRun)) == 0);
+  check(det, "the bake is a pure function — same map rebuilds the byte-identical town");
+
+  /* editing the map re-bakes it: still one instance per cell, but the town changed. */
+  sim_toggle_wall(&W, 53, 41);   /* flip an interior cell (not a nest centre) */
+  uint32_t nr3 = 0, ni3 = build_static_map(W.grid, W.nest_cell, g_si2, g_sr2, &nr3);
+  check(ni3 == (uint32_t)N_WORLD_CELLS, "after a wall edit the town re-bakes, still one instance per cell");
+  check(memcmp(g_si2, g_si, ni * sizeof(Inst)) != 0, "the wall edit actually changes the baked town");
 }
 
 static void t_render_overlays(void) {
@@ -1070,6 +1133,7 @@ int main(void) {
   t_depth_key();
   t_render_deterministic();
   t_render_visibility();
+  t_static_map();
   t_render_overlays();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);
   return g_fails ? 1 : 0;

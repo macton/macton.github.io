@@ -44,16 +44,24 @@
 
 typedef struct { int32_t wx, wy; int16_t wz, hz, hx, hy, co, si; uint32_t rgba; } Inst;
 
-/* mesh kinds — the slot a draw call binds its mesh by. The opaque kinds emit
- * first, in this order, each as a contiguous instance range (z-buffered, flat
- * face-shaded). The translucent kinds emit last, into ONE range drawn after the
- * opaque pass (depth-test on, depth-write off, alpha-blended, painter-sorted). */
+/* mesh kinds — the slot a draw call binds its mesh by. These are the DYNAMIC things
+ * only: the terrain (floors/walls) and the nests are no longer per-frame kinds —
+ * they are STATIC TOWN map data, baked once by src/staticmap.c and drawn from the
+ * uploaded-once static buffer (see build_static_map). What build_view emits is the
+ * swarm, the tanks, the FX, and the overlays. The opaque kinds emit first, in this
+ * order, each as a contiguous instance range (z-buffered, flat face-shaded). The
+ * translucent kinds emit last, into ONE range drawn after the opaque pass (depth-test
+ * on, depth-write off, alpha-blended, painter-sorted). */
 enum {
-  K_FLOOR = 0, K_WALL, K_NEST, K_RING, K_MITE, K_HULL, K_TURRET, K_BARREL, K_DEST, /* opaque */
+  K_RING = 0, K_MITE, K_HULL, K_TURRET, K_BARREL, K_DEST, /* opaque (dynamic) */
   K_OPAQUE_COUNT,                    /* opaque kinds are [0, K_OPAQUE_COUNT) */
   K_LASER = K_OPAQUE_COUNT, K_BURST, K_PATH, K_HOVER,   /* translucent (all drawn as cubes) */
   K_COUNT
 };
+
+/* the nests' identity colours (a full hue wheel, one per nest), shared by the mite
+ * homing tint (render.c) and the static landmark tint (staticmap.c). */
+extern const uint32_t COL_NEST[NEST_COUNT];
 
 /* what the host needs to issue the draws: per-opaque-kind instance counts (the
  * ranges are contiguous in emit order, so kind i starts at the sum of the earlier
@@ -63,13 +71,13 @@ typedef struct {
   uint32_t translucent;
 } DrawList;
 
-/* Capacity per built view: the worst case is the whole world in view — every cell
- * (one block each), the whole live swarm, the nests, every tank's hull+turret+barrel
- * (3) + up to PROJ_MAX 2-box bolts in flight + a 2-piece selection mark + a destination
- * beacon, the FX ring, and the routed path (capped). Render scales with what's shown. */
+/* Capacity per built view: the DYNAMIC worst case is the whole world in view — the
+ * whole live swarm, every tank's hull+turret+barrel (3) + up to PROJ_MAX 2-box bolts
+ * in flight + a 2-piece selection mark + a destination beacon, the FX ring, and the
+ * routed path (capped). The terrain and nests are NOT here — they are static town map
+ * data (build_static_map), uploaded once. Render scales with what's shown. */
 #define PATH_MAX  400                    /* path tiles across all routing tanks (capped) */
-#define INST_MAX (N_WORLD_CELLS + N_MITES + NEST_COUNT + N_TANKS * (6 + PROJ_MAX * 2) \
-                  + N_FX + PATH_MAX + 1 /*hover*/)
+#define INST_MAX (N_MITES + N_TANKS * (6 + PROJ_MAX * 2) + N_FX + PATH_MAX + 1 /*hover*/)
 
 /* Build the whole view into out[0..) (grouped by kind) and fill `dl`. Emits at WORLD
  * positions everything inside the visible box [wx0,wx1] x [wy0,wy1] (subcells) the

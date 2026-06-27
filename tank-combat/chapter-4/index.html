@@ -176,7 +176,7 @@
   </div>
   <div id="viewctl">
     <span class="tag">view (presentation only)</span>
-    <label><input type="checkbox" id="assetsToggle"> low-poly art <span style="opacity:.7">(late-bound meshes)</span></label>
+    <label><input type="checkbox" id="assetsToggle" checked> low-poly art <span style="opacity:.7">(late-bound meshes + town)</span></label>
     <label>zoom <input type="range" id="zoom" min="0.85" max="20" step="0.05" value="1"></label>
     <label>pitch <input type="range" id="pitch" min="5" max="80" step="1" value="30"><span id="pitchval" class="tag">30°</span></label>
     <label>fov <input type="range" id="fov" min="15" max="70" step="1" value="36"><span id="fovval" class="tag">36°</span></label>
@@ -283,10 +283,11 @@
     visible sides darker</strong> — which is exactly the cue that reads &ldquo;a raised 3-D block.&rdquo;
     It is computed in the shader from the face normal: no normal texture, no per-vertex lighting,
     cheap enough to run for every visible instance every frame. The whole first pass is built from a
-    <strong>single unit cube</strong>, instanced, projected, depth-tested, flat-shaded — a thin slab
-    for an open floor, a full-height cube for a wall, a body/turret/barrel for a tank, a tiny cube
-    per mite, a tall pylon per nest. It is genuinely 3-D, just primitive — and it is
-    shippable on its own.</p>
+    <strong>single unit cube</strong>, instanced, projected, depth-tested, flat-shaded — a
+    body/turret/barrel for a tank, a little spike per mite, and for the static map a white
+    <strong>massing model</strong> whose per-instance heights already read the town: a flat slab for a
+    road, a taller box for a building, a tall one for each landmark. It is genuinely 3-D, just
+    primitive — and it is shippable on its own.</p>
 
     <h2>Assets are late-bound data</h2>
     <p>The second pass swaps the primitive cube for real low-poly meshes <strong>without touching
@@ -295,14 +296,27 @@
     the escape table — see <a href="ASSETS.md">ASSETS.md</a>) and a <strong>kind → mesh</strong>
     binding when emitting instances. The instance data — placement, facing, tint — is
     <em>unchanged</em>; a baked mesh simply replaces the body-box. Tick <span class="tag">low-poly
-    art</span> at the top to watch the mites become little pyramids and the nests become pylons,
-    live: <strong>the picture is data you replace; the pipeline that draws it does not move.</strong>
-    The frequency-of-change spectrum is the whole story here — the <strong>assets load once</strong>,
-    the world <strong>geometry rebuilds on a wall edit</strong> (rare), the <strong>projection runs
-    every frame</strong> (constant), and the renderer <strong>scales with what is visible</strong>,
-    not with the 19200-cell world or the 4096-strong pool (it emits only the cells and units inside
-    the camera's visible box — everything when zoomed out, a few cells when zoomed in: the test pins
-    both ends).</p>
+    art</span> at the top to watch it swap live: <strong>the picture is data you replace; the
+    pipeline that draws it does not move.</strong></p>
+
+    <h2>The map is static, so the town is baked once</h2>
+    <p>The map is <strong>static and totally known</strong>: which cells are walls, where the nests
+    sit. So the <em>town</em> it becomes is known too — there is no reason to re-derive it every frame.
+    A single offline pass (<code>build_static_map</code>) reads the frozen grid and classifies every
+    cell once: a <strong>wall becomes a building</strong>, an <strong>open cell touching a wall becomes
+    an autotiled road</strong> (the streets follow the maze corridors, each tile rotated to match its
+    neighbours), a <strong>wide-open interior becomes grass</strong>, and a <strong>nest becomes a
+    landmark</strong> tinted in its hue. That is <strong>one instance per cell</strong>, grouped by
+    screen, <strong>uploaded once</strong>. Per frame the renderer does the one thing a static map
+    needs — a <strong>frustum cull</strong>, picking which screens' runs are visible — and draws them.
+    No re-emit, no re-classification; the town only re-bakes when the map itself changes (toggle a
+    wall and watch the buildings and streets re-knit around it). The <strong>dynamic</strong> things —
+    the swarm, the tanks, the FX, the overlays — still rebuild every frame, scaling with what the
+    camera shows, not with the 19200-cell world or the 4096-strong pool. The frequency-of-change
+    spectrum is the whole story: the <strong>town bakes once</strong>, the <strong>projection runs
+    every frame</strong> (constant), and only the live agents move through the per-frame path. The
+    sim never knows it became a town — the town is a <em>projection</em> of its walls and nests, the
+    same way the camera is a projection of its coordinates.</p>
 
     <h2>The simulation does not know it is drawn</h2>
     <p>Everything below this line is the <strong>model the view reads</strong> — and it is frozen,
@@ -369,11 +383,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.27-053756"></script>
+  <script src="version.js?v=2026.06.27-175818"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.27-053756");</script>
+  <script type="module">import("./app.js?v=2026.06.27-175818");</script>
 </body>
 </html>

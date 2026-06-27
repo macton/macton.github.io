@@ -20,15 +20,19 @@ cd "$(dirname "$0")"
 #   combat state (per-tank turret/cooldown/target + mite_resp[1000]) ~= 2 KB
 #   trace scratch, World scalars, 128 KB stack
 # CHAPTER 4 changes only the RENDER half's memory, and the sim is untouched:
-#   instance buffer  20-byte 3-D Inst * INST_MAX (~6500)   ~= 130 KB (worst case: the
-#                                          whole world in view — every cell, the whole
-#                                          swarm, tanks, FX, and the overlays; the free
-#                                          camera culls to far fewer when zoomed in)
-#   baked meshes (src/mesh_data.c, 162 verts * 8 bytes)    ~= 1.3 KB (loaded once)
+#   dynamic instance buffer  24-byte Inst * INST_MAX        ~= 75 KB (the swarm + tanks +
+#                                          FX + overlays in view; terrain/nests are no
+#                                          longer here — they are the static town below)
+#   STATIC TOWN buffer  24-byte Inst * N_WORLD_CELLS (19200) ~= 460 KB (the baked map, one
+#                                          instance/cell; built once at init, re-baked only
+#                                          on a wall/nest edit; uploaded once, then culled)
+#   static run table  StaticRun * (N_SCREENS*MAP_MESH_COUNT) ~= 12 KB
+#   procedural meshes (src/mesh_data.c)                     ~= 2 KB (loaded once)
+#   town meshes (src/map_mesh_data.c, baked Kenney art)     ~= 400 KB (data segment, once)
 # The DEPTH buffer is a viewport-sized GPU texture, NOT wasm linear memory. The sim's
-# high-water mark is unchanged from chapter 3 (~1.04 MiB), and the bigger instance
-# buffer is still tiny against it, so the linear memory stays 2 MiB (32 pages). Still
-# all static, integer, allocation-free.
+# high-water mark is unchanged from chapter 3 (~1.04 MiB); the static town + town meshes
+# add ~0.9 MiB, comfortably inside the 8 MiB linear memory. Still all static, integer,
+# allocation-free — and the per-FRAME map cost is now just a frustum cull, never a re-emit.
 clang \
   --target=wasm32 \
   -nostdlib \
@@ -44,7 +48,8 @@ clang \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_path.c src/agent_turn.c src/agent_move.c src/mites.c \
   src/tanks_fire.c src/render.c src/dirtab.c src/collide.c src/escape_table.c \
-  src/grid_paths.c src/edge_paths.c src/map_data.c src/mesh_data.c src/map_mesh_data.c
+  src/grid_paths.c src/edge_paths.c src/map_data.c src/mesh_data.c src/map_mesh_data.c \
+  src/staticmap.c
 
 VER="$(date -u '+%Y.%m.%d-%H%M%S')"
 printf 'window.TANK_VERSION = "%s";\n' "$VER" > version.js

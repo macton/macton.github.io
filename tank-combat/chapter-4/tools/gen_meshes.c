@@ -95,11 +95,14 @@ int main(void) {
   printf("};\n");
   printf("const uint32_t MESH_VERT_TOTAL = %d;\n\n", NV);
 
-  /* the kind->mesh binding for the asset pass, keyed by the real enum so it can't
-   * drift from render.h. floors/walls/nests bind the baked KENNEY map meshes; the
-   * placeholder pass (page toggle) binds M_CUBE for every kind instead. */
+  /* the kind->mesh binding for the DYNAMIC things, keyed by the real enum so it can't
+   * drift from render.h. The terrain (floors/walls/nests) is no longer a per-frame
+   * kind — it is STATIC TOWN map data, placed by src/staticmap.c and drawn from the
+   * uploaded-once static buffer with the town meshes. What remains here is the swarm,
+   * the tanks, and the overlays; the placeholder pass (page toggle) binds M_CUBE for
+   * every kind instead. */
   printf("const uint8_t MESH_FOR_KIND[K_OPAQUE_COUNT] = {\n");
-  printf("  [K_FLOOR]=M_MAP_FLOOR, [K_WALL]=M_MAP_WALL, [K_NEST]=M_MAP_NEST, [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID,\n");
-  printf("  [K_HULL]=M_HULL, [K_TURRET]=M_TURRET, [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");
+  printf("  [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID, [K_HULL]=M_HULL, [K_TURRET]=M_TURRET,\n");
+  printf("  [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");
   return 0;
 }

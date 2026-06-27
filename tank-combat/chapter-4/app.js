@@ -129,6 +129,8 @@ async function main() {
     // chapter-4 render protocol: the kinds + the baked meshes (the projection is a host MVP)
     KOC: wasm.k_opaque_count(), MVSTRIDE: wasm.mesh_vstride(), MVTOTAL: wasm.mesh_vert_total(),
     MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(),
+    // the STATIC TOWN: a run-table stride (the instance stride == inst_stride == STRIDE)
+    SRSTRIDE: wasm.static_run_stride(),
   };
   const mem = () => wasm.memory.buffer;
   const view = {
@@ -176,6 +178,30 @@ async function main() {
 
   const instBuf = device.createBuffer({ size: C.MAX_INST * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
   const viewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  // the STATIC TOWN instance buffer: the bake (one Inst per cell, build_static_map),
+  // uploaded ONCE and re-uploaded only when the map re-bakes. Same 24-byte Inst layout as
+  // the dynamic buffer, so it feeds the SAME pipeline — we just bind THIS buffer for the
+  // static draws. Sized to the cell count (the bake never exceeds one instance per cell).
+  const staticBuf = device.createBuffer({ size: C.NWC * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  // each screen's world AABB (subcells), constant — the frustum cull tests the visible box
+  // against these to pick which screens' runs to draw ("at most, a filter for culling").
+  const screenBox = [];
+  for (let s = 0; s < C.NS; s++) { const sx = s % C.SX, sy = (s / C.SX) | 0;
+    screenBox.push([sx * C.GW * C.SUB, sy * C.GH * C.SUB, (sx + 1) * C.GW * C.SUB, (sy + 1) * C.GH * C.SUB]); }
+  // re-upload the static instances + re-read the run table ONLY when the bake changes (a
+  // wall toggled, a nest moved); static_version ticks then. Per frame we touch neither.
+  let staticVersion = -1, staticRuns = [];
+  function syncStatic() {
+    const v = wasm.static_version(); if (v === staticVersion) return;
+    staticVersion = v;
+    device.queue.writeBuffer(staticBuf, 0, new Uint8Array(mem(), wasm.static_inst_ptr(), wasm.static_inst_count() * C.STRIDE));
+    const nr = wasm.static_run_count(), dv = new DataView(mem(), wasm.static_run_ptr(), nr * C.SRSTRIDE);
+    staticRuns = [];
+    for (let r = 0; r < nr; r++) { const o = r * C.SRSTRIDE;
+      staticRuns.push({ screen: dv.getUint16(o, true), mesh: dv.getUint16(o + 2, true),
+                        first: dv.getUint32(o + 4, true), count: dv.getUint32(o + 8, true) }); }
+  }
   const module = device.createShaderModule({ code: WGSL });
 
   const bgl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } }] });
@@ -225,7 +251,7 @@ async function main() {
   // straight-down gives the angled, perspective look (leaning south, so screen-up is
   // north). viewWrite writes the MVP and remembers its inverse so a pixel can be cast
   // back onto the ground. Nothing here touches the simulation.
-  let useAssets = false;
+  let useAssets = true;   // default: show the baked town + meshes; toggle OFF -> the placeholder massing model
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
   let invMVP = null;
   const ZMIN = 0.85, ZMAX = 20;
@@ -512,15 +538,30 @@ async function main() {
 
     const n = wasm.inst_count();
     device.queue.writeBuffer(instBuf, 0, view.instBytes(n));
+    syncStatic();                       // upload-once the baked town (no-op unless it re-baked)
     ensureDepth();
     const enc = device.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(),
         clearValue: { r: 0.055, g: 0.065, b: 0.085, a: 1 }, loadOp: "clear", storeOp: "store" }],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
-    pass.setBindGroup(0, bind); pass.setVertexBuffer(0, meshBuf); pass.setVertexBuffer(1, instBuf);
-    // opaque: one draw per kind, binding that kind's mesh (placeholder cube, or a baked mesh)
+    pass.setBindGroup(0, bind); pass.setVertexBuffer(0, meshBuf);
     pass.setPipeline(opaquePipe);
+    // the STATIC TOWN first: bind the uploaded-once buffer and draw only the runs whose
+    // SCREEN overlaps the visible box — the one per-frame filter the map needs (no rebuild,
+    // no re-emit). Each run is one instanced draw of its town mesh. The asset toggle late-binds
+    // the map too: OFF flattens every cell to the placeholder cube (a white massing model —
+    // same instances, the heights still read road/building/landmark), ON shows the town.
+    pass.setVertexBuffer(1, staticBuf);
+    for (const run of staticRuns) {
+      const sb = screenBox[run.screen];
+      if (box[0] <= sb[2] && box[2] >= sb[0] && box[1] <= sb[3] && box[3] >= sb[1]) {
+        const m = meshTable[useAssets ? run.mesh : C.CUBE]; pass.draw(m.cnt, run.count, m.off, run.first);
+      }
+    }
+    // then the DYNAMIC things from their own buffer: one draw per kind, binding that kind's
+    // mesh (placeholder cube, or a baked procedural mesh).
+    pass.setVertexBuffer(1, instBuf);
     let first = 0;
     for (let k = 0; k < C.KOC; k++) {
       const cnt = wasm.draw_opaque(k);

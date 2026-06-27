@@ -21,8 +21,6 @@
 #define RGBA(r, g, b, a) \
   ((uint32_t)(r) | ((uint32_t)(g) << 8) | ((uint32_t)(b) << 16) | ((uint32_t)(a) << 24))
 
-static const uint32_t COL_FLOOR = RGBA(44, 48, 58, 255);
-static const uint32_t COL_WALL  = RGBA(96, 102, 120, 255);
 /* per-tank identity colours: hull/turret, the darker barrel, and the lighter path */
 static const uint32_t COL_BODY[N_TANKS] = {
   RGBA(242, 158, 41, 255), RGBA(77, 179, 230, 255), RGBA(120, 205, 120, 255), RGBA(196, 140, 235, 255) };
@@ -42,8 +40,9 @@ static const uint32_t COL_MITE_IDLE      = RGBA( 96, 150, 138, 255);
 static const uint32_t COL_MITE_HUNT_HOT  = RGBA(240,  92,  60, 255);
 static const uint32_t COL_MITE_HUNT_COLD = RGBA(150,  64,  74, 255);
 /* the nests (NEST_COUNT of them on the 8x8 map), a full hue wheel — one distinct tint per
- * nest (matches NESTC in app.js). S=(230-110)/230, V=230/255, hues evenly spaced. */
-static const uint32_t COL_NEST[NEST_COUNT] = {
+ * nest (matches NESTC in app.js). S=(230-110)/230, V=230/255, hues evenly spaced. Shared
+ * (declared in render.h): the mite homing tint here + the static landmark tint in staticmap.c. */
+const uint32_t COL_NEST[NEST_COUNT] = {
   RGBA(230, 146, 110, 255), RGBA(230, 157, 110, 255), RGBA(230, 169, 110, 255), RGBA(230, 180, 110, 255),
   RGBA(230, 192, 110, 255), RGBA(230, 203, 110, 255), RGBA(230, 215, 110, 255), RGBA(230, 226, 110, 255),
   RGBA(223, 230, 110, 255), RGBA(211, 230, 110, 255), RGBA(200, 230, 110, 255), RGBA(188, 230, 110, 255),
@@ -65,21 +64,17 @@ static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright 
 #define MITE_AGE_HOT 150   /* frames a sighting stays "hot" in the hunt tint */
 
 /* per-kind heights + footprints, in subcells (render-only — z lives nowhere in the
- * sim). A floor is a thin slab on the ground; a wall is a full-height cube; tanks
- * and mites sit on the floor; a nest is a tall pylon; the overlays sit just above
- * the floor (a hair, to avoid z-fighting) or rise as a beacon/spike. */
-#define FLOOR_H    (SUB / 8)        /* 32: a thin slab */
-#define WALL_H     SUB              /* 256: a full-height cube */
+ * sim). The terrain and nests are no longer here — they are static town map data
+ * (staticmap.c). FLOOR_H is kept as the ground plane the dynamic things sit on: tanks
+ * and mites sit on the floor; the overlays sit just above it (a hair, to avoid
+ * z-fighting) or rise as a beacon/spike. */
+#define FLOOR_H    (SUB / 8)        /* 32: the ground plane the dynamic things sit on */
 #define MITE_H     (SUB / 3)        /* ~85 */
 #define HULL_H     (SUB / 2)        /* 128 */
 #define TURRET_H   (SUB / 4)        /* 64, on top of the hull */
 #define BARREL_H   (SUB / 6)        /* ~42 */
-#define NEST_H     (SUB + SUB / 2)  /* 384: a tall pylon */
 #define BOLT_H     (SUB / 8)        /* 32: a thin bolt */
-#define FLOOR_HALF (SUB / 2 - 4)    /* inset a hair so cell edges read */
-#define WALL_HALF  (SUB / 2)        /* fills the cell footprint */
 #define MITE_HALF  40
-#define NEST_HALF  54
 #define HULL_HX    87
 #define HULL_HY    67
 #define TURRET_HALF 42
@@ -135,42 +130,10 @@ static int cell_in_box(const Box* b, uint32_t cell) {
   return in_box(b, wc_x(cell) * SUB + SUB / 2, wc_y(cell) * SUB + SUB / 2);
 }
 
-/* ---- per-kind emitters: each appends its kind's instances inside the box -------- */
-
-static uint32_t emit_terrain(const World* w, Inst* out, uint32_t k, int want_wall, const Box* b) {
-  int cx0 = b->x0 >> SUB_SHIFT, cx1 = b->x1 >> SUB_SHIFT;
-  int cy0 = b->y0 >> SUB_SHIFT, cy1 = b->y1 >> SUB_SHIFT;
-  if (cx0 < 0) cx0 = 0; if (cy0 < 0) cy0 = 0;
-  if (cx1 > BIG_W - 1) cx1 = BIG_W - 1; if (cy1 > BIG_H - 1) cy1 = BIG_H - 1;
-  for (int cy = cy0; cy <= cy1; cy++)
-    for (int cx = cx0; cx <= cx1; cx++) {
-      int wall = cell_is_wall(w->grid, cx, cy);
-      if (wall != want_wall) continue;
-      int px = cx * SUB + SUB / 2, py = cy * SUB + SUB / 2;
-      if (want_wall) {
-        int jx = 0, jy = 0;   /* a recently-struck wall jolts: a small, fast-decaying jitter */
-        uint16_t cell = (uint16_t)wc_pack(cx, cy);
-        for (uint32_t e = 0; e < WALL_SHAKE_MAX; e++)
-          if (w->wall_shake_t[e] && w->wall_shake_cell[e] == cell) {
-            int tt = w->wall_shake_t[e], amp = (WALL_SHAKE_AMP * tt) / WALL_SHAKE_DUR;
-            jx = (tt & 1) ? amp : -amp; jy = (tt & 2) ? amp : -amp;   /* flips each tick: a buzz */
-            break;
-          }
-        k = push(out, k, px + jx, py + jy, WALL_H / 2, WALL_HALF, WALL_HALF, WALL_H / 2, 16384, 0, COL_WALL);
-      }
-      else           k = push(out, k, px, py, FLOOR_H / 2, FLOOR_HALF, FLOOR_HALF, FLOOR_H / 2, 16384, 0, COL_FLOOR);
-    }
-  return k;
-}
-
-static uint32_t emit_nests(const World* w, Inst* out, uint32_t k, const Box* b) {
-  for (uint32_t n = 0; n < NEST_COUNT; n++) {
-    if (!cell_in_box(b, w->nest_cell[n])) continue;
-    int px = wc_x(w->nest_cell[n]) * SUB + SUB / 2, py = wc_y(w->nest_cell[n]) * SUB + SUB / 2;
-    k = push(out, k, px, py, NEST_H / 2, NEST_HALF, NEST_HALF, NEST_H / 2, 16384, 0, COL_NEST[n]);
-  }
-  return k;
-}
+/* ---- per-kind emitters: each appends its kind's instances inside the box --------
+ * The terrain (floors/walls) and the nests are gone from here: they are STATIC TOWN
+ * map data now (build_static_map in staticmap.c), placed once and drawn from the
+ * uploaded-once static buffer. What follows emits only the DYNAMIC things. */
 
 /* the selected tank's selection highlight — green for AUTOPATH, yellow for MANUAL.
  * UNSELECTED tanks draw none, so this IS the mode indicator: a bright base ring under
@@ -326,9 +289,6 @@ uint32_t build_view(const World* w, Inst* out, DrawList* dl,
   collect_paths(w);
 
   uint32_t k = 0, base;
-  base = k; k = emit_terrain(w, out, k, 0, &b);        dl->opaque[K_FLOOR]  = k - base;
-  base = k; k = emit_terrain(w, out, k, 1, &b);        dl->opaque[K_WALL]   = k - base;
-  base = k; k = emit_nests(w, out, k, &b);             dl->opaque[K_NEST]   = k - base;
   base = k; k = emit_rings(w, out, k, &b);             dl->opaque[K_RING]   = k - base;
   base = k; k = emit_mites(w, out, k, &b);             dl->opaque[K_MITE]   = k - base;
   base = k; k = emit_tank_part(w, out, k, K_HULL,  &b); dl->opaque[K_HULL]   = k - base;

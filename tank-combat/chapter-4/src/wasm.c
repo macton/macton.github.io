@@ -21,8 +21,11 @@
 #include "sim.h"
 #include "render.h"
 #include "mesh_data.h"
+#include "map_mesh_data.h"
+#include "staticmap.h"
 
 #define EXPORT(name) __attribute__((export_name(#name)))
+#define MESH_TOTAL_COUNT (M_PROC_COUNT + MAP_MESH_COUNT)   /* procedural + town meshes */
 
 static World    g_world;
 static Inst     g_inst[INST_MAX];
@@ -34,13 +37,28 @@ static uint32_t g_inst_count;
 static int32_t  g_wx0, g_wy0, g_wx1 = ARENA_W_SUB - 1, g_wy1 = ARENA_H_SUB - 1;
 static uint16_t g_hover = REC_EMPTY;
 
+/* the STATIC TOWN — baked once from the frozen map (build_static_map), uploaded by the
+ * host ONCE and instanced every frame with only a frustum cull. It is re-baked ONLY
+ * when the map itself changes (a wall toggled, a nest moved); the version counter ticks
+ * then so the host re-uploads exactly once per change, never per frame. tick() does NOT
+ * touch it — the town is frozen while the swarm runs over it. */
+static Inst      g_static_inst[STATIC_INST_MAX];
+static StaticRun g_static_runs[STATIC_RUN_MAX];
+static uint32_t  g_static_inst_count, g_static_run_count, g_static_version;
+
 static void rebuild(void) {
   g_inst_count = build_view(&g_world, g_inst, &g_dl, g_wx0, g_wy0, g_wx1, g_wy1, g_hover);
+}
+static void rebuild_static(void) {
+  g_static_inst_count = build_static_map(g_world.grid, g_world.nest_cell,
+                                         g_static_inst, g_static_runs, &g_static_run_count);
+  g_static_version++;
 }
 
 EXPORT(init) void init(void) {
   sim_init(&g_world);
   g_wx0 = 0; g_wy0 = 0; g_wx1 = ARENA_W_SUB - 1; g_wy1 = ARENA_H_SUB - 1; g_hover = REC_EMPTY;
+  rebuild_static();
   rebuild();
 }
 EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_count; }
@@ -57,7 +75,9 @@ EXPORT(select_tank) void select_tank(uint32_t tank) {
   rebuild();
 }
 EXPORT(set_dest)    void set_dest(uint32_t tank, uint32_t wcx, uint32_t wcy) { sim_set_dest(&g_world, tank, wcx, wcy); rebuild(); }
-EXPORT(toggle_wall) void toggle_wall(uint32_t wcx, uint32_t wcy) { sim_toggle_wall(&g_world, wcx, wcy); rebuild(); }
+/* toggling a wall changes the MAP, so the static town re-bakes (a building appears/clears,
+ * the road autotiling around it shifts); the version bump tells the host to re-upload. */
+EXPORT(toggle_wall) void toggle_wall(uint32_t wcx, uint32_t wcy) { sim_toggle_wall(&g_world, wcx, wcy); rebuild_static(); rebuild(); }
 
 /* the visible box the free pan/zoom camera shows (world subcells), and the cursor
  * cell highlight (wcx>=BIG_W clears it). Pure presentation; the host computes both
@@ -69,8 +89,9 @@ EXPORT(set_view) void set_view(int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy
 }
 
 /* ---- the swarm: re-seed / nest mutators, live pointers, scalars, tunables -- */
-EXPORT(set_seed) void set_seed(uint32_t seed) { sim_set_seed(&g_world, seed); rebuild(); }
-EXPORT(set_nest) void set_nest(uint32_t n, uint32_t wcx, uint32_t wcy) { sim_set_nest(&g_world, n, wcx, wcy); rebuild(); }
+EXPORT(set_seed) void set_seed(uint32_t seed) { sim_set_seed(&g_world, seed); rebuild(); }   /* swarm only: the map is unchanged, so no static re-bake */
+/* moving a nest moves its LANDMARK, so the static town re-bakes (and re-uploads). */
+EXPORT(set_nest) void set_nest(uint32_t n, uint32_t wcx, uint32_t wcy) { sim_set_nest(&g_world, n, wcx, wcy); rebuild_static(); rebuild(); }
 
 EXPORT(mite_xy_ptr)   uint32_t* mite_xy_ptr(void)   { return g_world.mite_xy; }
 EXPORT(mite_angle_ptr) uint16_t* mite_angle_ptr(void) { return g_world.mite_ang; }
@@ -154,22 +175,38 @@ EXPORT(draw_translucent)  uint32_t draw_translucent(void)          { return g_dl
  * exports no projection basis — it just emits the world placements the host views. */
 
 /* the baked low-poly meshes (loaded once at startup, instanced every frame). Two
- * sources share one index space: procedural meshes [0,M_PROC_COUNT) then the Kenney
- * map meshes [M_PROC_COUNT,M_COUNT). The page uploads the two vertex buffers back to
- * back (procedural first), so mesh_voff() returns offsets into that combined buffer. */
+ * tables share one GPU buffer: the PROCEDURAL meshes [0,M_PROC_COUNT) for the dynamic
+ * things, then the TOWN meshes [M_PROC_COUNT,MESH_TOTAL_COUNT) for the static map. The
+ * page uploads the two vertex buffers back to back (procedural first), so mesh_voff()
+ * returns offsets into that combined buffer; the static runs carry already-offset ids. */
 EXPORT(mesh_data_ptr)     const int8_t* mesh_data_ptr(void)        { return MESH_VERT; }       /* procedural verts */
-EXPORT(map_mesh_data_ptr) const int8_t* map_mesh_data_ptr(void)    { return MAP_MESH_VERT; }   /* Kenney map verts */
+EXPORT(map_mesh_data_ptr) const int8_t* map_mesh_data_ptr(void)    { return MAP_MESH_VERT; }   /* town verts */
 EXPORT(mesh_proc_total)   uint32_t mesh_proc_total(void)           { return MESH_VERT_TOTAL; }  /* procedural vertex count */
 EXPORT(mesh_vert_total)   uint32_t mesh_vert_total(void)           { return MESH_VERT_TOTAL + MAP_MESH_VERT_TOTAL; }
 EXPORT(mesh_vstride)      uint32_t mesh_vstride(void)              { return MESH_VSTRIDE; }
-EXPORT(mesh_count)        uint32_t mesh_count(void)                { return M_COUNT; }
+EXPORT(mesh_count)        uint32_t mesh_count(void)                { return MESH_TOTAL_COUNT; }
 EXPORT(mesh_cube)         uint32_t mesh_cube(void)                 { return M_CUBE; }
 EXPORT(mesh_voff)         uint32_t mesh_voff(uint32_t m) {          /* offset into the COMBINED buffer */
   if (m < M_PROC_COUNT) return MESH_VOFF[m];
-  return m < M_COUNT ? MESH_VERT_TOTAL + MAP_MESH_VOFF[m - M_PROC_COUNT] : 0;
+  return m < MESH_TOTAL_COUNT ? MESH_VERT_TOTAL + MAP_MESH_VOFF[m - M_PROC_COUNT] : 0;
 }
 EXPORT(mesh_vcnt)         uint32_t mesh_vcnt(uint32_t m) {
   if (m < M_PROC_COUNT) return MESH_VCNT[m];
-  return m < M_COUNT ? MAP_MESH_VCNT[m - M_PROC_COUNT] : 0;
+  return m < MESH_TOTAL_COUNT ? MAP_MESH_VCNT[m - M_PROC_COUNT] : 0;
 }
 EXPORT(mesh_for_kind)     uint32_t mesh_for_kind(uint32_t kind)    { return kind < K_OPAQUE_COUNT ? MESH_FOR_KIND[kind] : 0; }
+
+/* ---- the STATIC TOWN: the bake the host uploads once and frustum-culls per frame ----
+ * static_inst_ptr/count/stride describe the instance buffer (same 24-byte Inst layout as
+ * the dynamic one — same vertex pipeline). The run table groups those instances by
+ * (screen, mesh): one run is a contiguous range sharing a town mesh, within one source
+ * screen — so the host culls whole screens, then draws the visible runs. static_version
+ * ticks whenever the map re-bakes (wall toggled / nest moved), so the host re-uploads the
+ * instance buffer + re-reads the runs exactly then, and otherwise touches neither. */
+EXPORT(static_inst_ptr)   const Inst*      static_inst_ptr(void)   { return g_static_inst; }
+EXPORT(static_inst_count) uint32_t         static_inst_count(void) { return g_static_inst_count; }
+EXPORT(static_inst_stride)uint32_t         static_inst_stride(void){ return (uint32_t)sizeof(Inst); }
+EXPORT(static_run_ptr)    const StaticRun* static_run_ptr(void)    { return g_static_runs; }
+EXPORT(static_run_count)  uint32_t         static_run_count(void)  { return g_static_run_count; }
+EXPORT(static_run_stride) uint32_t         static_run_stride(void) { return (uint32_t)sizeof(StaticRun); }
+EXPORT(static_version)    uint32_t         static_version(void)    { return g_static_version; }

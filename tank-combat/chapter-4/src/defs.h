@@ -167,8 +167,8 @@ static inline uint32_t screen_of(uint32_t sx, uint32_t sy) { return sy * SCREENS
 /* ---- world cells: one flat index over the BIG_W x BIG_H toroidal grid ------
  * A world cell is wcy*BIG_W + wcx, in [0, N_WORLD_CELLS). The mite record stores
  * one such cell (the last-known tank position); REC_EMPTY is the out-of-range
- * sentinel for "no cell" (4800 cells, so 0xFFFF can never be a real one). */
-#define N_WORLD_CELLS (BIG_W * BIG_H)        /* 4800 */
+ * sentinel for "no cell" (19200 cells, so 0xFFFF can never be a real one). */
+#define N_WORLD_CELLS (BIG_W * BIG_H)        /* 160 * 120 = 19200 */
 #define REC_EMPTY     0xFFFFu                 /* empty record: a readable, propagating value */
 static inline uint16_t wc_pack(int32_t wcx, int32_t wcy) { return (uint16_t)(wcy * BIG_W + wcx); }
 static inline int32_t  wc_x(uint32_t c) { return (int32_t)(c % BIG_W); }
