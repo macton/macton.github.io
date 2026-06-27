@@ -507,7 +507,12 @@ async function main() {
   const shadowBind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: lightViewBuf } }] });
   const shadowPipe = device.createRenderPipeline({ layout,
     vertex: { module, entryPoint: "vs_shadow", buffers: vbuffers },
-    primitive: { topology: "triangle-list", cullMode: "none" },
+    // cull FRONT faces -> store only the occluders' BACK (far-from-sun) depth (second-depth shadow
+    // mapping). A light-facing surface is then never its own occluder, so it can't self-shadow: that
+    // kills the acne on sun-lit roofs AND the ragged self-shadow where the cheap LOD1 caster's roof
+    // disagrees with the LOD0 roof the camera draws up close. The cast shadows are unchanged (a solid
+    // building's silhouette is the same from either face). Buildings are closed, so no light leaks.
+    primitive: { topology: "triangle-list", cullMode: "front" },
     depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "less" } });   // no fragment: depth only
   // (Re)bake the sun depth map: draw the whole static town (LOD1 massing — the bulk is all a shadow
   // needs) from the light matrix. Called only when the town changes, exactly like the instance bake.

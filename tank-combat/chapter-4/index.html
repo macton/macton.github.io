@@ -320,10 +320,13 @@
     A sun shadow map is just the scene's depth rendered from the light's point of view; render the
     static town's depth through one <strong>orthographic</strong> pass down the sun direction, and every
     later pixel can ask it "is something between me and the sun?" by projecting its world position into
-    that depth map and comparing. The bake runs at init and re-runs <em>only</em> when the map re-bakes
-    (a wall toggled, a nest moved) — the exact trigger the static instance buffer already uses. Per
-    frame the cost is one filtered compare per pixel, independent of the map's resolution; the shadow
-    of the whole town is, once more, a projection of the frozen map that nobody recomputes.</p>
+    that depth map and comparing. The bake records each occluder's <em>far</em> side (it culls the
+    sun-facing faces), so a lit roof is never its own shadow — that one flip removes the self-shadow
+    speckle without a per-surface bias to tune. The bake runs at init and re-runs <em>only</em> when
+    the map re-bakes (a wall toggled, a nest moved) — the exact trigger the static instance buffer
+    already uses. Per frame the cost is one filtered compare per pixel, independent of the map's
+    resolution; the shadow of the whole town is, once more, a projection of the frozen map that nobody
+    recomputes.</p>
     <p>That handles the <em>static</em> occluders. The <strong>moving</strong> ones — tanks, the swarm,
     the bolts — aren't in the bake, so they get the complementary technique:
     <a href="https://www.bendstudio.com/blog/inside-bend-screen-space-shadows/">Bend Studio's
