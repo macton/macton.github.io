@@ -281,13 +281,30 @@
     directional light, each face tinted by <code>dot(faceNormal, light)</code> over a small ambient
     floor. For an axis-aligned block that is three brightnesses — <strong>top brightest, the two
     visible sides darker</strong> — which is exactly the cue that reads &ldquo;a raised 3-D block.&rdquo;
-    It is computed in the shader from the face normal: no normal texture, no per-vertex lighting,
-    cheap enough to run for every visible instance every frame. The whole first pass is built from a
-    <strong>single unit cube</strong>, instanced, projected, depth-tested, flat-shaded — a
-    body/turret/barrel for a tank, a little spike per mite, and for the static map a white
-    <strong>massing model</strong> whose per-instance heights already read the town: a flat slab for a
-    road, a taller box for a building, a tall one for each landmark. It is genuinely 3-D, just
+    It needs only the face normal — no normal texture, no per-vertex lighting — so the geometry pass
+    just <em>writes that normal into the G-buffer</em>, and a screen pass turns it into light (next).
+    The whole first pass is built from a <strong>single unit cube</strong>, instanced, projected,
+    depth-tested — a body/turret/barrel for a tank, a little spike per mite, and for the static map a
+    white <strong>massing model</strong> whose per-instance heights already read the town: a flat slab
+    for a road, a taller box for a building, a tall one for each landmark. It is genuinely 3-D, just
     primitive — and it is shippable on its own.</p>
+
+    <h2>Lighting is a screen pass — a deferred renderer</h2>
+    <p>The shading now runs <strong>deferred</strong>. The opaque scene is drawn <strong>once</strong>
+    into a <strong>G-buffer</strong> — two screen-sized textures holding each pixel's <em>albedo</em>
+    and its <em>world-space normal</em>, plus depth — and <strong>no light is evaluated there</strong>.
+    The lighting is a separate <strong>screen pass</strong> that reads the G-buffer and writes the lit
+    result: a <strong>hemisphere ambient</strong> (cool sky overhead, a warm ground bounce below,
+    blended by how &ldquo;up&rdquo; each face points) plus one <strong>directional sun</strong>. The
+    background is simply the sky. A gentle exposure curve then rolls the result down to the display.</p>
+    <p>Why split it in two? Because the lighting cost then scales with the <strong>pixels a light
+    touches</strong>, not the object count times the light count. Shaded in the geometry pass, a
+    thousand small lights would mean re-lighting every triangle a thousand times; as a screen pass,
+    each light only pays for the pixels it actually reaches. That is the frequency-of-change argument
+    again, in screen space — the geometry is rasterised once, each light is evaluated only where it
+    lands. The environment is the first, global light; the <strong>per-mite and per-FX point
+    lights</strong> coming next are small bright volumes that <strong>additively accumulate</strong>
+    into the same HDR target — which is the whole reason the renderer is deferred.</p>
 
     <h2>Assets are late-bound data</h2>
     <p>The second pass swaps the primitive cube for real low-poly meshes <strong>without touching
@@ -383,11 +400,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.27-175818"></script>
+  <script src="version.js?v=2026.06.27-195149"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.27-175818");</script>
+  <script type="module">import("./app.js?v=2026.06.27-195149");</script>
 </body>
 </html>
