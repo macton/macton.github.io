@@ -181,8 +181,9 @@ is plain C over the `World`, so it is exercised on the host with no browser.
 Camera roll or a first-person fly-through (the camera stays an up-right orbit — yaw,
 pitch/tilt, fov, pan, and zoom are all provided); animated or rigged meshes / skeletal
 animation (static low-poly, oriented by the sim's
-existing facing); shadows, ambient occlusion, normal/PBR materials (flat face-shading
-only); height/elevation in the **simulation** (`z` is render-only — the world stays a
+existing facing); ambient occlusion, normal/PBR materials (flat face-shading
+only — sun shadows ARE built: a baked light-space map for the static town plus a
+screen-space march for the actors); height/elevation in the **simulation** (`z` is render-only — the world stays a
 2-D grid); terrain autotiling / corner-aware tilesets; a 3-D minimap (it stays
 top-down); per-mite distinct models or LOD (one instanced mesh for the swarm). Each is
 its own future step.

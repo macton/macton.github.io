@@ -313,27 +313,30 @@
     The environment is just the first, global light; the rest are the same idea, localised. None of
     it touches the model — the simulation still does not know it is lit.</p>
 
-    <h2>Shadows without a shadow map — a screen-space ray march</h2>
-    <p>The sun casts shadows the same data-oriented way: not by rendering the scene again from the
-    sun's view into a shadow map, but by <strong>marching the depth buffer we already have</strong>.
-    This is <a href="https://www.bendstudio.com/blog/inside-bend-screen-space-shadows/">Bend Studio's
-    screen-space shadow technique</a> (shipped in <em>Days Gone</em>). For each lit pixel, step a short
-    ray from the surface <strong>toward the sun</strong>; project each step back to the screen and read
-    the stored position there. If an on-screen surface sits <strong>in front of the ray</strong> —
-    within a thickness window, so a thin railing shadows but the sky behind it does not — the sun is
-    blocked, and that pixel falls into shadow. Many small steps keep the edge crisp without a
-    jittered start — an undenoised dither just reads as grain. The whole cost is a handful of texture
-    reads per pixel; there is no second scene pass, no shadow-map resolution to pick, and the
-    occluders are exactly the pixels on screen.</p>
-    <p>The honest limit of one depth layer: it can't see an occluder's <em>far</em> side, so it
-    assumes a fixed thickness. March too far past a tall tower and the technique reconstructs only a
-    smeared, truncated silhouette — a shadow at an odd angle. So the ray is kept <strong>medium
-    range</strong>, where the assumption holds: a clean shadow that <em>grounds</em> each building
-    rather than a long cast one (that would want a shadow map). (Bend's real contribution is the
-    <em>scheduling</em> — marching whole wavefronts of pixels in lockstep along the light direction so
-    each depth texel is read once; here we keep the plain per-pixel march, which gives the same
-    picture.) Because the shadows carry the contrast, the sun can be turned up: a brighter, warmer key
-    light over a dim dusk ambient. Still all screen space, still over a frozen sim.</p>
+    <h2>Shadows, split by what moves — a baked sun map + a screen-space march</h2>
+    <p>The sun's shadow splits the same way the rest of the chapter splits its data: by <em>frequency
+    of change</em>. The town is static and the sun is fixed, so the buildings' shadow is a <strong>pure
+    function of the frozen map</strong> — and like the town instances, it is <strong>baked once</strong>.
+    A sun shadow map is just the scene's depth rendered from the light's point of view; render the
+    static town's depth through one <strong>orthographic</strong> pass down the sun direction, and every
+    later pixel can ask it "is something between me and the sun?" by projecting its world position into
+    that depth map and comparing. The bake runs at init and re-runs <em>only</em> when the map re-bakes
+    (a wall toggled, a nest moved) — the exact trigger the static instance buffer already uses. Per
+    frame the cost is one filtered compare per pixel, independent of the map's resolution; the shadow
+    of the whole town is, once more, a projection of the frozen map that nobody recomputes.</p>
+    <p>That handles the <em>static</em> occluders. The <strong>moving</strong> ones — tanks, the swarm,
+    the bolts — aren't in the bake, so they get the complementary technique:
+    <a href="https://www.bendstudio.com/blog/inside-bend-screen-space-shadows/">Bend Studio's
+    screen-space shadow march</a> (shipped in <em>Days Gone</em>). For each lit pixel, step a ray from
+    the surface <strong>toward the sun</strong>; project each step back to the screen and read the
+    stored position there. If an on-screen surface sits in front of the ray within a thickness window,
+    the sun is blocked. This is the conventional pairing: a light-space map carries the long cast
+    shadows, a screen-space march adds the contact detail and the actors the map never saw. Its honest
+    limit is one depth layer — it can't see an occluder's far side, so marched too far past a tower it
+    smears a truncated silhouette; kept medium-range it just <em>grounds</em> what moves. The two
+    visibilities multiply, and because the shadows carry the contrast the sun runs bright and warm over
+    a dim dusk ambient — long building shadows down the streets, a soft pool under every tank. Still
+    over a frozen sim, which never learns it casts one.</p>
 
     <h2>Assets are late-bound data</h2>
     <p>The second pass swaps the primitive cube for real low-poly meshes <strong>without touching

@@ -45,6 +45,21 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f, @location(2
   o.world = world;
   return o;
 }
+// SHADOW BAKE: the same instance transform as vs, but projected by the SUN's orthographic light
+// matrix (bound to the view uniform) and emitting depth ONLY. Run once over the static town to
+// bake a sun depth map — the town is frozen, so its sun shadow is too (re-baked only on a map
+// edit, exactly like the static instance buffer). No fragment stage: the rasteriser writes depth.
+@vertex fn vs_shadow(
+    @location(0) mpos: vec4f,
+    @location(2) wxy: vec2<i32>, @location(3) wzhz: vec2<i32>,
+    @location(4) hxy: vec2<i32>, @location(5) rot: vec2<i32>) -> @builtin(position) vec4f {
+  let half = vec3f(f32(hxy.x), f32(hxy.y), f32(wzhz.y));
+  let local = mpos.xyz * half;
+  let c = f32(rot.x) * (1.0 / 16384.0); let s = f32(rot.y) * (1.0 / 16384.0);
+  let rx = local.x * c - local.y * s; let ry = local.x * s + local.y * c;
+  let world = vec3f(f32(wxy.x) + rx, f32(wxy.y) + ry, f32(wzhz.x) + local.z);
+  return view.mvp * vec4f(world, 1.0);                         // sun light-space clip; depth is z/w
+}
 // DEFERRED geometry: write the SURFACE into the G-buffer (albedo + world normal) instead of
 // shading it here. gColor.a = 1 marks a surface; the cleared background stays 0 (sky). The
 // lighting is a later SCREEN pass, so one light or a thousand cost the same fill here — that
@@ -110,14 +125,17 @@ const WGSL_SCREEN = `
 struct Env {
   sun: vec4f, sunCol: vec4f, sky: vec4f, ground: vec4f,   // sun.xyz dir + .w intensity; sky/ground = hemisphere ambient
   shp: vec4f,                                             // screen-space shadow: maxDist, steps, thickness, bias (subcells)
-  eye: vec4f,                                             // camera world position (subcells)
+  eye: vec4f,                                             // camera world position (subcells); .w = shadow-map normal-offset bias (subcells)
   mvp: mat4x4f,                                           // world (subcells) -> clip, to project the shadow ray to screen
+  lightMvp: mat4x4f,                                      // world (subcells) -> SUN light clip, to sample the baked shadow map
 };
 @group(0) @binding(0) var<uniform> env: Env;
 @group(0) @binding(1) var gColorTex: texture_2d<f32>;
 @group(0) @binding(2) var gNormalTex: texture_2d<f32>;
 @group(0) @binding(3) var gPosTex: texture_2d<f32>;
 @group(0) @binding(4) var hdrTex: texture_2d<f32>;
+@group(0) @binding(5) var shadowMap: texture_depth_2d;        // the baked sun depth map (static town)
+@group(0) @binding(6) var shadowSamp: sampler_comparison;     // hardware PCF compare
 @vertex fn vs_full(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));   // one screen-covering triangle
   return vec4f(p[vi], 0.0, 1.0);
@@ -148,6 +166,19 @@ fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
   }
   return 1.0;
 }
+// BAKED SUN SHADOW MAP: the static town's depth from the sun, rendered once. Project this
+// receiver into the sun's light clip, then PCF-compare its depth against the stored nearest-to-
+// sun depth — if something static is closer to the sun, this pixel is in shadow. Handles the LONG
+// building shadows a single-layer screen-space march can't (it can't see an occluder's far side);
+// the SSS still adds contact + the DYNAMIC actors, which aren't in this static bake. A normal-
+// offset bias (push the receiver toward the sun along its normal) kills the self-shadow acne.
+fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
+  let clip = env.lightMvp * vec4f(pos + n * env.eye.w, 1.0);
+  let ndc = clip.xyz / clip.w;
+  let uv = ndc.xy * vec2f(0.5, -0.5) + vec2f(0.5);
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) { return 1.0; }
+  return textureSampleCompareLevel(shadowMap, shadowSamp, uv, ndc.z - 0.0008);   // lit where receiver is nearer than the stored occluder
+}
 // ENVIRONMENTAL lighting: a hemisphere ambient (sky overhead, a dim ground bounce below,
 // lerped by how "up" the face points — +z is up) plus one directional sun, the sun SHADOWED in
 // screen space. The background (mask 0) is the sky itself.
@@ -160,7 +191,7 @@ fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
   var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
-  if (sun > 0.0) { sun = sun * sun_shadow(pos, n); }                     // shadow the SUN term only; ambient still fills
+  if (sun > 0.0) { sun = sun * shadow_map(pos, n) * sun_shadow(pos, n); }  // baked town shadow + screen-space (dynamic + contact); ambient still fills
   return vec4f(alb.rgb * (ambient + env.sunCol.rgb * sun), 1.0);
 }
 // TONEMAP: exposure roll-off (1 - e^-cx) — near-linear in the mid-tones, never clips, so the
@@ -197,6 +228,10 @@ function m4lookAt(eye, center, up) {                     // right-handed view ma
   const z = v3norm(v3sub(eye, center)), x = v3norm(v3cross(up, z)), y = v3cross(z, x);
   return [ x[0],y[0],z[0],0,  x[1],y[1],z[1],0,  x[2],y[2],z[2],0,
            -v3dot(x,eye),-v3dot(y,eye),-v3dot(z,eye),1 ];
+}
+function m4ortho(l, r, b, t, near, far) {                // WebGPU clip: z in [0,1] (parallel projection)
+  return [ 2/(r-l),0,0,0,  0,2/(t-b),0,0,  0,0,1/(near-far),0,
+           -(r+l)/(r-l), -(t+b)/(t-b), near/(near-far), 1 ];
 }
 function m4invert(m) {                                    // general 4x4 inverse
   const a00=m[0],a01=m[1],a02=m[2],a03=m[3], a10=m[4],a11=m[5],a12=m[6],a13=m[7],
@@ -315,12 +350,22 @@ async function main() {
   function syncStatic() {
     const v = wasm.static_version(); if (v === staticVersion) return;
     staticVersion = v;
-    device.queue.writeBuffer(staticBuf, 0, new Uint8Array(mem(), wasm.static_inst_ptr(), wasm.static_inst_count() * C.STRIDE));
+    const nInst = wasm.static_inst_count();
+    device.queue.writeBuffer(staticBuf, 0, new Uint8Array(mem(), wasm.static_inst_ptr(), nInst * C.STRIDE));
     const nr = wasm.static_run_count(), dv = new DataView(mem(), wasm.static_run_ptr(), nr * C.SRSTRIDE);
     staticRuns = [];
     for (let r = 0; r < nr; r++) { const o = r * C.SRSTRIDE;
       staticRuns.push({ screen: dv.getUint16(o, true), mesh: dv.getUint16(o + 2, true),
                         first: dv.getUint32(o + 4, true), count: dv.getUint32(o + 8, true) }); }
+    // the town changed, so its baked SUN shadow is stale: refit the light frustum to the tallest
+    // instance (wz + hz, subcells) and re-render the depth map. Once, here — never per frame.
+    const idv = new DataView(mem(), wasm.static_inst_ptr(), nInst * C.STRIDE);
+    let maxTop = 0;
+    for (let i = 0; i < nInst; i++) { const o = i * C.STRIDE; const top = idv.getInt16(o + 8, true) + idv.getInt16(o + 10, true); if (top > maxTop) maxTop = top; }
+    lightMVP = sunLightMatrix(maxTop);
+    device.queue.writeBuffer(lightViewBuf, 0, new Float32Array(lightMVP));   // for the bake (vs_shadow)
+    device.queue.writeBuffer(envBuf, 160, new Float32Array(lightMVP));       // for the sample (fs_light)
+    renderShadowMap();
   }
   const module = device.createShaderModule({ code: WGSL });
   const screenModule = device.createShaderModule({ code: WGSL_SCREEN });
@@ -372,9 +417,14 @@ async function main() {
                                                                          // a clean grounding shadow. 40 small steps keep the edge crisp without dither.
   };
   const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
-  // 160 bytes: the STATIC sun + ambient + shadow params (below); the per-frame eye + MVP are
-  // appended by viewWrite (the shadow march needs them to project ray steps to screen).
-  const envBuf = device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  // the BAKED SUN SHADOW MAP: one orthographic depth render of the static town from the sun,
+  // re-baked only when the map re-bakes. SHADOW_RES is a one-time cost (the per-frame cost is one
+  // PCF sample, independent of resolution); SHADOW_NBIAS is the receiver normal-offset (subcells).
+  const SHADOW_RES = 2048, SHADOW_NBIAS = 28;
+  let lightMVP = null;   // world (subcells) -> sun light clip; recomputed on re-bake (sun + world are otherwise fixed)
+  // 224 bytes: the STATIC sun + ambient + shadow params (0..80); the per-frame eye + camera MVP
+  // appended by viewWrite (80..160); the STATIC sun light MVP written by syncStatic (160..224).
+  const envBuf = device.createBuffer({ size: 224, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   function writeEnv() {
     const s = norm3(env.sunDir);
     device.queue.writeBuffer(envBuf, 0, new Float32Array([
@@ -385,12 +435,36 @@ async function main() {
       env.sh[0], env.sh[1], env.sh[2], env.sh[3] ]));
   }
   writeEnv();
+  // The SUN's orthographic light matrix (world subcells -> light clip). The sun is a parallel
+  // light, so its shadow is an orthographic depth render. Fit the ortho box to the whole town's
+  // world AABB (in CELLS): place the eye far back along the sun direction, transform the 8 box
+  // corners into light space, and bound them — a tight box maximises depth precision. maxTopSub
+  // is the tallest baked instance (subcells), so the frustum just clears the skyscraper.
+  function sunLightMatrix(maxTopSub) {
+    const dir = norm3(env.sunDir);                       // toward the sun
+    const maxZc = Math.max(1, maxTopSub / C.SUB);        // tallest building, in cells
+    const ctr = [C.BW / 2, C.BH / 2, maxZc / 2];
+    const D = (C.BW + C.BH) * 1.5;                       // push the eye well outside the town
+    const eye = [ctr[0] + dir[0] * D, ctr[1] + dir[1] * D, ctr[2] + dir[2] * D];
+    const view = m4lookAt(eye, ctr, [0, 0, 1]);
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let cx = 0; cx < 2; cx++) for (let cy = 0; cy < 2; cy++) for (let cz = 0; cz < 2; cz++) {
+      const v = m4vec(view, [cx ? C.BW : 0, cy ? C.BH : 0, cz ? maxZc : 0, 1]);  // corner -> light view space
+      for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], v[k]); hi[k] = Math.max(hi[k], v[k]); }
+    }
+    const pad = 1;   // one-cell margin so a shadow at the very edge isn't clipped
+    // view z is negative in front; near = nearest = -hi.z, far = -lo.z (both positive, near < far)
+    const ortho = m4ortho(lo[0] - pad, hi[0] + pad, lo[1] - pad, hi[1] + pad, -hi[2] - pad, -lo[2] + pad);
+    return m4mul(m4mul(ortho, view), m4scale(1 / C.SUB));   // accept world in SUBCELLS, like the camera MVP
+  }
   // LIGHTING: env uniform + the two G-buffer textures (read via textureLoad, no sampler).
   const lightBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
     { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // gPosition (for the shadow march)
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },   // gPosition (for the shadow march)
+    { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },                // the baked sun depth map
+    { binding: 6, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } } ] });             // PCF compare sampler
   const lightingPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [lightBGL] }),
     vertex: { module: screenModule, entryPoint: "vs_full" },
     fragment: { module: screenModule, entryPoint: "fs_light", targets: [{ format: HDR }] },
@@ -422,6 +496,32 @@ async function main() {
     primitive: { topology: "triangle-list", cullMode: "front" } });
   const lightBuf = device.createBuffer({ size: wasm.light_max() * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
 
+  // SHADOW BAKE resources: a depth-only render of the static town from the sun, into one fixed-size
+  // ortho depth map. The light matrix rides its own small uniform; the depth-only pipeline reuses
+  // the geometry vertex layout (vs_shadow) and writes depth alone — no colour, no fragment shader.
+  const shadowTex = device.createTexture({ size: [SHADOW_RES, SHADOW_RES], format: "depth32float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+  const shadowView = shadowTex.createView();
+  const shadowSampler = device.createSampler({ compare: "less", magFilter: "linear", minFilter: "linear" });   // 2x2 hardware PCF
+  const lightViewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const shadowBind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: lightViewBuf } }] });
+  const shadowPipe = device.createRenderPipeline({ layout,
+    vertex: { module, entryPoint: "vs_shadow", buffers: vbuffers },
+    primitive: { topology: "triangle-list", cullMode: "none" },
+    depthStencil: { format: "depth32float", depthWriteEnabled: true, depthCompare: "less" } });   // no fragment: depth only
+  // (Re)bake the sun depth map: draw the whole static town (LOD1 massing — the bulk is all a shadow
+  // needs) from the light matrix. Called only when the town changes, exactly like the instance bake.
+  function renderShadowMap() {
+    const enc = device.createCommandEncoder();
+    const sp = enc.beginRenderPass({ colorAttachments: [],
+      depthStencilAttachment: { view: shadowView, depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
+    sp.setPipeline(shadowPipe); sp.setBindGroup(0, shadowBind);
+    sp.setVertexBuffer(0, meshBuf); sp.setVertexBuffer(1, staticBuf);
+    for (const run of staticRuns) { const m = meshTable[run.mesh + C.MLOFF]; sp.draw(m.cnt, run.count, m.off, run.first); }
+    sp.end();
+    device.queue.submit([enc.finish()]);
+  }
+
   // the viewport-sized targets (G-buffer + HDR + depth), rebuilt on resize; the screen-pass and
   // light-volume bind groups reference them, so they rebuild together.
   let gColorTex = null, gNormalTex = null, gPosTex = null, hdrTex = null, depthTex = null, lightBind = null, lightVolBind = null, tonemapBind = null;
@@ -438,7 +538,9 @@ async function main() {
       { binding: 0, resource: { buffer: envBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() },
-      { binding: 3, resource: gPosTex.createView() } ] });
+      { binding: 3, resource: gPosTex.createView() },
+      { binding: 5, resource: shadowView },                  // the baked sun depth map (static)
+      { binding: 6, resource: shadowSampler } ] });
     lightVolBind = device.createBindGroup({ layout: lightVolBGL, entries: [
       { binding: 0, resource: { buffer: viewBuf } },
       { binding: 1, resource: gColorTex.createView() },
@@ -517,7 +619,7 @@ async function main() {
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
     camEye = [eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB];   // subcells — for the shadow march + the LOD distance
     // append the per-frame camera (eye in subcells) + MVP for the screen-space shadow march
-    device.queue.writeBuffer(envBuf, 80, new Float32Array([ ...camEye, 0, ...mvp ]));
+    device.queue.writeBuffer(envBuf, 80, new Float32Array([ ...camEye, SHADOW_NBIAS, ...mvp ]));   // eye.w = shadow-map normal-offset bias
   }
   // The LOD distance: at MAX zoom + 56-degree pitch, EVERYTHING visible is highest detail (the
   // user's reference), so the LOD0/LOD1 split is the eye-to-farthest-visible-ground distance of

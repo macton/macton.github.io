@@ -111,9 +111,10 @@ cell; none of it writes the model:
 
 - `z` is **render-only**: the world stays a 2-D grid; the simulation has no height.
 - No camera roll or first-person fly-through (the camera stays an up-right orbit — yaw,
-  pitch/tilt, fov, pan, and zoom are all provided), no animated/rigged meshes, no
-  shadows/AO/PBR, no 3-D minimap (it stays top-down). These are deferred (see
-  `README.md`), noted here, not built.
+  pitch/tilt, fov, pan, and zoom are all provided), no animated/rigged meshes, no AO/PBR,
+  no 3-D minimap (it stays top-down). These are deferred (see `README.md`), noted here, not
+  built. (Sun shadows ARE built — a baked light-space map for the static town plus a
+  screen-space march for the moving actors — all still render-only over the frozen sim.)
 
 ## How it's tested
 
