@@ -44,7 +44,7 @@ clang \
   -o game.wasm \
   src/wasm.c src/sim.c src/tanks_path.c src/agent_turn.c src/agent_move.c src/mites.c \
   src/tanks_fire.c src/render.c src/dirtab.c src/collide.c src/escape_table.c \
-  src/grid_paths.c src/edge_paths.c src/map_data.c src/mesh_data.c
+  src/grid_paths.c src/edge_paths.c src/map_data.c src/mesh_data.c src/map_mesh_data.c
 
 VER="$(date -u '+%Y.%m.%d-%H%M%S')"
 printf 'window.TANK_VERSION = "%s";\n' "$VER" > version.js

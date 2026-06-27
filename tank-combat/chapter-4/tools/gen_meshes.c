@@ -18,15 +18,20 @@ static V sub(V a, V b) { return v(a.x - b.x, a.y - b.y, a.z - b.z); }
 static V cross(V a, V b) { return v(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
 static V norm(V a) { double m = sqrt(a.x * a.x + a.y * a.y + a.z * a.z); if (m < 1e-9) m = 1; return v(a.x / m, a.y / m, a.z / m); }
 
-static signed char OUT[40000];
+#define VSTRIDE 12          /* pos snorm8x4 + normal snorm8x4 + colour unorm8x4 */
+static signed char OUT[60000];
 static int NV = 0;
 static int M_OFF[16], M_CNT[16], NM = 0, cur_off = 0;
 
 static signed char qn(double f) { double s = f * 127.0; if (s > 127) s = 127; if (s < -127) s = -127; return (signed char)(s >= 0 ? s + 0.5 : s - 0.5); }
+/* the procedural meshes are tintable: vertex colour is white, so meshColour*instanceTint
+ * in the shader == the instance tint (the chapter-3 behaviour). The Kenney map meshes,
+ * baked separately, carry their real per-vertex palette colour instead. */
 static void emitv(V p, V n) {
-  int o = NV * 8;
+  int o = NV * VSTRIDE;
   OUT[o] = qn(p.x); OUT[o+1] = qn(p.y); OUT[o+2] = qn(p.z); OUT[o+3] = 0;
   OUT[o+4] = qn(n.x); OUT[o+5] = qn(n.y); OUT[o+6] = qn(n.z); OUT[o+7] = 0;
+  OUT[o+8] = (signed char)255; OUT[o+9] = (signed char)255; OUT[o+10] = (signed char)255; OUT[o+11] = (signed char)255;
   NV++;
 }
 /* one flat triangle, its normal forced OUTWARD (these meshes are convex around the
@@ -75,24 +80,26 @@ int main(void) {
 
   printf("const int8_t MESH_VERT[] = {\n");
   for (int i = 0; i < NV; i++) {
-    int o = i * 8;
-    printf("  %d,%d,%d,%d, %d,%d,%d,%d,\n",
-           OUT[o], OUT[o+1], OUT[o+2], OUT[o+3], OUT[o+4], OUT[o+5], OUT[o+6], OUT[o+7]);
+    int o = i * VSTRIDE;
+    printf("  %d,%d,%d,%d, %d,%d,%d,%d, %d,%d,%d,%d,\n",
+           OUT[o], OUT[o+1], OUT[o+2], OUT[o+3], OUT[o+4], OUT[o+5], OUT[o+6], OUT[o+7],
+           (unsigned char)OUT[o+8], (unsigned char)OUT[o+9], (unsigned char)OUT[o+10], (unsigned char)OUT[o+11]);
   }
   printf("};\n\n");
 
-  printf("const uint32_t MESH_VOFF[M_COUNT] = {");
+  printf("const uint32_t MESH_VOFF[M_PROC_COUNT] = {");
   for (int m = 0; m < NM; m++) printf(" %d%s", M_OFF[m], m + 1 < NM ? "," : " ");
   printf("};\n");
-  printf("const uint32_t MESH_VCNT[M_COUNT] = {");
+  printf("const uint32_t MESH_VCNT[M_PROC_COUNT] = {");
   for (int m = 0; m < NM; m++) printf(" %d%s", M_CNT[m], m + 1 < NM ? "," : " ");
   printf("};\n");
   printf("const uint32_t MESH_VERT_TOTAL = %d;\n\n", NV);
 
   /* the kind->mesh binding for the asset pass, keyed by the real enum so it can't
-   * drift from render.h. The placeholder pass binds M_CUBE for every kind. */
+   * drift from render.h. floors/walls/nests bind the baked KENNEY map meshes; the
+   * placeholder pass (page toggle) binds M_CUBE for every kind instead. */
   printf("const uint8_t MESH_FOR_KIND[K_OPAQUE_COUNT] = {\n");
-  printf("  [K_FLOOR]=M_CUBE, [K_WALL]=M_CUBE, [K_NEST]=M_PYLON, [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID,\n");
+  printf("  [K_FLOOR]=M_MAP_FLOOR, [K_WALL]=M_MAP_WALL, [K_NEST]=M_MAP_NEST, [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID,\n");
   printf("  [K_HULL]=M_HULL, [K_TURRET]=M_TURRET, [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");
   return 0;
 }

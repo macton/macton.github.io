@@ -153,12 +153,23 @@ EXPORT(draw_translucent)  uint32_t draw_translucent(void)          { return g_dl
 /* the projection is now a host-side perspective MVP matrix (see app.js); the wasm
  * exports no projection basis — it just emits the world placements the host views. */
 
-/* the baked low-poly meshes (loaded once at startup, instanced every frame) */
-EXPORT(mesh_data_ptr)   const int8_t* mesh_data_ptr(void)      { return MESH_VERT; }
-EXPORT(mesh_vert_total) uint32_t mesh_vert_total(void)         { return MESH_VERT_TOTAL; }
-EXPORT(mesh_vstride)    uint32_t mesh_vstride(void)            { return MESH_VSTRIDE; }
-EXPORT(mesh_count)      uint32_t mesh_count(void)              { return M_COUNT; }
-EXPORT(mesh_cube)       uint32_t mesh_cube(void)               { return M_CUBE; }
-EXPORT(mesh_voff)       uint32_t mesh_voff(uint32_t m)         { return m < M_COUNT ? MESH_VOFF[m] : 0; }
-EXPORT(mesh_vcnt)       uint32_t mesh_vcnt(uint32_t m)         { return m < M_COUNT ? MESH_VCNT[m] : 0; }
-EXPORT(mesh_for_kind)   uint32_t mesh_for_kind(uint32_t kind)  { return kind < K_OPAQUE_COUNT ? MESH_FOR_KIND[kind] : 0; }
+/* the baked low-poly meshes (loaded once at startup, instanced every frame). Two
+ * sources share one index space: procedural meshes [0,M_PROC_COUNT) then the Kenney
+ * map meshes [M_PROC_COUNT,M_COUNT). The page uploads the two vertex buffers back to
+ * back (procedural first), so mesh_voff() returns offsets into that combined buffer. */
+EXPORT(mesh_data_ptr)     const int8_t* mesh_data_ptr(void)        { return MESH_VERT; }       /* procedural verts */
+EXPORT(map_mesh_data_ptr) const int8_t* map_mesh_data_ptr(void)    { return MAP_MESH_VERT; }   /* Kenney map verts */
+EXPORT(mesh_proc_total)   uint32_t mesh_proc_total(void)           { return MESH_VERT_TOTAL; }  /* procedural vertex count */
+EXPORT(mesh_vert_total)   uint32_t mesh_vert_total(void)           { return MESH_VERT_TOTAL + MAP_MESH_VERT_TOTAL; }
+EXPORT(mesh_vstride)      uint32_t mesh_vstride(void)              { return MESH_VSTRIDE; }
+EXPORT(mesh_count)        uint32_t mesh_count(void)                { return M_COUNT; }
+EXPORT(mesh_cube)         uint32_t mesh_cube(void)                 { return M_CUBE; }
+EXPORT(mesh_voff)         uint32_t mesh_voff(uint32_t m) {          /* offset into the COMBINED buffer */
+  if (m < M_PROC_COUNT) return MESH_VOFF[m];
+  return m < M_COUNT ? MESH_VERT_TOTAL + MAP_MESH_VOFF[m - M_PROC_COUNT] : 0;
+}
+EXPORT(mesh_vcnt)         uint32_t mesh_vcnt(uint32_t m) {
+  if (m < M_PROC_COUNT) return MESH_VCNT[m];
+  return m < M_COUNT ? MAP_MESH_VCNT[m - M_PROC_COUNT] : 0;
+}
+EXPORT(mesh_for_kind)     uint32_t mesh_for_kind(uint32_t kind)    { return kind < K_OPAQUE_COUNT ? MESH_FOR_KIND[kind] : 0; }

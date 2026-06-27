@@ -28,6 +28,7 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(
 
 @vertex fn vs(
     @location(0) mpos: vec4f, @location(1) mnrm: vec4f,        // baked mesh: pos + normal in [-1,1]
+    @location(7) mcol: vec4f,                                  // baked mesh: per-vertex colour (white = tintable)
     @location(2) wxy: vec2<i32>, @location(3) wzhz: vec2<i32>, // instance: centre xy, centre-z + half-z
     @location(4) hxy: vec2<i32>, @location(5) rot: vec2<i32>,  // half-extent xy, facing (cos,sin) Q14
     @location(6) color: vec4f) -> VOut {
@@ -39,7 +40,7 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(
   var o: VOut;
   o.pos = view.mvp * vec4f(world, 1.0);                        // top-down perspective; depth is clip.z/w
   let nx = mnrm.x * c - mnrm.y * s; let ny = mnrm.x * s + mnrm.y * c;
-  o.nrm = vec3f(nx, ny, mnrm.z); o.col = color;                // world-space normal, for lighting
+  o.nrm = vec3f(nx, ny, mnrm.z); o.col = mcol * color;         // mesh palette colour x instance tint
   return o;
 }
 const LIGHT = vec3f(0.32, 0.46, 0.78);                         // one directional light, from above
@@ -162,11 +163,14 @@ async function main() {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: "opaque" });
 
-  // the baked low-poly meshes, uploaded ONCE (frequency of change: once). The whole
-  // packed buffer lives in wasm memory; each kind's draw picks its mesh's vertex
-  // range with firstVertex. M_CUBE is the placeholder for every kind.
+  // the baked low-poly meshes, uploaded ONCE (frequency of change: once). Two wasm
+  // buffers — the procedural meshes then the Kenney map meshes — go back to back into
+  // one GPU buffer; each kind's draw picks its mesh's vertex range with firstVertex
+  // (offsets from mesh_voff() are already into this combined buffer).
   const meshBuf = device.createBuffer({ size: C.MVTOTAL * C.MVSTRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(meshBuf, 0, new Uint8Array(mem(), wasm.mesh_data_ptr(), C.MVTOTAL * C.MVSTRIDE));
+  const mProc = wasm.mesh_proc_total();
+  device.queue.writeBuffer(meshBuf, 0, new Uint8Array(mem(), wasm.mesh_data_ptr(), mProc * C.MVSTRIDE));
+  device.queue.writeBuffer(meshBuf, mProc * C.MVSTRIDE, new Uint8Array(mem(), wasm.map_mesh_data_ptr(), (C.MVTOTAL - mProc) * C.MVSTRIDE));
   const meshTable = []; for (let m = 0; m < C.MCOUNT; m++) meshTable.push({ off: wasm.mesh_voff(m), cnt: wasm.mesh_vcnt(m) });
   const meshForKind = []; for (let k = 0; k < C.KOC; k++) meshForKind.push(wasm.mesh_for_kind(k));
 
@@ -178,7 +182,8 @@ async function main() {
   const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl] });
   const vbuffers = [
     { arrayStride: C.MVSTRIDE, stepMode: "vertex", attributes: [
-      { shaderLocation: 0, offset: 0, format: "snorm8x4" }, { shaderLocation: 1, offset: 4, format: "snorm8x4" } ] },
+      { shaderLocation: 0, offset: 0, format: "snorm8x4" }, { shaderLocation: 1, offset: 4, format: "snorm8x4" },
+      { shaderLocation: 7, offset: 8, format: "unorm8x4" } ] },
     { arrayStride: C.STRIDE, stepMode: "instance", attributes: [
       { shaderLocation: 2, offset: 0, format: "sint32x2" }, { shaderLocation: 3, offset: 8, format: "sint16x2" },
       { shaderLocation: 4, offset: 12, format: "sint16x2" }, { shaderLocation: 5, offset: 16, format: "sint16x2" },
