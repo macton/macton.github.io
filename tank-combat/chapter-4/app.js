@@ -122,17 +122,18 @@ struct Env {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));   // one screen-covering triangle
   return vec4f(p[vi], 0.0, 1.0);
 }
-fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }   // interleaved-gradient noise
 // SCREEN-SPACE SUN SHADOW (Bend Studio's method): march from the surface toward the sun in
 // screen space, reading the G-buffer the geometry already wrote. Each step is a world point on
 // the ray, projected to its pixel; if a STORED surface there sits in front of the ray within a
 // thickness window, the sun is blocked. No shadow map — the on-screen depth IS the occluder.
 // (Bend's contribution is the wavefront SCHEDULING that shares depth reads; the test is this.)
-fn sun_shadow(pos: vec3f, n: vec3f, fc: vec2f) -> f32 {
+// Medium-range + many small steps gives a clean HARD grounding shadow; no dither (an undenoised
+// jitter just reads as grain, and a long march only smears a tall occluder's truncated silhouette).
+fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
   let steps = i32(env.shp.y);
   let stepv = normalize(env.sun.xyz) * (env.shp.x / env.shp.y);          // one ray step (subcells)
   let res = vec2f(textureDimensions(gColorTex));
-  var rp = pos + n * env.shp.w + stepv * ign(fc);                        // bias off the surface + dither the start
+  var rp = pos + n * env.shp.w;                                          // bias off the surface, then march
   for (var s = 0; s < steps; s = s + 1) {
     rp = rp + stepv;
     let clip = env.mvp * vec4f(rp, 1.0);
@@ -159,7 +160,7 @@ fn sun_shadow(pos: vec3f, n: vec3f, fc: vec2f) -> f32 {
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
   var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
-  if (sun > 0.0) { sun = sun * sun_shadow(pos, n, fc.xy); }              // shadow the SUN term only; ambient still fills
+  if (sun > 0.0) { sun = sun * sun_shadow(pos, n); }                     // shadow the SUN term only; ambient still fills
   return vec4f(alb.rgb * (ambient + env.sunCol.rgb * sun), 1.0);
 }
 // TONEMAP: exposure roll-off (1 - e^-cx) — near-linear in the mid-tones, never clips, so the
@@ -364,7 +365,11 @@ async function main() {
   const env = {
     sunDir: [0.50, 0.66, 0.40], sunI: 1.15, sunCol: [1.0, 0.70, 0.42],   // EVENING: low raking warm sun, intensity raised — the screen-space shadows carry the contrast
     sky: [0.15, 0.17, 0.27], ground: [0.10, 0.08, 0.09],                 // dim dusk-blue sky ambient, dark warm ground
-    sh: [1280, 32, 300, 18],                                             // screen-space sun shadow: maxDist, steps, thickness, bias (subcells; SUB=256)
+    sh: [560, 40, 170, 14],                                              // screen-space sun shadow: maxDist, steps, thickness, bias (subcells; SUB=256).
+                                                                         // KEPT MEDIUM-RANGE ON PURPOSE: single-layer SSS can't know an occluder's far
+                                                                         // side, so a LONG march past a tall building reconstructs only a sheared,
+                                                                         // truncated silhouette. ~2.2 cells is where the thickness assumption holds —
+                                                                         // a clean grounding shadow. 40 small steps keep the edge crisp without dither.
   };
   const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
   // 160 bytes: the STATIC sun + ambient + shadow params (below); the per-frame eye + MVP are

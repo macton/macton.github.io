@@ -321,14 +321,19 @@
     ray from the surface <strong>toward the sun</strong>; project each step back to the screen and read
     the stored position there. If an on-screen surface sits <strong>in front of the ray</strong> —
     within a thickness window, so a thin railing shadows but the sky behind it does not — the sun is
-    blocked, and that pixel falls into shadow. A dithered start hides the step banding. The whole cost
-    is a handful of texture reads per pixel; there is no second scene pass, no shadow-map resolution to
-    pick, and the occluders are exactly the pixels on screen.</p>
-    <p>(Bend's real contribution is the <em>scheduling</em> — marching whole wavefronts of pixels in
-    lockstep along the light direction so each depth texel is read once; here we keep the
-    plain per-pixel march, which gives the same picture.) Because the shadows carry the contrast, the
-    sun can be turned up: a brighter, warmer key light over a dim dusk ambient, with the town casting
-    long evening shadows down its own streets. Still all screen space, still over a frozen sim.</p>
+    blocked, and that pixel falls into shadow. Many small steps keep the edge crisp without a
+    jittered start — an undenoised dither just reads as grain. The whole cost is a handful of texture
+    reads per pixel; there is no second scene pass, no shadow-map resolution to pick, and the
+    occluders are exactly the pixels on screen.</p>
+    <p>The honest limit of one depth layer: it can't see an occluder's <em>far</em> side, so it
+    assumes a fixed thickness. March too far past a tall tower and the technique reconstructs only a
+    smeared, truncated silhouette — a shadow at an odd angle. So the ray is kept <strong>medium
+    range</strong>, where the assumption holds: a clean shadow that <em>grounds</em> each building
+    rather than a long cast one (that would want a shadow map). (Bend's real contribution is the
+    <em>scheduling</em> — marching whole wavefronts of pixels in lockstep along the light direction so
+    each depth texel is read once; here we keep the plain per-pixel march, which gives the same
+    picture.) Because the shadows carry the contrast, the sun can be turned up: a brighter, warmer key
+    light over a dim dusk ambient. Still all screen space, still over a frozen sim.</p>
 
     <h2>Assets are late-bound data</h2>
     <p>The second pass swaps the primitive cube for real low-poly meshes <strong>without touching
