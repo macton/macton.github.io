@@ -180,13 +180,14 @@
     <label>zoom <input type="range" id="zoom" min="0.85" max="20" step="0.05" value="1"></label>
     <label>pitch <input type="range" id="pitch" min="5" max="80" step="1" value="30"><span id="pitchval" class="tag">30°</span></label>
     <label>fov <input type="range" id="fov" min="15" max="70" step="1" value="36"><span id="fovval" class="tag">36°</span></label>
+    <label>lod dist <input type="range" id="loddist" min="0.25" max="4" step="0.05" value="1"><span id="loddistval" class="tag">1.00×</span></label>
   </div>
   <div id="status">loading…</div>
   <div id="help">
     The main view is <b>top-down perspective 3-D</b> and shows the <b>whole 8×8 world</b> as one
     connected map; the minimap below stays <b>flat top-down</b> — the same data drawn two ways. <b>Drag</b> to
     pan, <b>shift- or right-drag</b> (or a <b>two-finger drag</b>) to <b>orbit &amp; tilt</b>, <b>pinch</b> or
-    <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b> sliders above are live;
+    <b>scroll</b> to zoom, <b>hover</b> a cell to highlight it. The <b>pitch</b>/<b>fov</b>/<b>lod dist</b> sliders above are live;
     the <b>toolbar</b> follow-cams a tank (selecting it) or returns to <b>free</b> view — pan/zoom/orbit adjust the follow; <b>F</b> frames the selection. The
     <b>mites</b> run themselves. <b>Tap a tank</b> to cycle it:
     <span class="swatch" style="background:#78e68c;border-radius:50%"></span> auto-path (a green spike marks it; tap a cell to send it there — its path + destination are drawn) →
@@ -372,7 +373,10 @@
     screen beyond it draws LOD1 instead. The <em>same baked instance</em> renders either mesh — the
     LOD is one integer added to the mesh id — so distant blocks cost forty vertices apiece, not three
     thousand, and the foreground keeps its windows. Nothing about the instances or the sim changes;
-    the renderer just picks the art that's worth drawing at the size it will be seen.</p>
+    the renderer just picks the art that's worth drawing at the size it will be seen. The <strong>lod
+    dist</strong> slider scales that crossover distance live (1× is the reference framing; lower pulls
+    the cheap massing in closer, higher holds the full art farther out) — handy for seeing the swap,
+    or trading detail for cost.</p>
 
     <h2>The simulation does not know it is drawn</h2>
     <p>Everything below this line is the <strong>model the view reads</strong> — and it is frozen,

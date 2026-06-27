@@ -468,6 +468,8 @@ async function main() {
   const PITCH0 = 30 * DEG, FOV0 = 36 * DEG;
   const PITCH_MIN = 5 * DEG, PITCH_MAX = 80 * DEG, FOV_MIN = 15 * DEG, FOV_MAX = 70 * DEG;
   let pitch = PITCH0, yaw = 0, fov = FOV0;
+  let lodScale = 1;   // tuning: scales the LOD0/LOD1 crossover DISTANCE (1 = the reference framing;
+                      // <1 pulls the simplified massing closer/cheaper, >1 keeps full art farther out)
   // Keep the camera below the horizon: the TOP edge of the frustum must stay under the
   // skyline (angle below horizontal = (90° − pitch) − fov/2 > 0), else the ground runs to
   // infinity and clips. So the usable pitch tightens as fov widens; a small margin keeps
@@ -688,6 +690,10 @@ async function main() {
   const fR = document.getElementById("fov"), fV = document.getElementById("fovval");
   // widening fov lowers the horizon, so re-clamp pitch and refresh its slider range
   if (fR) fR.oninput = () => { fov = clampFov((parseFloat(fR.value) || 36) * DEG); if (fV) fV.textContent = fR.value + "°"; pitch = clampPitch(pitch); syncViewUI(); };
+  // live LOD distance: scales the LOD0->LOD1 crossover (presentation-only, like pitch/fov)
+  const lR = document.getElementById("loddist"), lV = document.getElementById("loddistval");
+  if (lR) lR.oninput = () => { lodScale = parseFloat(lR.value) || 1; if (lV) lV.textContent = lodScale.toFixed(2) + "×"; };
+  if (lV && lR) lV.textContent = (parseFloat(lR.value) || 1).toFixed(2) + "×";
   function syncViewUI() {
     if (zR) zR.value = zoom.toFixed(2);
     if (pR) { pR.max = Math.round(maxPitch() / DEG); pR.value = (pitch / DEG).toFixed(0); } if (pV) pV.textContent = (pitch / DEG).toFixed(0) + "°";
@@ -775,7 +781,7 @@ async function main() {
     // per-SCREEN LOD: a screen whose nearest point is beyond the LOD distance draws the simplified
     // colour-matched massing (LOD1), nearer screens the full art (LOD0). Squared distances; the
     // eye is up at camEye, the screen footprint on the ground.
-    const lod2 = lodDist2(), ez2 = camEye[2] * camEye[2], screenLod1 = [];
+    const lod2 = lodDist2() * lodScale * lodScale, ez2 = camEye[2] * camEye[2], screenLod1 = [];
     for (let s = 0; s < C.NS; s++) { const b = screenBox[s];
       const nx = Math.max(b[0], Math.min(camEye[0], b[2])) - camEye[0], ny = Math.max(b[1], Math.min(camEye[1], b[3])) - camEye[1];
       screenLod1[s] = (nx * nx + ny * ny + ez2) > lod2; }
