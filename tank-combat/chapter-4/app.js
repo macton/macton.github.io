@@ -107,30 +107,63 @@ struct LVOut {
 // fs_light reads the G-buffer and writes environmental lighting into an HDR target; fs_tonemap
 // rolls that HDR down to the display. textureLoad needs no sampler (per-pixel, no filtering).
 const WGSL_SCREEN = `
-struct Env { sun: vec4f, sunCol: vec4f, sky: vec4f, ground: vec4f };  // sun.xyz dir + .w intensity; sky/ground = hemisphere ambient
+struct Env {
+  sun: vec4f, sunCol: vec4f, sky: vec4f, ground: vec4f,   // sun.xyz dir + .w intensity; sky/ground = hemisphere ambient
+  shp: vec4f,                                             // screen-space shadow: maxDist, steps, thickness, bias (subcells)
+  eye: vec4f,                                             // camera world position (subcells)
+  mvp: mat4x4f,                                           // world (subcells) -> clip, to project the shadow ray to screen
+};
 @group(0) @binding(0) var<uniform> env: Env;
 @group(0) @binding(1) var gColorTex: texture_2d<f32>;
 @group(0) @binding(2) var gNormalTex: texture_2d<f32>;
-@group(0) @binding(3) var hdrTex: texture_2d<f32>;
+@group(0) @binding(3) var gPosTex: texture_2d<f32>;
+@group(0) @binding(4) var hdrTex: texture_2d<f32>;
 @vertex fn vs_full(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));   // one screen-covering triangle
   return vec4f(p[vi], 0.0, 1.0);
 }
+fn ign(p: vec2f) -> f32 { return fract(52.9829189 * fract(dot(p, vec2f(0.06711056, 0.00583715)))); }   // interleaved-gradient noise
+// SCREEN-SPACE SUN SHADOW (Bend Studio's method): march from the surface toward the sun in
+// screen space, reading the G-buffer the geometry already wrote. Each step is a world point on
+// the ray, projected to its pixel; if a STORED surface there sits in front of the ray within a
+// thickness window, the sun is blocked. No shadow map — the on-screen depth IS the occluder.
+// (Bend's contribution is the wavefront SCHEDULING that shares depth reads; the test is this.)
+fn sun_shadow(pos: vec3f, n: vec3f, fc: vec2f) -> f32 {
+  let steps = i32(env.shp.y);
+  let stepv = normalize(env.sun.xyz) * (env.shp.x / env.shp.y);          // one ray step (subcells)
+  let res = vec2f(textureDimensions(gColorTex));
+  var rp = pos + n * env.shp.w + stepv * ign(fc);                        // bias off the surface + dither the start
+  for (var s = 0; s < steps; s = s + 1) {
+    rp = rp + stepv;
+    let clip = env.mvp * vec4f(rp, 1.0);
+    if (clip.w <= 0.0) { break; }
+    let uv = (clip.xy / clip.w) * vec2f(0.5, -0.5) + vec2f(0.5);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { break; }   // marched off-screen
+    let px = vec2<i32>(i32(uv.x * res.x), i32(uv.y * res.y));
+    if (textureLoad(gColorTex, px, 0).a < 0.5) { continue; }               // sky there — no occluder
+    let occ = textureLoad(gPosTex, px, 0).xyz;
+    let delta = length(rp - env.eye.xyz) - length(occ - env.eye.xyz);     // >0: the stored surface is in front of the ray
+    if (delta > env.shp.w && delta < env.shp.z) { return 0.0; }            // blocked within the thickness window
+  }
+  return 1.0;
+}
 // ENVIRONMENTAL lighting: a hemisphere ambient (sky overhead, a dim ground bounce below,
-// lerped by how "up" the face points — +z is up) plus one directional sun. The background
-// (mask 0) is the sky itself. This runs once per pixel, reading only the G-buffer.
+// lerped by how "up" the face points — +z is up) plus one directional sun, the sun SHADOWED in
+// screen space. The background (mask 0) is the sky itself.
 @fragment fn fs_light(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let p = vec2<i32>(i32(fc.x), i32(fc.y));
   let alb = textureLoad(gColorTex, p, 0);
   if (alb.a < 0.5) { return vec4f(env.sky.rgb, 1.0); }
+  let pos = textureLoad(gPosTex, p, 0).xyz;
   let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
-  let ndl = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0);
-  return vec4f(alb.rgb * (ambient + env.sunCol.rgb * (ndl * env.sun.w)), 1.0);
+  var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
+  if (sun > 0.0) { sun = sun * sun_shadow(pos, n, fc.xy); }              // shadow the SUN term only; ambient still fills
+  return vec4f(alb.rgb * (ambient + env.sunCol.rgb * sun), 1.0);
 }
 // TONEMAP: exposure roll-off (1 - e^-cx) — near-linear in the mid-tones, never clips, so the
-// additive point lights coming next stay graceful when they push pixels past 1.
+// additive point lights stay graceful when they push pixels past 1.
 @fragment fn fs_tonemap(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let c = textureLoad(hdrTex, vec2<i32>(i32(fc.x), i32(fc.y)), 0).rgb;
   return vec4f(vec3f(1.0) - exp(-c * 1.25), 1.0);
@@ -329,32 +362,37 @@ async function main() {
   // the ENVIRONMENT light: a directional sun (xyz dir + .w intensity), its colour, and the
   // hemisphere ambient (sky overhead / ground bounce below). Tunable; uploaded when changed.
   const env = {
-    sunDir: [0.50, 0.66, 0.40], sunI: 0.62, sunCol: [1.0, 0.66, 0.38],   // EVENING: low, raking, warm amber sun
-    sky: [0.15, 0.17, 0.27], ground: [0.10, 0.08, 0.09],                 // dim dusk-blue sky ambient, dark warm ground — so the point lights carry the scene
+    sunDir: [0.50, 0.66, 0.40], sunI: 1.15, sunCol: [1.0, 0.70, 0.42],   // EVENING: low raking warm sun, intensity raised — the screen-space shadows carry the contrast
+    sky: [0.15, 0.17, 0.27], ground: [0.10, 0.08, 0.09],                 // dim dusk-blue sky ambient, dark warm ground
+    sh: [1280, 32, 300, 18],                                             // screen-space sun shadow: maxDist, steps, thickness, bias (subcells; SUB=256)
   };
   const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
-  const envBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  // 160 bytes: the STATIC sun + ambient + shadow params (below); the per-frame eye + MVP are
+  // appended by viewWrite (the shadow march needs them to project ray steps to screen).
+  const envBuf = device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   function writeEnv() {
     const s = norm3(env.sunDir);
     device.queue.writeBuffer(envBuf, 0, new Float32Array([
       s[0], s[1], s[2], env.sunI,
       env.sunCol[0], env.sunCol[1], env.sunCol[2], 0,
       env.sky[0], env.sky[1], env.sky[2], 0,
-      env.ground[0], env.ground[1], env.ground[2], 0 ]));
+      env.ground[0], env.ground[1], env.ground[2], 0,
+      env.sh[0], env.sh[1], env.sh[2], env.sh[3] ]));
   }
   writeEnv();
   // LIGHTING: env uniform + the two G-buffer textures (read via textureLoad, no sampler).
   const lightBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-    { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+    { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // gPosition (for the shadow march)
   const lightingPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [lightBGL] }),
     vertex: { module: screenModule, entryPoint: "vs_full" },
     fragment: { module: screenModule, entryPoint: "fs_light", targets: [{ format: HDR }] },
     primitive: { topology: "triangle-list" } });
   // TONEMAP: the HDR light target -> the display.
   const tonemapBGL = device.createBindGroupLayout({ entries: [
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+    { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
   const tonemapPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [tonemapBGL] }),
     vertex: { module: screenModule, entryPoint: "vs_full" },
     fragment: { module: screenModule, entryPoint: "fs_tonemap", targets: [{ format }] },
@@ -394,13 +432,14 @@ async function main() {
     lightBind = device.createBindGroup({ layout: lightBGL, entries: [
       { binding: 0, resource: { buffer: envBuf } },
       { binding: 1, resource: gColorTex.createView() },
-      { binding: 2, resource: gNormalTex.createView() } ] });
+      { binding: 2, resource: gNormalTex.createView() },
+      { binding: 3, resource: gPosTex.createView() } ] });
     lightVolBind = device.createBindGroup({ layout: lightVolBGL, entries: [
       { binding: 0, resource: { buffer: viewBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() },
       { binding: 3, resource: gPosTex.createView() } ] });
-    tonemapBind = device.createBindGroup({ layout: tonemapBGL, entries: [{ binding: 3, resource: hdrTex.createView() }] });
+    tonemapBind = device.createBindGroup({ layout: tonemapBGL, entries: [{ binding: 4, resource: hdrTex.createView() }] });
   }
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, 2);
@@ -468,6 +507,9 @@ async function main() {
     const mvp = m4mul(flipX, m4mul(m4mul(proj, view), m4scale(1 / C.SUB)));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
+    // append the per-frame camera (eye in subcells) + MVP for the screen-space shadow march
+    device.queue.writeBuffer(envBuf, 80, new Float32Array([
+      eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB, 0, ...mvp ]));
   }
   // cast a screen NDC point onto the ground plane (z=0) -> world subcells
   function groundAt(ndcx, ndcy) {
