@@ -194,7 +194,8 @@ EXPORT(mesh_proc_total)   uint32_t mesh_proc_total(void)           { return MESH
 EXPORT(mesh_vert_total)   uint32_t mesh_vert_total(void)           { return MESH_VERT_TOTAL + MAP_MESH_VERT_TOTAL; }
 EXPORT(mesh_vstride)      uint32_t mesh_vstride(void)              { return MESH_VSTRIDE; }
 EXPORT(mesh_count)        uint32_t mesh_count(void)                { return MESH_TOTAL_COUNT; }
-EXPORT(map_lod1_offset)   uint32_t map_lod1_offset(void)           { return MAP_LOD1_OFFSET; }   /* LOD1 of a town mesh id = id + this */
+EXPORT(mesh_proc_count)   uint32_t mesh_proc_count(void)           { return M_PROC_COUNT; }   /* town mesh id = M_PROC_COUNT + base */
+EXPORT(map_lod2_offset)   uint32_t map_lod2_offset(void)           { return MAP_LOD2_OFFSET; }   /* LOD2 massing of a town mesh id = id + this */
 EXPORT(mesh_cube)         uint32_t mesh_cube(void)                 { return M_CUBE; }
 EXPORT(mesh_voff)         uint32_t mesh_voff(uint32_t m) {          /* offset into the COMBINED buffer */
   if (m < M_PROC_COUNT) return MESH_VOFF[m];
@@ -205,6 +206,16 @@ EXPORT(mesh_vcnt)         uint32_t mesh_vcnt(uint32_t m) {
   return m < MESH_TOTAL_COUNT ? MAP_MESH_VCNT[m - M_PROC_COUNT] : 0;
 }
 EXPORT(mesh_for_kind)     uint32_t mesh_for_kind(uint32_t kind)    { return kind < K_OPAQUE_COUNT ? MESH_FOR_KIND[kind] : 0; }
+/* the LOD1 IMPOSTERS: a SEPARATE 16-byte vertex table (they carry UVs into town_atlas.png),
+ * indexed by base town-mesh m in [0,MAP_IMPOSTER_COUNT). The page uploads them to their own
+ * vertex buffer + a textured pipeline; the atlas PNG is loaded separately by the page. */
+EXPORT(map_imposter_data_ptr)  const int8_t* map_imposter_data_ptr(void) { return MAP_IMPOSTER_VERT; }
+EXPORT(map_imposter_count)     uint32_t map_imposter_count(void)         { return MAP_IMPOSTER_COUNT; }
+EXPORT(map_imposter_vert_total)uint32_t map_imposter_vert_total(void)    { return MAP_IMPOSTER_VERT_TOTAL; }
+EXPORT(map_imposter_voff)      uint32_t map_imposter_voff(uint32_t m)    { return m < MAP_IMPOSTER_COUNT ? MAP_IMPOSTER_VOFF[m] : 0; }
+EXPORT(map_imposter_vcnt)      uint32_t map_imposter_vcnt(uint32_t m)    { return m < MAP_IMPOSTER_COUNT ? MAP_IMPOSTER_VCNT[m] : 0; }
+EXPORT(map_atlas_w)            uint32_t map_atlas_w(void)                { return MAP_ATLAS_W; }
+EXPORT(map_atlas_h)            uint32_t map_atlas_h(void)                { return MAP_ATLAS_H; }
 
 /* ---- the STATIC TOWN: the bake the host uploads once and frustum-culls per frame ----
  * static_inst_ptr/count/stride describe the instance buffer (same 24-byte Inst layout as

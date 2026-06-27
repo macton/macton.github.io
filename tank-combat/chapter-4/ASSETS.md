@@ -50,12 +50,14 @@ ships in the binary.
 Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.
 
-**Town meshes** — baked from **Kenney CC0** kits into `src/map_mesh_data.c` (32 meshes:
-16 full-detail **LOD0** + 16 simplified, colour-matched **LOD1** at `MAP_LOD1_OFFSET`;
-~406 KB of packed `int8` verts carrying their own palette colour). Each LOD1 is a box body
-+ the building's main roof shape (~40 verts vs ~3,500), so distant town screens draw the
-cheap version. The committed buffer is **CC0** (derived from CC0 source). The *source art is
-not committed*; the bake reads a local download. Kits used:
+**Town meshes** — baked from **Kenney CC0** kits into `src/map_mesh_data.c` at **three LODs**:
+16 full-detail **LOD0** + 16 colour-matched **LOD2** flat massing (one 12-byte table, LOD2 at
+`MAP_LOD2_OFFSET`, ~406 KB), plus 16 **LOD1 imposters** (a separate 16-byte table that carries
+UVs). Each LOD1/LOD2 is a ~40-vert box+roof cage; the imposter additionally samples
+`town_atlas.png` — the LOD0 art rendered (offline, by a CPU rasteriser in the baker)
+orthographically from the top + 4 sides and packed into one atlas, so the cheap cage shows the
+real building's windows/doors from a distance. The committed buffers + atlas are **CC0** (derived
+from CC0 source). The *source art is not committed*; the bake reads a local download. Kits used:
 
 | group (`map_mesh_data.h`) | source kit (Kenney, **CC0**) | meshes |
 |---|---|---|
@@ -74,9 +76,11 @@ node tools/bake_map_assets.mjs <assets-dir> src
 ```
 
 It decodes each kit's indexed-PNG palette, parses the OBJ, rotates Kenney's Y-up to the
-engine's Z-up, normalises each mesh per-axis into a unit box, recolours building roofs, and
-emits `src/map_mesh_data.{c,h}` (the mesh table + group bases + per-mesh height). Nothing
-runs at game time; the committed tables are the deliverable.
+engine's Z-up, normalises each mesh per-axis into a unit box, recolours building roofs,
+CPU-rasterises the LOD0 projections into the imposter atlas, and emits
+`src/map_mesh_data.{c,h}` (the LOD0 + LOD2 table, the LOD1 imposter table, group bases,
+per-mesh height) plus `town_atlas.png`. Nothing runs at game time; the committed tables +
+atlas are the deliverable.
 
 ## The binding points — where external art drops in
 

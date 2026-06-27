@@ -73,6 +73,41 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f, @location(2
 }
 @fragment fn fs_flat(i: VOut) -> @location(0) vec4f { return i.col; }  // forward FX, blended into the lit HDR
 
+// LOD1 IMPOSTER: the cheap cage, but each face samples town_atlas.png — the LOD0 art projected
+// (offline) from that face's direction. Same instance transform + same G-buffer write as the full
+// art, so the deferred lighting/shadows treat it identically; only the albedo comes from a texture.
+struct VOutI { @builtin(position) pos: vec4f, @location(0) mcol: vec4f, @location(1) nrm: vec3f,
+               @location(2) world: vec3f, @location(3) uv: vec2f, @location(4) tint: vec4f };
+@group(1) @binding(0) var atlasTex: texture_2d<f32>;
+@group(1) @binding(1) var atlasSamp: sampler;
+@vertex fn vs_imp(
+    @location(0) mpos: vec4f, @location(1) mnrm: vec4f, @location(7) mcol: vec4f,
+    @location(8) muv: vec2<i32>,                                 // imposter UV (i16; <0 = no texture, use mcol)
+    @location(2) wxy: vec2<i32>, @location(3) wzhz: vec2<i32>,
+    @location(4) hxy: vec2<i32>, @location(5) rot: vec2<i32>, @location(6) color: vec4f) -> VOutI {
+  let half = vec3f(f32(hxy.x), f32(hxy.y), f32(wzhz.y));
+  let local = mpos.xyz * half;
+  let c = f32(rot.x) * (1.0 / 16384.0); let s = f32(rot.y) * (1.0 / 16384.0);
+  let rx = local.x * c - local.y * s; let ry = local.x * s + local.y * c;
+  let world = vec3f(f32(wxy.x) + rx, f32(wxy.y) + ry, f32(wzhz.x) + local.z);
+  var o: VOutI;
+  o.pos = view.mvp * vec4f(world, 1.0);
+  let nx = mnrm.x * c - mnrm.y * s; let ny = mnrm.x * s + mnrm.y * c;
+  o.nrm = vec3f(nx, ny, mnrm.z); o.world = world;
+  o.mcol = mcol; o.tint = color; o.uv = vec2f(f32(muv.x), f32(muv.y));   // raw i16 UV; /32767 -> [0,1]
+  return o;
+}
+@fragment fn fs_imp(i: VOutI) -> GOut {
+  let t = textureSampleLevel(atlasTex, atlasSamp, i.uv / 32767.0, 0.0);   // sampled unconditionally (no derivatives)
+  var base = i.mcol.rgb;                                         // fallback: the massing colour (cage gaps / flat tiles)
+  if (i.uv.x >= 0.0 && t.a > 0.5) { base = t.rgb; }              // textured where the projection covered this face
+  var o: GOut;
+  o.color    = vec4f(base * i.tint.rgb, 1.0);                    // baked albedo x instance tint (nest hue / white)
+  o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
+  o.position = vec4f(i.world, 1.0);
+  return o;
+}
+
 // ---- DEFERRED point lights ----------------------------------------------------------
 // One per visible mite / FX (build_lights). Each is drawn as a small cube VOLUME (front
 // faces only, no depth test); for every pixel the volume covers it reads the G-buffer
@@ -283,7 +318,10 @@ async function main() {
     MEMPTY: wasm.mite_empty(), NEST: wasm.nest_count(), NF: wasm.n_fields(),
     // chapter-4 render protocol: the kinds + the baked meshes (the projection is a host MVP)
     KOC: wasm.k_opaque_count(), MVSTRIDE: wasm.mesh_vstride(), MVTOTAL: wasm.mesh_vert_total(),
-    MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(), MLOFF: wasm.map_lod1_offset(),   // LOD1 mesh id = LOD0 id + MLOFF
+    MCOUNT: wasm.mesh_count(), CUBE: wasm.mesh_cube(),
+    LOD2OFF: wasm.map_lod2_offset(),     // LOD2 (flat massing) mesh id = LOD0 id + LOD2OFF
+    MPROC: wasm.mesh_proc_count(), IMPCOUNT: wasm.map_imposter_count(),   // LOD1 imposters: separate table, base = id - MPROC
+    ATLASW: wasm.map_atlas_w(), ATLASH: wasm.map_atlas_h(),
     // the STATIC TOWN: a run-table stride (the instance stride == inst_stride == STRIDE)
     SRSTRIDE: wasm.static_run_stride(),
   };
@@ -330,6 +368,19 @@ async function main() {
   device.queue.writeBuffer(meshBuf, mProc * C.MVSTRIDE, new Uint8Array(mem(), wasm.map_mesh_data_ptr(), (C.MVTOTAL - mProc) * C.MVSTRIDE));
   const meshTable = []; for (let m = 0; m < C.MCOUNT; m++) meshTable.push({ off: wasm.mesh_voff(m), cnt: wasm.mesh_vcnt(m) });
   const meshForKind = []; for (let k = 0; k < C.KOC; k++) meshForKind.push(wasm.mesh_for_kind(k));
+  // the LOD1 IMPOSTERS: their own 16-byte vertex buffer (they carry UVs) + a table indexed by base m.
+  const IMP_VSTRIDE = 16, impTotal = wasm.map_imposter_vert_total();
+  const imposterBuf = device.createBuffer({ size: Math.max(IMP_VSTRIDE, impTotal * IMP_VSTRIDE), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(imposterBuf, 0, new Uint8Array(mem(), wasm.map_imposter_data_ptr(), impTotal * IMP_VSTRIDE));
+  const imposterTable = []; for (let m = 0; m < C.IMPCOUNT; m++) imposterTable.push({ off: wasm.map_imposter_voff(m), cnt: wasm.map_imposter_vcnt(m) });
+  // town_atlas.png — the LOD0 art projected from top + 4 sides, sampled by the imposter. Loaded
+  // async: until it arrives the imposter samples empty (alpha 0) and falls back to the massing colour.
+  const atlasTex = device.createTexture({ size: [C.ATLASW, C.ATLASH], format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
+  const atlasSampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
+  fetch("town_atlas.png?v=" + VERSION).then((r) => r.blob()).then(createImageBitmap).then((bmp) => {
+    device.queue.copyExternalImageToTexture({ source: bmp }, { texture: atlasTex }, [C.ATLASW, C.ATLASH]);
+  }).catch((e) => console.warn("town_atlas.png load failed:", e));
 
   const instBuf = device.createBuffer({ size: C.MAX_INST * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
   const viewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -392,6 +443,23 @@ async function main() {
   const geometryPipe = device.createRenderPipeline({ layout,
     vertex: { module, entryPoint: "vs", buffers: vbuffers },
     fragment: { module, entryPoint: "fs_gbuffer", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }, { format: GBUF_POS }] },
+    primitive: { topology: "triangle-list", cullMode: "none" },
+    depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: "less" } });
+  // IMPOSTER (LOD1): same G-buffer write, but a 16-byte vertex (adds a UV) and an extra bind group
+  // for the projected-art atlas. Writes the same targets, so the deferred lighting treats it as art.
+  const vbuffersImp = [
+    { arrayStride: IMP_VSTRIDE, stepMode: "vertex", attributes: [
+      { shaderLocation: 0, offset: 0, format: "snorm8x4" }, { shaderLocation: 1, offset: 4, format: "snorm8x4" },
+      { shaderLocation: 7, offset: 8, format: "unorm8x4" }, { shaderLocation: 8, offset: 12, format: "sint16x2" } ] },
+    vbuffers[1] ];   // the same 24-byte instance layout
+  const atlasBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+    { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } } ] });
+  const atlasBind = device.createBindGroup({ layout: atlasBGL, entries: [
+    { binding: 0, resource: atlasTex.createView() }, { binding: 1, resource: atlasSampler } ] });
+  const imposterPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, atlasBGL] }),
+    vertex: { module, entryPoint: "vs_imp", buffers: vbuffersImp },
+    fragment: { module, entryPoint: "fs_imp", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }, { format: GBUF_POS }] },
     primitive: { topology: "triangle-list", cullMode: "none" },
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: "less" } });
   // FORWARD FX: the translucent pass, now blended into the lit HDR, depth-tested against the
@@ -522,7 +590,7 @@ async function main() {
       depthStencilAttachment: { view: shadowView, depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
     sp.setPipeline(shadowPipe); sp.setBindGroup(0, shadowBind);
     sp.setVertexBuffer(0, meshBuf); sp.setVertexBuffer(1, staticBuf);
-    for (const run of staticRuns) { const m = meshTable[run.mesh + C.MLOFF]; sp.draw(m.cnt, run.count, m.off, run.first); }
+    for (const run of staticRuns) { const m = meshTable[run.mesh + C.LOD2OFF]; sp.draw(m.cnt, run.count, m.off, run.first); }
     sp.end();
     device.queue.submit([enc.finish()]);
   }
@@ -581,7 +649,8 @@ async function main() {
   const PITCH_MIN = 5 * DEG, PITCH_MAX = 80 * DEG, FOV_MIN = 15 * DEG, FOV_MAX = 70 * DEG;
   let pitch = PITCH0, yaw = 0, fov = FOV0;
   let lodScale = 1;   // tuning: scales the LOD0/LOD1 crossover DISTANCE (1 = the reference framing;
-                      // <1 pulls the simplified massing closer/cheaper, >1 keeps full art farther out)
+                      // <1 pulls the cheaper LODs closer, >1 keeps full art farther out)
+  const LOD_FAR = 2.5;   // the LOD1(imposter)/LOD2(flat massing) crossover, as a multiple of the LOD0/LOD1 distance
   // Keep the camera below the horizon: the TOP edge of the frustum must stay under the
   // skyline (angle below horizontal = (90° − pitch) − fov/2 > 0), else the ground runs to
   // infinity and clips. So the usable pitch tightens as fov widens; a small margin keeps
@@ -890,23 +959,28 @@ async function main() {
         { view: gPosTex.createView(),    clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
     gpass.setBindGroup(0, bind); gpass.setVertexBuffer(0, meshBuf); gpass.setPipeline(geometryPipe);
-    // per-SCREEN LOD: a screen whose nearest point is beyond the LOD distance draws the simplified
-    // colour-matched massing (LOD1), nearer screens the full art (LOD0). Squared distances; the
-    // eye is up at camEye, the screen footprint on the ground.
-    const lod2 = lodDist2() * lodScale * lodScale, ez2 = camEye[2] * camEye[2], screenLod1 = [];
+    // per-SCREEN LOD, THREE tiers by distance: LOD0 full art (near) -> LOD1 textured imposter (mid)
+    // -> LOD2 flat massing (far). d1 = lodDist2()*lodScale^2 is the LOD0/LOD1 crossover; LOD_FAR
+    // widens it to the LOD1/LOD2 crossover. Squared distances; the eye is up at camEye.
+    const d1 = lodDist2() * lodScale * lodScale, d2 = d1 * (LOD_FAR * LOD_FAR), ez2 = camEye[2] * camEye[2], screenLod = [];
     for (let s = 0; s < C.NS; s++) { const b = screenBox[s];
       const nx = Math.max(b[0], Math.min(camEye[0], b[2])) - camEye[0], ny = Math.max(b[1], Math.min(camEye[1], b[3])) - camEye[1];
-      screenLod1[s] = (nx * nx + ny * ny + ez2) > lod2; }
-    // the STATIC TOWN: frustum-cull screens, draw the visible runs (no rebuild, no re-emit). The
-    // asset toggle late-binds the map (OFF = the white placeholder cube); within the art, the LOD
-    // swaps the mesh by id + MLOFF for distant screens.
+      const dd = nx * nx + ny * ny + ez2; screenLod[s] = dd <= d1 ? 0 : dd <= d2 ? 1 : 2; }
+    const inView = (run) => { const sb = screenBox[run.screen]; return box[0] <= sb[2] && box[2] >= sb[0] && box[1] <= sb[3] && box[3] >= sb[1]; };
+    // the STATIC TOWN, frustum-culled per screen (no rebuild). Asset toggle OFF -> the placeholder
+    // cube. With art: LOD0 + LOD2 share the flat geometry pipeline; LOD1 is the textured imposter.
     gpass.setVertexBuffer(1, staticBuf);
     for (const run of staticRuns) {
-      const sb = screenBox[run.screen];
-      if (box[0] <= sb[2] && box[2] >= sb[0] && box[1] <= sb[3] && box[3] >= sb[1]) {
-        const id = useAssets ? (screenLod1[run.screen] ? run.mesh + C.MLOFF : run.mesh) : C.CUBE;
-        const m = meshTable[id]; gpass.draw(m.cnt, run.count, m.off, run.first);
-      }
+      if (!inView(run)) continue;
+      if (!useAssets) { const m = meshTable[C.CUBE]; gpass.draw(m.cnt, run.count, m.off, run.first); continue; }
+      const lvl = screenLod[run.screen]; if (lvl === 1) continue;          // imposters draw in the pass below
+      const m = meshTable[lvl === 2 ? run.mesh + C.LOD2OFF : run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first);
+    }
+    if (useAssets) {   // LOD1 IMPOSTERS: the textured pipeline + the projected-art atlas, same instances
+      gpass.setPipeline(imposterPipe); gpass.setBindGroup(1, atlasBind); gpass.setVertexBuffer(0, imposterBuf);
+      for (const run of staticRuns) { if (screenLod[run.screen] !== 1 || !inView(run)) continue;
+        const m = imposterTable[run.mesh - C.MPROC]; gpass.draw(m.cnt, run.count, m.off, run.first); }
+      gpass.setPipeline(geometryPipe); gpass.setVertexBuffer(0, meshBuf);  // restore for the dynamic kinds
     }
     // the DYNAMIC opaque kinds from their own buffer: one draw per kind, that kind's mesh.
     gpass.setVertexBuffer(1, instBuf);

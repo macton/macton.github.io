@@ -5,7 +5,10 @@
 #include <stdint.h>
 
 #define MAP_MESH_COUNT 32
-#define MAP_LOD1_OFFSET 16   /* the LOD1 (simplified) of town mesh m is m + MAP_LOD1_OFFSET */
+#define MAP_LOD2_OFFSET 16   /* the LOD2 (flat massing) of town mesh m is m + MAP_LOD2_OFFSET */
+#define MAP_IMPOSTER_COUNT 16   /* the LOD1 textured imposters — a SEPARATE 16-byte table, indexed by base m */
+#define MAP_ATLAS_W 340
+#define MAP_ATLAS_H 612
 #define MAP_ROAD_BASE 0
 #define MAP_ROAD_N 6
 #define MAP_BUILD_BASE 6
@@ -19,4 +22,8 @@ extern const uint32_t MAP_MESH_VCNT[MAP_MESH_COUNT];
 extern const int16_t  MAP_MESH_HZ[MAP_MESH_COUNT];
 extern const uint8_t  MAP_ROAD_CANON[MAP_ROAD_N];  /* autotile: per-road canonical connection mask (N=1,E=2,S=4,W=8) */
 extern const uint32_t MAP_MESH_VERT_TOTAL;
+extern const int8_t   MAP_IMPOSTER_VERT[];
+extern const uint32_t MAP_IMPOSTER_VOFF[MAP_IMPOSTER_COUNT];
+extern const uint32_t MAP_IMPOSTER_VCNT[MAP_IMPOSTER_COUNT];
+extern const uint32_t MAP_IMPOSTER_VERT_TOTAL;
 #endif
