@@ -97,6 +97,10 @@ EXPORT(snapshot_prev) void snapshot_prev(void) {
 EXPORT(set_interp) void set_interp(uint32_t alpha_q8) {
   render_set_interp(alpha_q8, g_prev_tank_xy, g_prev_mite_xy, g_prev_proj_xy);
 }
+/* the previous tick's tank positions (packed x|y<<16) — the host reads these to follow a tank at
+ * its INTERPOLATED position, so the follow-cam tracks where the tank is DRAWN (smooth) instead of
+ * the tick-quantised position (which scrolls the whole scene in sim-rate steps when zoomed in). */
+EXPORT(prev_tank_xy_ptr) uint32_t* prev_tank_xy_ptr(void) { return g_prev_tank_xy; }
 
 EXPORT(set_input)   void set_input(uint32_t tank, uint32_t bits) { if (tank < N_TANKS) g_world.tank_in[tank] = (uint8_t)bits; }
 EXPORT(cycle_tank)  void cycle_tank(uint32_t tank) { sim_cycle_tank(&g_world, tank); rebuild(); }
