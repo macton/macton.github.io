@@ -144,6 +144,14 @@
   #viewctl label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #viewctl input[type=range] { width: 116px; vertical-align: middle; }
   #viewctl .tag { color: var(--acc); }
+  #profctl { max-width: 720px; margin: 8px auto 0; padding: 7px 11px; display: flex; flex-wrap: wrap;
+             align-items: center; gap: 16px; background: var(--card); border: 1px solid var(--line);
+             border-radius: 8px; font-size: 13px; color: var(--dim); }
+  #profctl label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  #profctl .tag { color: var(--acc); }
+  #prof { flex-basis: 100%; margin: 2px 0 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+          color: var(--dim); white-space: pre-wrap; }
+  #prof b { color: var(--acc); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -181,6 +189,13 @@
     <label>pitch <input type="range" id="pitch" min="5" max="80" step="1" value="30"><span id="pitchval" class="tag">30°</span></label>
     <label>fov <input type="range" id="fov" min="15" max="70" step="1" value="36"><span id="fovval" class="tag">36°</span></label>
     <label>lod dist <input type="range" id="loddist" min="0.25" max="4" step="0.05" value="1"><span id="loddistval" class="tag">1.00×</span></label>
+  </div>
+  <div id="profctl">
+    <span class="tag">render profile</span>
+    <label><input type="checkbox" id="t_town" checked> town</label>
+    <label><input type="checkbox" id="t_trees" checked> trees</label>
+    <label><input type="checkbox" id="t_lights" checked> point lights</label>
+    <pre id="prof">profiling…</pre>
   </div>
   <div id="status">loading…</div>
   <div id="help">
@@ -459,11 +474,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.28-031840"></script>
+  <script src="version.js?v=2026.06.28-034929"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.28-031840");</script>
+  <script type="module">import("./app.js?v=2026.06.28-034929");</script>
 </body>
 </html>

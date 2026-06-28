@@ -353,7 +353,10 @@ async function main() {
   // --- WebGPU -------------------------------------------------------------
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error("no WebGPU adapter (unsupported GPU/driver?)");
-  const device = await adapter.requestDevice();
+  // timestamp-query gives real per-pass GPU time; not every platform exposes it (notably iOS
+  // Safari today), so it is optional — the profiler falls back to CPU timing + the layer toggles.
+  const canTimestamp = adapter.features.has("timestamp-query");
+  const device = await adapter.requestDevice({ requiredFeatures: canTimestamp ? ["timestamp-query"] : [] });
   device.addEventListener("uncapturederror", (e) => console.error("WEBGPU_UNCAPTURED:", e.error.message));
   const canvas = document.getElementById("gpu");
   const ctx = canvas.getContext("webgpu");
@@ -680,6 +683,26 @@ async function main() {
   // north). viewWrite writes the MVP and remembers its inverse so a pixel can be cast
   // back onto the ground. Nothing here touches the simulation.
   let useAssets = true;   // default: show the baked town + meshes; toggle OFF -> the placeholder massing model
+  // render-profiling: live A/B toggles for the heavy layers (watch the frame time move on the
+  // actual device — the surest way to attribute GPU cost where timestamp-query isn't available).
+  let drawTown = true, drawTrees = true, drawLights = true;
+
+  // GPU timing via timestamp-query (when supported): one write at the start + end of each pass.
+  const GP = ["geom", "light", "plight", "fx", "tone"];   // the per-pass slots
+  const tsCount = GP.length * 2;
+  let tsQuery = null, tsResolve = null; const tsFree = [];
+  if (canTimestamp) {
+    tsQuery = device.createQuerySet({ type: "timestamp", count: tsCount });
+    tsResolve = device.createBuffer({ size: tsCount * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+    for (let i = 0; i < 4; i++) tsFree.push(device.createBuffer({ size: tsCount * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }));
+  }
+  // timestampWrites descriptor for pass `name` (or undefined when unsupported -> the pass is plain)
+  const tw = (name) => canTimestamp ? { querySet: tsQuery, beginningOfPassWriteIndex: GP.indexOf(name) * 2, endOfPassWriteIndex: GP.indexOf(name) * 2 + 1 } : undefined;
+  // the running profile: EMA-smoothed CPU sections (ms), per-pass GPU time (ms), and draw counts.
+  const prof = { sim: 0, enc: 0, cpu: 0, gpu: {}, n: {}, ts: canTimestamp };
+  const ema = (o, k, v) => { o[k] = o[k] ? o[k] * 0.9 + v * 0.1 : v; };
+  const profEl = document.getElementById("prof");
+  let profFrame = 0;
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
   let camEye = [0, 0, 0];   // the eye in world subcells (set by viewWrite) — feeds the LOD distance test
   let invMVP = null;
@@ -908,6 +931,10 @@ async function main() {
 
   // render-only controls (presentation): low-poly art toggle + a camera zoom slider
   const aT = document.getElementById("assetsToggle"); if (aT) aT.onchange = () => { useAssets = aT.checked; };
+  // render-profile layer toggles: drop a layer to see its frame-time cost live
+  const tTown = document.getElementById("t_town"); if (tTown) tTown.onchange = () => { drawTown = tTown.checked; };
+  const tTrees = document.getElementById("t_trees"); if (tTrees) tTrees.onchange = () => { drawTrees = tTrees.checked; };
+  const tLights = document.getElementById("t_lights"); if (tLights) tLights.onchange = () => { drawLights = tLights.checked; };
   const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { zoom = parseFloat(zR.value) || 1; clampCam(); };
   // live pitch (tilt off straight-down) + fov (lens) — presentation-only, like zoom
   const pR = document.getElementById("pitch"), pV = document.getElementById("pitchval");
@@ -958,6 +985,21 @@ async function main() {
     yaw = 0; pitch = PITCH0; fov = FOV0; syncViewUI(); setPicker(false);
   };
 
+  // the render-profile readout: frame time, CPU sections, per-pass GPU time (when available),
+  // and the live draw counts. The GEOM pass time bundles town + trees + dynamic opaque, so to
+  // read a single layer's GPU cost, toggle it off and watch GEOM (and the frame) drop.
+  function updateProfPanel() {
+    const g = prof.gpu, ms = (v) => (v ? v.toFixed(2) : "–"), N = prof.n;
+    const gpuTotal = GP.reduce((a, p) => a + (g[p] || 0), 0);
+    let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps)    `
+          + `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
+    s += canTimestamp
+      ? `<b>GPU</b> geom ${ms(g.geom)} · light ${ms(g.light)} · plights ${ms(g.plight)} · fx ${ms(g.fx)} · tone ${ms(g.tone)} · <b>Σ ${gpuTotal.toFixed(2)} ms</b>\n`
+      : `<b>GPU</b> per-pass timing unavailable here — toggle town / trees / point lights to A/B each layer's frame cost\n`;
+    s += `<b>draws</b> town ${N.staticRuns || 0} runs · trees ${N.trees || 0} (${N.treeRuns || 0} runs) · opaque ${N.inst || 0} inst · lights ${N.lights || 0}`;
+    profEl.innerHTML = s;
+  }
+
   function frame(now) {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
@@ -987,6 +1029,7 @@ async function main() {
     const hc = lastMouse ? cellAt(lastMouse.x, lastMouse.y) : null;
     wasm.set_view(box[0], box[1], box[2], box[3], hc ? hc.wcx : C.BW, hc ? hc.wcy : C.BH);
 
+    const cpu0 = performance.now();     // CPU profile: prep + uploads + the encode below
     const n = wasm.inst_count();
     device.queue.writeBuffer(instBuf, 0, view.instBytes(n));
     const nLights = wasm.light_count();   // the deferred point lights (mites + FX), rebuilt each frame
@@ -994,7 +1037,9 @@ async function main() {
     syncStatic();                       // upload-once the baked town (no-op unless it re-baked)
     applyWallShake();                   // jolt any struck building this frame (patches a few instances)
     ensureTargets();
+    const enc0 = performance.now();     // CPU profile: just the command-encoder build (the draw loops)
     const enc = device.createCommandEncoder();
+    let dStaticRuns = 0, dTreeRuns = 0, dTrees = 0;   // draw counts, for the profiler
 
     // 1) GEOMETRY -> the G-buffer (albedo + world normal + world position) + depth. Drawn once.
     const gpass = enc.beginRenderPass({
@@ -1002,7 +1047,8 @@ async function main() {
         { view: gColorTex.createView(),  clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
         { view: gNormalTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
         { view: gPosTex.createView(),    clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
-      depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" } });
+      depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" },
+      timestampWrites: tw("geom") });
     gpass.setBindGroup(0, bind); gpass.setVertexBuffer(0, meshBuf); gpass.setPipeline(geometryPipe);
     // per-SCREEN LOD, THREE tiers by distance: LOD0 full art (near) -> LOD1 textured imposter (mid)
     // -> LOD2 flat massing (far). d1 = lodDist2()*lodScale^2 is the LOD0/LOD1 crossover; LOD_FAR
@@ -1014,24 +1060,26 @@ async function main() {
     const inView = (run) => { const sb = screenBox[run.screen]; return box[0] <= sb[2] && box[2] >= sb[0] && box[1] <= sb[3] && box[3] >= sb[1]; };
     // the STATIC TOWN, frustum-culled per screen (no rebuild). Asset toggle OFF -> the placeholder
     // cube. With art: LOD0 + LOD2 share the flat geometry pipeline; LOD1 is the textured imposter.
-    gpass.setVertexBuffer(1, staticBuf);
-    for (const run of staticRuns) {
-      if (!inView(run)) continue;
-      if (!useAssets) { const m = meshTable[C.CUBE]; gpass.draw(m.cnt, run.count, m.off, run.first); continue; }
-      const lvl = screenLod[run.screen]; if (lvl === 1) continue;          // imposters draw in the pass below
-      const m = meshTable[lvl === 2 ? run.mesh + C.LOD2OFF : run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first);
-    }
-    if (useAssets) {   // LOD1 IMPOSTERS: the textured pipeline + the projected-art atlas, same instances
-      gpass.setPipeline(imposterPipe); gpass.setBindGroup(1, atlasBind); gpass.setVertexBuffer(0, imposterBuf);
-      for (const run of staticRuns) { if (screenLod[run.screen] !== 1 || !inView(run)) continue;
-        const m = imposterTable[run.mesh - C.MPROC]; gpass.draw(m.cnt, run.count, m.off, run.first); }
-      gpass.setPipeline(geometryPipe); gpass.setVertexBuffer(0, meshBuf);  // restore for the dynamic kinds
+    if (drawTown) {
+      gpass.setVertexBuffer(1, staticBuf);
+      for (const run of staticRuns) {
+        if (!inView(run)) continue;
+        if (!useAssets) { const m = meshTable[C.CUBE]; gpass.draw(m.cnt, run.count, m.off, run.first); dStaticRuns++; continue; }
+        const lvl = screenLod[run.screen]; if (lvl === 1) continue;          // imposters draw in the pass below
+        const m = meshTable[lvl === 2 ? run.mesh + C.LOD2OFF : run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first); dStaticRuns++;
+      }
+      if (useAssets) {   // LOD1 IMPOSTERS: the textured pipeline + the projected-art atlas, same instances
+        gpass.setPipeline(imposterPipe); gpass.setBindGroup(1, atlasBind); gpass.setVertexBuffer(0, imposterBuf);
+        for (const run of staticRuns) { if (screenLod[run.screen] !== 1 || !inView(run)) continue;
+          const m = imposterTable[run.mesh - C.MPROC]; gpass.draw(m.cnt, run.count, m.off, run.first); dStaticRuns++; }
+        gpass.setPipeline(geometryPipe); gpass.setVertexBuffer(0, meshBuf);  // restore for the dynamic kinds
+      }
     }
     // the static PROPS (trees): art-pass only, frustum-culled per screen, drawn with the M_TREE
     // procedural mesh at every distance (no LOD — a tree is a handful of triangles).
-    if (useAssets) {
+    if (useAssets && drawTrees) {
       gpass.setVertexBuffer(1, propBuf);
-      for (const run of propRuns) { if (!inView(run)) continue; const m = meshTable[run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first); }
+      for (const run of propRuns) { if (!inView(run)) continue; const m = meshTable[run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first); dTreeRuns++; dTrees += run.count; }
     }
     // the DYNAMIC opaque kinds from their own buffer: one draw per kind, that kind's mesh.
     gpass.setVertexBuffer(1, instBuf);
@@ -1047,16 +1095,19 @@ async function main() {
     // (hemisphere ambient + a directional sun); the background (mask 0) becomes the sky. This
     // is where the next per-mite / per-FX point lights will additively accumulate.
     const lpass = enc.beginRenderPass({
-      colorAttachments: [{ view: hdrTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }] });
+      colorAttachments: [{ view: hdrTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }],
+      timestampWrites: tw("light") });
     lpass.setPipeline(lightingPipe); lpass.setBindGroup(0, lightBind); lpass.draw(3);
     lpass.end();
 
     // 2b) POINT LIGHTS -> HDR (additive). Each visible mite / FX is a small cube volume that
     // lights only the G-buffer pixels it covers, so the swarm's glow scales with lit pixels, not
     // with the mite count times the scene. One instanced draw over the whole light buffer.
-    if (nLights) {
+    const runLights = nLights && drawLights;
+    if (runLights) {
       const plpass = enc.beginRenderPass({
-        colorAttachments: [{ view: hdrTex.createView(), loadOp: "load", storeOp: "store" }] });
+        colorAttachments: [{ view: hdrTex.createView(), loadOp: "load", storeOp: "store" }],
+        timestampWrites: tw("plight") });
       plpass.setPipeline(lightVolPipe); plpass.setBindGroup(0, lightVolBind);
       plpass.setVertexBuffer(0, meshBuf); plpass.setVertexBuffer(1, lightBuf);
       const cube = meshTable[C.CUBE]; plpass.draw(cube.cnt, nLights, cube.off, 0);
@@ -1068,7 +1119,8 @@ async function main() {
     if (tc) {
       const fpass = enc.beginRenderPass({
         colorAttachments: [{ view: hdrTex.createView(), loadOp: "load", storeOp: "store" }],
-        depthStencilAttachment: { view: depthTex.createView(), depthLoadOp: "load", depthStoreOp: "store" } });
+        depthStencilAttachment: { view: depthTex.createView(), depthLoadOp: "load", depthStoreOp: "store" },
+        timestampWrites: tw("fx") });
       fpass.setBindGroup(0, bind); fpass.setVertexBuffer(0, meshBuf); fpass.setVertexBuffer(1, instBuf);
       fpass.setPipeline(transPipe); const m = meshTable[C.CUBE]; fpass.draw(m.cnt, tc, m.off, first);
       fpass.end();
@@ -1076,11 +1128,35 @@ async function main() {
 
     // 4) TONEMAP -> the display. Roll the HDR down (exposure curve) into the swapchain.
     const tpass = enc.beginRenderPass({
-      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }] });
+      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }],
+      timestampWrites: tw("tone") });
     tpass.setPipeline(tonemapPipe); tpass.setBindGroup(0, tonemapBind); tpass.draw(3);
     tpass.end();
 
+    // resolve the GPU timestamps into a mappable buffer to read back next frame (when supported)
+    let tsRead = null;
+    if (canTimestamp) {
+      enc.resolveQuerySet(tsQuery, 0, tsCount, tsResolve, 0);
+      tsRead = tsFree.pop() || device.createBuffer({ size: tsCount * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      enc.copyBufferToBuffer(tsResolve, 0, tsRead, 0, tsCount * 8);
+    }
     device.queue.submit([enc.finish()]);
+    ema(prof, "enc", performance.now() - enc0);   // CPU: the command-encoder build
+    ema(prof, "cpu", performance.now() - cpu0);    // CPU: prep + uploads + encode
+    prof.sim = updMs; prof.dt = dt; prof.fps = fps;
+    prof.n = { staticRuns: dStaticRuns, treeRuns: dTreeRuns, trees: dTrees, inst: n, lights: runLights ? nLights : 0 };
+
+    // read back the per-pass GPU times (a frame or two behind; that's fine for a running average)
+    if (tsRead) {
+      const ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0 };
+      tsRead.mapAsync(GPUMapMode.READ).then(() => {
+        const t = new BigInt64Array(tsRead.getMappedRange());
+        for (const p of GP) { if (!ran[p]) continue;
+          const ns = Number(t[GP.indexOf(p) * 2 + 1] - t[GP.indexOf(p) * 2]);
+          if (ns >= 0 && ns < 1e9) ema(prof.gpu, p, ns / 1e6); }
+        tsRead.unmap(); tsFree.push(tsRead);
+      }).catch(() => {});   // buffer can be discarded on teardown; ignore
+    }
 
     const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
     articleMap.update(camIdx);
@@ -1088,6 +1164,7 @@ async function main() {
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
     updateCamUI();
     dbg.update({ fps, dt, updMs, instCount: n, cam });
+    if (profEl && (++profFrame % 8 === 0)) updateProfPanel();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
