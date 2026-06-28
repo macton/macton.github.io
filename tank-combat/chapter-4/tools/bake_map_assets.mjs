@@ -106,29 +106,30 @@ function cage(kitDir, name, img, roofCol, group) {
     face([[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]], top);
     return { name, hz, faces, flat: true };
   }
-  // buildings/landmark: detect the eave height + roof shape, sample wall/roof colours
-  let roofMinZ = hi[2], rx = [], ry = [];
+  // buildings/landmark: classify the roof by the AREA-WEIGHTED slope of the upper upward faces.
+  // Rooftop clutter (AC units, parapets, penthouses) is small in area, so it no longer fakes a
+  // ridge the way the old top-12%-vertex span did — that false-gabled flat-roofed buildings.
+  // roofNz ~1 = flat; lower = a real pitch; the ridge runs ACROSS the dominant slope direction.
+  let aSum = 0, nzA = 0, nxA = 0, nyA = 0, roofMinZ = hi[2];
   for (const tri of tris) { const P = tri.map(([vi]) => E[vi]);
     const e1 = [P[1][0]-P[0][0],P[1][1]-P[0][1],P[1][2]-P[0][2]], e2 = [P[2][0]-P[0][0],P[2][1]-P[0][1],P[2][2]-P[0][2]];
-    let n = [e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]]; const L = Math.hypot(...n)||1; n = n.map((v)=>v/L);
+    const cr = [e1[1]*e2[2]-e1[2]*e2[1],e1[2]*e2[0]-e1[0]*e2[2],e1[0]*e2[1]-e1[1]*e2[0]]; const aA = 0.5*Math.hypot(...cr), L = 2*aA||1, n = cr.map((v)=>v/L);
     const czF = ((P[0][2]+P[1][2]+P[2][2])/3 - lo[2]) / hKen;
-    if (n[2] > 0.35 && czF > 0.3) { for (const p of P) { roofMinZ = Math.min(roofMinZ, p[2]); if ((p[2]-lo[2])/hKen > 0.88) { rx.push(p[0]); ry.push(p[1]); } } } }
-  const eaveFrac = Math.min(0.65, Math.max(0.30, (roofMinZ - lo[2]) / hKen)), ez = -1 + 2 * eaveFrac;
-  const fw = hi[0]-lo[0], fd = hi[1]-lo[1];
-  const rxF = rx.length ? (Math.max(...rx)-Math.min(...rx)) / fw : 1, ryF = ry.length ? (Math.max(...ry)-Math.min(...ry)) / fd : 1;
-  const gable = Math.min(rxF, ryF) < 0.25, ridgeX = rxF >= ryF;   // one ridge axis ~a line => pitched; ridge along the wider one
+    if (n[2] > 0.15 && czF > 0.45) { aSum += aA; nzA += n[2]*aA; nxA += Math.abs(n[0])*aA; nyA += Math.abs(n[1])*aA; for (const p of P) roofMinZ = Math.min(roofMinZ, p[2]); } }
+  const roofNz = aSum ? nzA / aSum : 1;
+  const gable = roofNz < 0.90, ridgeX = nyA >= nxA;   // sloped enough to read as pitched; slopes face +-Y => ridge along X
+  const eaveFrac = gable ? Math.min(0.62, Math.max(0.32, (roofMinZ - lo[2]) / hKen)) : 0.82;   // flat: a thin top cap
+  const ez = -1 + 2 * eaveFrac;
+  if (process.argv.includes("debugroofs")) console.error(`  ${name.padEnd(22)} gable=${gable} roofNz=${roofNz.toFixed(3)} ridgeX=${ridgeX} eaveFrac=${eaveFrac.toFixed(2)}`);
   const wall = avgFaceColour(E, tris, uv, img, lo, hKen, (n) => Math.abs(n[2]) < 0.35);
   const roof = roofCol || avgFaceColour(E, tris, uv, img, lo, hKen, (n, czF) => n[2] > 0.35 && czF > 0.3);
-  // box walls up to the eave
-  face([[-1,-1,-1],[1,-1,-1],[1,-1,ez],[-1,-1,ez]], wall);
-  face([[1,-1,-1],[1,1,-1],[1,1,ez],[1,-1,ez]], wall);
-  face([[1,1,-1],[-1,1,-1],[-1,1,ez],[1,1,ez]], wall);
-  face([[-1,1,-1],[-1,-1,-1],[-1,-1,ez],[-1,1,ez]], wall);
-  if (!gable) {                                   // flat roof: a roof-coloured cap + top
-    face([[-1,-1,ez],[1,-1,ez],[1,-1,1],[-1,-1,1]], roof);
-    face([[1,-1,ez],[1,1,ez],[1,1,1],[1,-1,1]], roof);
-    face([[1,1,ez],[-1,1,ez],[-1,1,1],[1,1,1]], roof);
-    face([[-1,1,ez],[-1,-1,ez],[-1,-1,1],[-1,1,1]], roof);
+  // box walls: FULL height for a flat roof (the top is just a cap), up to the eave for a gable
+  const wt = gable ? ez : 1;
+  face([[-1,-1,-1],[1,-1,-1],[1,-1,wt],[-1,-1,wt]], wall);
+  face([[1,-1,-1],[1,1,-1],[1,1,wt],[1,-1,wt]], wall);
+  face([[1,1,-1],[-1,1,-1],[-1,1,wt],[1,1,wt]], wall);
+  face([[-1,1,-1],[-1,-1,-1],[-1,-1,wt],[-1,1,wt]], wall);
+  if (!gable) {                                   // flat roof: just the top quad (roof colour)
     face([[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]], roof);
   } else if (ridgeX) {                            // gable, ridge along X (y=0, z=+1)
     face([[-1,1,ez],[1,1,ez],[1,0,1],[-1,0,1]], roof);
