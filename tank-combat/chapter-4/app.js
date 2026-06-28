@@ -806,15 +806,29 @@ async function main() {
   // RISES past budget when the GPU can't keep up (it can't read below the refresh floor), so we
   // trim on a bad window (median over ~30 frames, robust to one-off hitches) and probe up blindly
   // on a cooldown. Disabled during the diagnostics sweep (which drives renderScale itself).
+  // a ring of recent RAW frame times (ms) — the source of truth for the live jitter readout and the
+  // diagnostics. The on-screen fps was EMA-smoothed (hides spikes); these expose the distribution.
+  const ftRing = new Float64Array(256); let ftHead = 0, ftCount = 0;
+  function ftPush(ms) { ftRing[ftHead] = ms; ftHead = (ftHead + 1) % ftRing.length; if (ftCount < ftRing.length) ftCount++; }
+  function ftRecent(k) { const n = Math.min(k, ftCount), out = new Float64Array(n);
+    for (let i = 0; i < n; i++) out[i] = ftRing[(ftHead - 1 - i + ftRing.length) % ftRing.length]; return out; }
+  function stats(arr) {                                   // {n,med,mean,p95,p99,max,min,sd}
+    const a = Array.from(arr).sort((x, y) => x - y), n = a.length; if (!n) return null;
+    const pct = (p) => a[Math.min(n - 1, Math.floor(p * n))];
+    let m = 0; for (const v of a) m += v; m /= n;
+    let sd = 0; for (const v of a) sd += (v - m) * (v - m); sd = Math.sqrt(sd / n);
+    return { n, med: a[n >> 1], mean: m, p95: pct(0.95), p99: pct(0.99), max: a[n - 1], min: a[0], sd };
+  }
   let autoRes = true;
-  const AR_BUDGET = 18.5, AR_MIN = 0.5, AR_STEP = 0.1, AR_PROBE = 8;   // ms / floor / step / windows before a probe-up
+  const AR_BUDGET = 18.5, AR_P95 = 26, AR_MIN = 0.5, AR_STEP = 0.1, AR_PROBE = 8;   // median / spike thresholds (ms)
   let arWin = [], arSince = 0;
   function autoResTick(dtMs) {
-    if (!autoRes || diag.active) return;
+    if (!autoRes || diag.active) return;   // stays live during the follow-diag — we want to see it act
     arWin.push(dtMs);
     if (arWin.length < 30) return;
-    const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1]; arWin = []; arSince++;
-    if (med > AR_BUDGET && renderScale > AR_MIN) { renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arSince = 0; }
+    const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1], p95 = s[Math.floor(0.95 * s.length)]; arWin = []; arSince++;
+    // trim on a high median OR a high p95 (frequent SPIKES — the jitter case the median hides)
+    if ((med > AR_BUDGET || p95 > AR_P95) && renderScale > AR_MIN) { renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arSince = 0; }
     else if (arSince >= AR_PROBE && renderScale < 1) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); arSince = 0; }
   }
   function resize() {
@@ -885,6 +899,7 @@ async function main() {
     { k: "shadow: revect, no SSS",   town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2, sss: 0 },
     { k: "shadow: Poisson + SSS",    town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 1, sss: 1 },
   ];
+  let lastReport = "", reportShown = false;   // the text the copy button copies; reportShown keeps a finished report on the panel
   const diag = {
     active: false, done: false, ci: 0, phase: "warm", warm: 0, coll: [], results: [],
     snap: null, gmin: Infinity, report: "", view: "",
@@ -921,9 +936,9 @@ async function main() {
       if (sT) sT.checked = drawTown; if (sR) sR.checked = drawTrees; if (sL) sL.checked = drawLights;
       const sS = document.getElementById("shq_town"), sB = document.getElementById("shq_sss");
       if (sS) sS.value = String(townShadowMode); if (sB) sB.checked = !!sssBlur;
-      this.active = false; this.done = true; this.report = this.build();
-      const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn");
-      if (cp) cp.disabled = false; if (bt) bt.disabled = false;
+      this.active = false; this.done = true; lastReport = this.report = this.build(); reportShown = true;
+      const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn"), fb = document.getElementById("followDiagBtn");
+      if (cp) cp.disabled = false; if (bt) bt.disabled = false; if (fb) fb.disabled = false;
       if (profEl) profEl.textContent = this.report;
     },
     build() {
@@ -947,6 +962,73 @@ async function main() {
         L.push(`  ${r.k.padEnd(24)} ${r.med.toFixed(1)} / ${r.p95.toFixed(1)} / ${r.min.toFixed(1)}  (~${Math.round(1000 / r.med)} fps)`);
         if (canTimestamp) L.push(`      gpu: geom ${f(r.gpu.geom)} sss ${f(r.gpu.sss)} light ${f(r.gpu.light)} plights ${f(r.gpu.plight)} fx ${f(r.gpu.fx)} tone ${f(r.gpu.tone)}`);
       }
+      return L.join("\n");
+    },
+  };
+
+  // FOLLOW DIAGNOSTIC: keep the user's view, follow a tank, and route it to a handful of spread-out
+  // nest cells across the map. Capture the RAW frame time every frame (bucketed by screen + leg) and
+  // collate a compact report — percentiles + jitter + a histogram + worst screens — so the dynamic
+  // camera-through-town jitter is measured without pasting thousands of samples. Auto-res stays live
+  // (we want to see whether it kicks in); the per-leg / overall render-scale range is recorded.
+  const FD_LEG_MS = 11000, FD_ARRIVE = 2.5, FD_MIN = 40;   // ms/leg cap; arrival within 2.5 cells; min samples/leg
+  const followDiag = {
+    active: false, done: false, t: 0, leg: 0, wps: [], all: [], allSamp: [], byScreen: null,
+    legSamp: [], legScreens: null, legScaleMin: 1, legScaleMax: 1, legT0: 0, snap: null, gmin: Infinity,
+    start() {
+      if (this.active || diag.active) return;
+      const nests = view.nest(), want = 6, step = Math.max(1, Math.floor(nests.length / want));
+      this.wps = []; for (let i = 0; i < nests.length && this.wps.length < want; i += step) { const c = nests[i]; this.wps.push({ wcx: c % C.BW, wcy: (c / C.BW) | 0 }); }
+      if (!this.wps.length) return;
+      this.snap = { follow, followTank, zoom, pitch };
+      this.t = wasm.selected() !== 255 ? wasm.selected() : 0;
+      wasm.select_tank(this.t); follow = true; followTank = this.t; followOffX = followOffY = 0;
+      this.active = true; this.done = false; this.leg = 0; this.all = []; this.allSamp = []; this.byScreen = new Map(); this.gmin = Infinity;
+      this.route();
+    },
+    route() { const w = this.wps[this.leg]; wasm.set_dest(this.t, w.wcx, w.wcy);
+      this.legSamp = []; this.legScreens = new Set(); this.legScaleMin = 9; this.legScaleMax = 0; this.legT0 = performance.now(); },
+    step(dt) {
+      const ms = dt * 1000; if (ms > 0.2 && ms < this.gmin) this.gmin = ms;
+      this.legSamp.push(ms); this.allSamp.push(ms);
+      const cam = camScreen(), key = `${cam.sx},${cam.sy}`;
+      this.legScreens.add(key); if (!this.byScreen.has(key)) this.byScreen.set(key, []); this.byScreen.get(key).push(ms);
+      this.legScaleMin = Math.min(this.legScaleMin, renderScale); this.legScaleMax = Math.max(this.legScaleMax, renderScale);
+      const xy = view.xy(), w = this.wps[this.leg];
+      const dCells = Math.hypot(xy[2 * this.t] - (w.wcx * C.SUB + C.SUB / 2), xy[2 * this.t + 1] - (w.wcy * C.SUB + C.SUB / 2)) / C.SUB;
+      if (this.legSamp.length >= FD_MIN && (dCells < FD_ARRIVE || performance.now() - this.legT0 > FD_LEG_MS)) {
+        this.all.push({ dest: `${w.wcx},${w.wcy}`, screens: [...this.legScreens], st: stats(this.legSamp), scale: [this.legScaleMin, this.legScaleMax], arrived: dCells < FD_ARRIVE });
+        this.leg++; if (this.leg >= this.wps.length) this.finish(); else this.route();
+      }
+    },
+    finish() {
+      follow = this.snap.follow; followTank = this.snap.followTank;
+      this.active = false; this.done = true; lastReport = this.build(); reportShown = true;
+      const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn"), fb = document.getElementById("followDiagBtn");
+      if (cp) cp.disabled = false; if (bt) bt.disabled = false; if (fb) fb.disabled = false;
+      if (profEl) profEl.textContent = lastReport;
+    },
+    build() {
+      const all = this.allSamp, ov = stats(all), info = adapter.info || {};
+      const sumS = (all.reduce((a, b) => a + b, 0) / 1000).toFixed(0);
+      const hitch = (b) => (all.filter(v => v > b).length / all.length * 100);
+      const buckets = [[0, 14], [14, 18], [18, 22], [22, 28], [28, 40], [40, 1e9]];
+      const hist = buckets.map(([a, b]) => all.filter(v => v >= a && v < b).length);
+      const scLo = Math.min(...this.all.map(l => l.scale[0])), scHi = Math.max(...this.all.map(l => l.scale[1]));
+      const L = [];
+      L.push("=== follow diagnostic (v" + (window.TANK_VERSION || "?") + ") ===");
+      L.push("ua: " + navigator.userAgent);
+      L.push("gpu: " + [info.vendor, info.architecture].filter(Boolean).join("/") + " | timestamp-query:" + (canTimestamp ? "y" : "n") + " | refresh ~" + (this.gmin < Infinity ? Math.round(1000 / this.gmin) : "?") + "Hz");
+      L.push(`view: zoom ${this.snap.zoom.toFixed(2)} · pitch ${Math.round(this.snap.pitch / DEG)}° · auto-res ${autoRes ? "on" : "off"}`);
+      L.push(`overall (${ov.n} frames, ~${sumS}s): median ${ov.med.toFixed(1)}ms (${(1000 / ov.med).toFixed(0)}fps) · mean ${ov.mean.toFixed(1)} · p95 ${ov.p95.toFixed(1)} · p99 ${ov.p99.toFixed(1)} · max ${ov.max.toFixed(1)} · jitter(sd) ${ov.sd.toFixed(1)}`);
+      L.push(`  hitches >25ms ${hitch(25).toFixed(1)}% · dropped >33ms ${hitch(33).toFixed(1)}% · res ${scLo.toFixed(2)}..${scHi.toFixed(2)}×`);
+      L.push(`histogram (ms): <14 ${hist[0]} · 14-18 ${hist[1]} · 18-22 ${hist[2]} · 22-28 ${hist[3]} · 28-40 ${hist[4]} · >40 ${hist[5]}`);
+      L.push("per-leg (dest · screens): median/p95/max ms · res:");
+      for (let i = 0; i < this.all.length; i++) { const l = this.all[i];
+        L.push(`  leg${i + 1} →${l.dest} [${l.screens.join(" ")}]${l.arrived ? "" : " (timeout)"}: ${l.st.med.toFixed(1)}/${l.st.p95.toFixed(1)}/${l.st.max.toFixed(1)} · ${l.scale[0].toFixed(2)}..${l.scale[1].toFixed(2)}×`); }
+      L.push("worst screens by p95 (median/p95/max, n):");
+      const sc = [...this.byScreen.entries()].map(([k, a]) => ({ k, s: stats(a) })).filter(x => x.s.n >= 20).sort((a, b) => b.s.p95 - a.s.p95).slice(0, 6);
+      for (const x of sc) L.push(`  screen ${x.k}: ${x.s.med.toFixed(1)}/${x.s.p95.toFixed(1)}/${x.s.max.toFixed(1)} (n=${x.s.n})`);
       return L.join("\n");
     },
   };
@@ -1189,13 +1271,16 @@ async function main() {
   const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
   const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
   const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; };
-  // the controlled diagnostic sweep + copy-to-clipboard
-  const diagBtn = document.getElementById("diagBtn"), diagCopy = document.getElementById("diagCopy");
-  if (diagBtn) diagBtn.onclick = () => { if (diag.active) return; diagBtn.disabled = true; diagCopy.disabled = true; diag.start(); };
+  // any control change in the profile panel dismisses a finished report and resumes the live readout
+  const pc = document.getElementById("profctl"); if (pc) pc.addEventListener("input", () => { reportShown = false; });
+  // the controlled diagnostic sweep, the roaming follow-cam capture, + copy-to-clipboard
+  const diagBtn = document.getElementById("diagBtn"), diagCopy = document.getElementById("diagCopy"), followBtn = document.getElementById("followDiagBtn");
+  if (diagBtn) diagBtn.onclick = () => { if (diag.active || followDiag.active) return; diagBtn.disabled = true; if (followBtn) followBtn.disabled = true; diagCopy.disabled = true; diag.start(); };
+  if (followBtn) followBtn.onclick = () => { if (diag.active || followDiag.active) return; followBtn.disabled = true; diagBtn.disabled = true; diagCopy.disabled = true; followDiag.start(); };
   if (diagCopy) diagCopy.onclick = async () => {
-    try { await navigator.clipboard.writeText(diag.report); }
+    try { await navigator.clipboard.writeText(lastReport); }
     catch (e) {   // clipboard API blocked (insecure ctx / permissions) — fall back to a selection
-      const ta = document.createElement("textarea"); ta.value = diag.report; document.body.appendChild(ta);
+      const ta = document.createElement("textarea"); ta.value = lastReport; document.body.appendChild(ta);
       ta.select(); try { document.execCommand("copy"); } catch (_) {} ta.remove();
     }
     const o = diagCopy.textContent; diagCopy.textContent = "copied!"; setTimeout(() => { diagCopy.textContent = o; }, 1200);
@@ -1256,8 +1341,11 @@ async function main() {
   function updateProfPanel() {
     const g = prof.gpu, R = prof.ran || {}, ms = (p) => (R[p] && g[p] ? g[p].toFixed(2) : "–"), N = prof.n;
     const gpuTotal = GP.reduce((a, p) => a + (R[p] ? g[p] || 0 : 0), 0);
-    let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps) · <b>res</b> ${renderScale.toFixed(2)}×${autoRes ? " auto" : ""}    `
-          + `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
+    const ft = stats(ftRecent(120));   // the real frame-time distribution over ~2s (not the smoothed mean)
+    let s = ft
+      ? `<b>frame</b> ${ft.med.toFixed(1)} ms (${(1000 / ft.med).toFixed(0)} fps) · p95 <b>${ft.p95.toFixed(1)}</b> · max <b>${ft.max.toFixed(1)}</b> · jitter ${ft.sd.toFixed(1)} ms · <b>res</b> ${renderScale.toFixed(2)}×${autoRes ? " auto" : ""}\n`
+      : "";
+    s += `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
     s += canTimestamp
       ? `<b>GPU</b> geom ${ms("geom")} · sss ${ms("sss")} · light ${ms("light")} · plights ${ms("plight")} · fx ${ms("fx")} · tone ${ms("tone")} · <b>Σ ${gpuTotal.toFixed(2)} ms</b> (passes overlap on tile GPUs)\n`
       : `<b>GPU</b> per-pass timing unavailable here — toggle town / trees / point lights to A/B each layer's frame cost\n`;
@@ -1268,8 +1356,10 @@ async function main() {
   function frame(now) {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
+    ftPush(dt * 1000);                // raw frame time for the jitter readout + diagnostics
     if (diag.active) diag.step(dt);   // the sweep sets the layer flags + render scale for THIS frame
     else autoResTick(dt * 1000);      // adaptive resolution holds ~60fps when not sweeping
+    if (followDiag.active) followDiag.step(dt);   // the roaming follow-cam capture
     const sel = wasm.selected(), ts = view.tstate();
     const manual = sel !== 255 && ts[sel] === 2;
 
@@ -1446,7 +1536,8 @@ async function main() {
     dbg.update({ fps, dt, updMs, instCount: n, cam });
     if (profEl) {
       if (diag.active) profEl.textContent = `diagnostics… ${diag.ci + 1}/${DIAG_CONFIGS.length}  "${DIAG_CONFIGS[diag.ci].k}"  (${diag.phase === "warm" ? "settling" : diag.coll.length + "/" + DIAG_N})`;
-      else if (!diag.done && (++profFrame % 8 === 0)) updateProfPanel();   // diag.done keeps the report on screen
+      else if (followDiag.active) profEl.textContent = `follow diag… leg ${followDiag.leg + 1}/${followDiag.wps.length} → cell ${followDiag.wps[followDiag.leg].wcx},${followDiag.wps[followDiag.leg].wcy}  (${followDiag.legSamp.length} frames)`;
+      else if (!reportShown && (++profFrame % 8 === 0)) updateProfPanel();   // a finished report stays on screen until a control changes
     }
     requestAnimationFrame(frame);
   }
