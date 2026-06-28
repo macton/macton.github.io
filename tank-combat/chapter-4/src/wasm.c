@@ -144,6 +144,14 @@ EXPORT(set_proj_speed)   void     set_proj_speed(uint32_t v) { g_world.proj_spee
  * simulation-internal in chapter 3, so they are no longer exported) */
 EXPORT(inst_ptr)        Inst*     inst_ptr(void)        { return g_inst; }
 EXPORT(grid_ptr)        uint32_t* grid_ptr(void)        { return g_world.grid; }
+/* the WALL SHAKE the sim computes (a struck wall buzzes for WALL_SHAKE_DUR ticks). In chapter 3
+ * render.c re-emitted walls and jittered them; here the walls are the STATIC town, so the host
+ * reads this state and jolts the struck building's static instance — same effect, render-side. */
+EXPORT(wall_shake_cell_ptr) const uint16_t* wall_shake_cell_ptr(void) { return g_world.wall_shake_cell; }
+EXPORT(wall_shake_t_ptr)    const uint8_t*  wall_shake_t_ptr(void)    { return g_world.wall_shake_t; }
+EXPORT(wall_shake_max)      uint32_t        wall_shake_max(void)      { return WALL_SHAKE_MAX; }
+EXPORT(wall_shake_dur)      uint32_t        wall_shake_dur(void)      { return WALL_SHAKE_DUR; }
+EXPORT(wall_shake_amp)      uint32_t        wall_shake_amp(void)      { return WALL_SHAKE_AMP; }
 EXPORT(tank_xy_ptr)     uint32_t* tank_xy_ptr(void)     { return g_world.tank_xy; }
 EXPORT(tank_angle_ptr)  uint16_t* tank_angle_ptr(void)  { return g_world.tank_ang; }
 EXPORT(tstate_ptr)      uint8_t*  tstate_ptr(void)      { return g_world.tstate; }

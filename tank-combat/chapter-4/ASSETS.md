@@ -24,10 +24,11 @@ the *town* it becomes is known too, and it is baked **once** — never re-derive
   that nest's hue) — and packs **one instance per cell**, grouped by `(screen, mesh)` into
   a small run table.
 - `app.js` uploads that instance buffer **once** and, per frame, only **frustum-culls the
-  screen buckets** and draws the visible runs. The sole per-frame map cost is the cull —
-  no re-emit, no re-classification. It re-bakes (in wasm) **only** when the map itself
-  changes (a wall toggled, a nest moved); a version counter tells the page to re-upload
-  exactly then.
+  screen buckets** and draws the visible runs — no re-emit, no re-classification. (The one
+  exception is cosmetic: a building **struck by a bolt** buzzes for a few ticks, so the host
+  nudges just that instance's position from the sim's `wall_shake` state — a handful of
+  bytes, not a re-bake.) It re-bakes (in wasm) **only** when the map itself changes (a wall
+  toggled, a nest moved); a version counter tells the page to re-upload exactly then.
 
 This is the chapter's thesis applied to the map: the sim never knows it became a town —
 the town is a *projection* of the sim's walls and nests, the same bake-it-once discipline

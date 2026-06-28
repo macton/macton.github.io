@@ -324,6 +324,8 @@ async function main() {
     ATLASW: wasm.map_atlas_w(), ATLASH: wasm.map_atlas_h(),
     // the STATIC TOWN: a run-table stride (the instance stride == inst_stride == STRIDE)
     SRSTRIDE: wasm.static_run_stride(),
+    // wall-shake: a struck building's static instance jolts (the sim computes the buzz)
+    SHAKEMAX: wasm.wall_shake_max(), SHAKEDUR: wasm.wall_shake_dur(), SHAKEAMP: wasm.wall_shake_amp(),
   };
   const mem = () => wasm.memory.buffer;
   const view = {
@@ -397,7 +399,7 @@ async function main() {
     screenBox.push([sx * C.GW * C.SUB, sy * C.GH * C.SUB, (sx + 1) * C.GW * C.SUB, (sy + 1) * C.GH * C.SUB]); }
   // re-upload the static instances + re-read the run table ONLY when the bake changes (a
   // wall toggled, a nest moved); static_version ticks then. Per frame we touch neither.
-  let staticVersion = -1, staticRuns = [];
+  let staticVersion = -1, staticRuns = [], cell2static = new Int32Array(C.NWC).fill(-1), shakePatched = new Set();
   function syncStatic() {
     const v = wasm.static_version(); if (v === staticVersion) return;
     staticVersion = v;
@@ -412,11 +414,33 @@ async function main() {
     // instance (wz + hz, subcells) and re-render the depth map. Once, here — never per frame.
     const idv = new DataView(mem(), wasm.static_inst_ptr(), nInst * C.STRIDE);
     let maxTop = 0;
-    for (let i = 0; i < nInst; i++) { const o = i * C.STRIDE; const top = idv.getInt16(o + 8, true) + idv.getInt16(o + 10, true); if (top > maxTop) maxTop = top; }
+    cell2static.fill(-1); shakePatched.clear();   // one instance per cell -> index, for the wall-shake jolt
+    for (let i = 0; i < nInst; i++) { const o = i * C.STRIDE;
+      const top = idv.getInt16(o + 8, true) + idv.getInt16(o + 10, true); if (top > maxTop) maxTop = top;
+      const wcx = (idv.getInt32(o, true) / C.SUB) | 0, wcy = (idv.getInt32(o + 4, true) / C.SUB) | 0;
+      cell2static[wcy * C.BW + wcx] = i; }
     lightMVP = sunLightMatrix(maxTop);
     device.queue.writeBuffer(lightViewBuf, 0, new Float32Array(lightMVP));   // for the bake (vs_shadow)
     device.queue.writeBuffer(envBuf, 160, new Float32Array(lightMVP));       // for the sample (fs_light)
     renderShadowMap();
+  }
+  // jolt the STRUCK buildings: read the sim's wall_shake and offset those static instances' wx/wy
+  // with chapter 3's buzz (amplitude decays over the shake's life, flipping each tick), restoring
+  // any that stopped. At most WALL_SHAKE_MAX cells while a bolt is fresh — a tiny per-instance patch,
+  // not a re-bake; the upload-once town is otherwise untouched. (Chapter 3 jittered the wall in
+  // render.c; here the wall IS the static town, so the host applies the same buzz to its instance.)
+  function applyWallShake() {
+    const n = C.SHAKEMAX, cells = new Uint16Array(mem(), wasm.wall_shake_cell_ptr(), n), ts = new Uint8Array(mem(), wasm.wall_shake_t_ptr(), n);
+    const now = new Set(), base = (cell) => { const wcx = cell % C.BW, wcy = (cell / C.BW) | 0; return [wcx * C.SUB + C.SUB / 2, wcy * C.SUB + C.SUB / 2]; };
+    for (let e = 0; e < n; e++) {
+      const t = ts[e]; if (!t) continue;
+      const cell = cells[e], idx = cell2static[cell]; if (idx < 0) continue;
+      const amp = (C.SHAKEAMP * t / C.SHAKEDUR) | 0, jx = (t & 1) ? amp : -amp, jy = (t & 2) ? amp : -amp, b = base(cell);
+      device.queue.writeBuffer(staticBuf, idx * C.STRIDE, new Int32Array([b[0] + jx, b[1] + jy]));
+      now.add(cell);
+    }
+    for (const cell of shakePatched) if (!now.has(cell)) { const idx = cell2static[cell]; if (idx >= 0) device.queue.writeBuffer(staticBuf, idx * C.STRIDE, new Int32Array(base(cell))); }
+    shakePatched = now;
   }
   const module = device.createShaderModule({ code: WGSL });
   const screenModule = device.createShaderModule({ code: WGSL_SCREEN });
@@ -948,6 +972,7 @@ async function main() {
     const nLights = wasm.light_count();   // the deferred point lights (mites + FX), rebuilt each frame
     if (nLights) device.queue.writeBuffer(lightBuf, 0, new Uint8Array(mem(), wasm.light_ptr(), nLights * C.STRIDE));
     syncStatic();                       // upload-once the baked town (no-op unless it re-baked)
+    applyWallShake();                   // jolt any struck building this frame (patches a few instances)
     ensureTargets();
     const enc = device.createCommandEncoder();
 
