@@ -784,6 +784,22 @@ async function main() {
   // Dropping this below 1 renders the G-buffer + HDR smaller and lets CSS upscale the canvas — the
   // single biggest lever on a fill-bound mobile GPU, and a live A/B test of "is it resolution?".
   let renderScale = 1;
+  // ADAPTIVE RESOLUTION: hold ~60fps by trimming the internal render scale when frames miss the
+  // vsync budget, and probing back up when they're comfortable. Under vsync the frame time only
+  // RISES past budget when the GPU can't keep up (it can't read below the refresh floor), so we
+  // trim on a bad window (median over ~30 frames, robust to one-off hitches) and probe up blindly
+  // on a cooldown. Disabled during the diagnostics sweep (which drives renderScale itself).
+  let autoRes = true;
+  const AR_BUDGET = 18.5, AR_MIN = 0.5, AR_STEP = 0.1, AR_PROBE = 8;   // ms / floor / step / windows before a probe-up
+  let arWin = [], arSince = 0;
+  function autoResTick(dtMs) {
+    if (!autoRes || diag.active) return;
+    arWin.push(dtMs);
+    if (arWin.length < 30) return;
+    const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1]; arWin = []; arSince++;
+    if (med > AR_BUDGET && renderScale > AR_MIN) { renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arSince = 0; }
+    else if (arSince >= AR_PROBE && renderScale < 1) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); arSince = 0; }
+  }
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, 2) * renderScale;
     const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
@@ -1153,6 +1169,7 @@ async function main() {
   // shadow-quality controls (opt-in): town shadow-map filter mode + the screen-space contact blur
   const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
   const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
+  const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; };
   // the controlled diagnostic sweep + copy-to-clipboard
   const diagBtn = document.getElementById("diagBtn"), diagCopy = document.getElementById("diagCopy");
   if (diagBtn) diagBtn.onclick = () => { if (diag.active) return; diagBtn.disabled = true; diagCopy.disabled = true; diag.start(); };
@@ -1220,7 +1237,7 @@ async function main() {
   function updateProfPanel() {
     const g = prof.gpu, R = prof.ran || {}, ms = (p) => (R[p] && g[p] ? g[p].toFixed(2) : "–"), N = prof.n;
     const gpuTotal = GP.reduce((a, p) => a + (R[p] ? g[p] || 0 : 0), 0);
-    let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps)    `
+    let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps) · <b>res</b> ${renderScale.toFixed(2)}×${autoRes ? " auto" : ""}    `
           + `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
     s += canTimestamp
       ? `<b>GPU</b> geom ${ms("geom")} · sss ${ms("sss")} · light ${ms("light")} · plights ${ms("plight")} · fx ${ms("fx")} · tone ${ms("tone")} · <b>Σ ${gpuTotal.toFixed(2)} ms</b> (passes overlap on tile GPUs)\n`
@@ -1233,6 +1250,7 @@ async function main() {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
     if (diag.active) diag.step(dt);   // the sweep sets the layer flags + render scale for THIS frame
+    else autoResTick(dt * 1000);      // adaptive resolution holds ~60fps when not sweeping
     const sel = wasm.selected(), ts = view.tstate();
     const manual = sel !== 255 && ts[sel] === 2;
 
