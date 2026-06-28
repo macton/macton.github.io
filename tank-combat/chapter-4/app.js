@@ -25,7 +25,7 @@ const WGSL = `
 struct View { mvp: mat4x4f, invMvp: mat4x4f };                 // subcells -> clip, and its inverse (clip -> subcells, for depth->world)
 @group(0) @binding(0) var<uniform> view: View;
 struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(1) nrm: vec3f, @location(2) world: vec3f };
-struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // G-buffer: albedo+mask, normal (world position is reconstructed from depth)
+struct GOut { @location(0) color: vec4f, @location(1) normal: vec2f };   // G-buffer: albedo+mask, octahedral-packed normal (rg8); world position reconstructed from depth
 
 @vertex fn vs(
     @location(0) mpos: vec4f, @location(1) mnrm: vec4f,        // baked mesh: pos + normal in [-1,1]
@@ -60,6 +60,20 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // G-bu
   let world = vec3f(f32(wxy.x) + rx, f32(wxy.y) + ry, f32(wzhz.x) + local.z);
   return view.mvp * vec4f(world, 1.0);                         // sun light-space clip; depth is z/w
 }
+// OCTAHEDRAL normal packing: a unit normal <-> 2 channels, so the G-buffer normal target is rg8
+// (2 B/px) instead of rgba8 (4). Standard Cigolle-et-al. mapping; the decode renormalises.
+fn oct_encode(n0: vec3f) -> vec2f {
+  let n = n0 / (abs(n0.x) + abs(n0.y) + abs(n0.z));
+  var e = n.xy;
+  if (n.z < 0.0) { e = (1.0 - abs(n.yx)) * select(vec2f(-1.0), vec2f(1.0), n.xy >= vec2f(0.0)); }
+  return e * 0.5 + 0.5;
+}
+fn oct_decode(f: vec2f) -> vec3f {
+  let e = f * 2.0 - 1.0;
+  var v = vec3f(e, 1.0 - abs(e.x) - abs(e.y));
+  if (v.z < 0.0) { v = vec3f((1.0 - abs(v.yx)) * select(vec2f(-1.0), vec2f(1.0), v.xy >= vec2f(0.0)), v.z); }
+  return normalize(v);
+}
 // DEFERRED geometry: write the SURFACE into the G-buffer (albedo + world normal) instead of
 // shading it here. gColor.a = 1 marks a surface; the cleared background stays 0 (sky). The
 // lighting is a later SCREEN pass, so one light or a thousand cost the same fill here — that
@@ -67,7 +81,7 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // G-bu
 @fragment fn fs_gbuffer(i: VOut) -> GOut {
   var o: GOut;
   o.color    = vec4f(i.col.rgb, 1.0);
-  o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
+  o.normal   = oct_encode(normalize(i.nrm));
   return o;
 }
 @fragment fn fs_flat(i: VOut) -> @location(0) vec4f { return i.col; }  // forward FX, blended into the lit HDR
@@ -102,7 +116,7 @@ struct VOutI { @builtin(position) pos: vec4f, @location(0) mcol: vec4f, @locatio
   if (i.uv.x >= 0.0 && t.a > 0.5) { base = t.rgb; }              // textured where the projection covered this face
   var o: GOut;
   o.color    = vec4f(base * i.tint.rgb, 1.0);                    // baked albedo x instance tint (nest hue / white)
-  o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
+  o.normal   = oct_encode(normalize(i.nrm));
   return o;
 }
 
@@ -148,7 +162,7 @@ struct LVOut {
   let alb = textureLoad(gColorTex, p, 0);
   if (alb.a < 0.5) { discard; }                               // sky: nothing to light
   let surf = recon(p);
-  let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
+  let n = oct_decode(textureLoad(gNormalTex, p, 0).xy);
   let toL = i.center - surf;
   let dist = length(toL);
   let r = i.lcol.a;
@@ -201,6 +215,13 @@ fn recon(p: vec2<i32>) -> vec3f {
   let uv = (vec2f(p) + vec2f(0.5)) / res;
   let wh = env.invMvp * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
   return wh.xyz / wh.w;
+}
+// decode the octahedral-packed normal (rg8 G-buffer) back to a unit vector (matches oct_encode)
+fn oct_decode(f: vec2f) -> vec3f {
+  let e = f * 2.0 - 1.0;
+  var v = vec3f(e, 1.0 - abs(e.x) - abs(e.y));
+  if (v.z < 0.0) { v = vec3f((1.0 - abs(v.yx)) * select(vec2f(-1.0), vec2f(1.0), v.xy >= vec2f(0.0)), v.z); }
+  return normalize(v);
 }
 fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
   let steps = i32(env.shp.y);
@@ -281,7 +302,7 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let alb = textureLoad(gColorTex, p, 0);
   if (alb.a < 0.5) { return vec4f(env.sky.rgb, 1.0); }
   let pos = recon(p);
-  let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
+  let n = oct_decode(textureLoad(gNormalTex, p, 0).xy);
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
   var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
@@ -300,7 +321,7 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let p = vec2<i32>(i32(fc.x), i32(fc.y));
   if (textureLoad(gColorTex, p, 0).a < 0.5) { return vec4f(1.0); }   // sky: lit
   let pos = recon(p);
-  let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
+  let n = oct_decode(textureLoad(gNormalTex, p, 0).xy);
   return vec4f(sun_shadow(pos, n), 0.0, 0.0, 1.0);
 }
 // one axis of a depth-aware (bilateral) blur: gaussian weights gated by the eye-distance gap, so
@@ -591,7 +612,7 @@ async function main() {
   // lighting is then a screen pass that reads the G-buffer. That is what makes per-mite /
   // per-FX point lights affordable later: their cost is the lit pixels they cover, not the
   // object count times the light count. For now the screen pass is just the environment.
-  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", DEPTH = "depth32float";   // depth32float so the lighting can sample it + reconstruct world position
+  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rg8unorm", DEPTH = "depth32float";   // normal is octahedral-packed into 2 channels (4->2 B/px); depth32float reconstructs world position
   const HDR = canRG11 ? "rg11b10ufloat" : "rgba16float";   // half the HDR bandwidth when the device allows it as a blendable target
 
   // GEOMETRY: fill the G-buffer (albedo, normal, world position) + depth. No lighting here.
