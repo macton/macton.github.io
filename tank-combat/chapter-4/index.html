@@ -149,6 +149,10 @@
              border-radius: 8px; font-size: 13px; color: var(--dim); }
   #profctl label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
   #profctl .tag { color: var(--acc); }
+  #profctl button { flex: 0 0 auto; padding: 4px 10px; background: #2b2f3a; color: var(--fg);
+                    border: 1px solid #3a3f4c; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; }
+  #profctl button:hover { background: #353a47; }
+  #profctl button:disabled { opacity: .5; cursor: default; }
   #prof { flex-basis: 100%; margin: 2px 0 0; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
           color: var(--dim); white-space: pre-wrap; }
   #prof b { color: var(--acc); font-weight: 600; }
@@ -195,6 +199,8 @@
     <label><input type="checkbox" id="t_town" checked> town</label>
     <label><input type="checkbox" id="t_trees" checked> trees</label>
     <label><input type="checkbox" id="t_lights" checked> point lights</label>
+    <button id="diagBtn" type="button">run diagnostics</button>
+    <button id="diagCopy" type="button" disabled>copy</button>
     <pre id="prof">profiling…</pre>
   </div>
   <div id="status">loading…</div>
@@ -474,11 +480,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.28-034929"></script>
+  <script src="version.js?v=2026.06.28-040445"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.28-034929");</script>
+  <script type="module">import("./app.js?v=2026.06.28-040445");</script>
 </body>
 </html>

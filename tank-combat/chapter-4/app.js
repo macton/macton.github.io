@@ -668,8 +668,13 @@ async function main() {
       { binding: 3, resource: gPosTex.createView() } ] });
     tonemapBind = device.createBindGroup({ layout: tonemapBGL, entries: [{ binding: 4, resource: hdrTex.createView() }] });
   }
+  // internal render scale (presentation-only): the deferred passes (lighting, point lights, FX,
+  // tonemap) are full-screen and fill/bandwidth-bound, so their cost scales with the pixel count.
+  // Dropping this below 1 renders the G-buffer + HDR smaller and lets CSS upscale the canvas — the
+  // single biggest lever on a fill-bound mobile GPU, and a live A/B test of "is it resolution?".
+  let renderScale = 1;
   function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const dpr = Math.min(devicePixelRatio || 1, 2) * renderScale;
     const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
   }
@@ -699,10 +704,88 @@ async function main() {
   // timestampWrites descriptor for pass `name` (or undefined when unsupported -> the pass is plain)
   const tw = (name) => canTimestamp ? { querySet: tsQuery, beginningOfPassWriteIndex: GP.indexOf(name) * 2, endOfPassWriteIndex: GP.indexOf(name) * 2 + 1 } : undefined;
   // the running profile: EMA-smoothed CPU sections (ms), per-pass GPU time (ms), and draw counts.
-  const prof = { sim: 0, enc: 0, cpu: 0, gpu: {}, n: {}, ts: canTimestamp };
+  const prof = { sim: 0, enc: 0, cpu: 0, gpu: {}, n: {}, ran: {}, ts: canTimestamp };
   const ema = (o, k, v) => { o[k] = o[k] ? o[k] * 0.9 + v * 0.1 : v; };
   const profEl = document.getElementById("prof");
   let profFrame = 0;
+
+  // ---- the controlled diagnostic sweep -------------------------------------------------
+  // The per-pass GPU timestamps overlap on tile GPUs (their Σ exceeds the real frame), so the
+  // RELIABLE signal is the wall-clock frame time itself. This runs a fixed A/B sweep — toggling
+  // one layer / the resolution at a time and measuring the achieved frame time (median / p95 /
+  // min over many frames) — then emits a text report to copy. Deltas between rows attribute cost.
+  const DIAG_WARM = 20, DIAG_N = 80;   // discard 20 frames after each switch, then sample 80
+  const DIAG_CONFIGS = [
+    { k: "baseline (all, 1.0x)",     town: 1, trees: 1, lights: 1, scale: 1.0 },
+    { k: "no trees",                 town: 1, trees: 0, lights: 1, scale: 1.0 },
+    { k: "no point lights",          town: 1, trees: 1, lights: 0, scale: 1.0 },
+    { k: "no town",                  town: 0, trees: 1, lights: 1, scale: 1.0 },
+    { k: "no trees+lights",          town: 1, trees: 0, lights: 0, scale: 1.0 },
+    { k: "0.5x res (all)",           town: 1, trees: 1, lights: 1, scale: 0.5 },
+    { k: "0.5x res, no lights",      town: 1, trees: 1, lights: 0, scale: 0.5 },
+    { k: "0.5x res, minimal",        town: 1, trees: 0, lights: 0, scale: 0.5 },
+    { k: "0.75x res (all)",          town: 1, trees: 1, lights: 1, scale: 0.75 },
+  ];
+  const diag = {
+    active: false, done: false, ci: 0, phase: "warm", warm: 0, coll: [], results: [],
+    snap: null, gmin: Infinity, report: "", view: "",
+    start() {
+      if (this.active) return;
+      this.snap = { town: drawTown, trees: drawTrees, lights: drawLights, scale: renderScale };
+      this.active = true; this.done = false; this.ci = 0; this.results = []; this.gmin = Infinity;
+      try { const c = camScreen(); this.view = `screen ${c.sx},${c.sy} · zoom ${zoom.toFixed(2)} · pitch ${Math.round(pitch / DEG)}°`; }
+      catch (e) { this.view = "?"; }
+      this.apply(0);
+    },
+    apply(i) { const c = DIAG_CONFIGS[i]; drawTown = !!c.town; drawTrees = !!c.trees; drawLights = !!c.lights;
+      if (renderScale !== c.scale) { renderScale = c.scale; resize(); }
+      this.phase = "warm"; this.warm = DIAG_WARM; this.coll = []; },
+    step(dt) {                                    // called at the top of each frame while active
+      const ms = dt * 1000; if (ms > 0.2 && ms < this.gmin) this.gmin = ms;
+      if (this.phase === "warm") { if (--this.warm <= 0) this.phase = "coll"; return; }
+      this.coll.push(ms);
+      if (this.coll.length >= DIAG_N) {
+        const s = this.coll.slice().sort((a, b) => a - b), n = s.length;
+        const r = { k: DIAG_CONFIGS[this.ci].k, med: s[n >> 1], p95: s[Math.min(n - 1, Math.floor(0.95 * n))], min: s[0] };
+        r.gpu = {}; for (const pn of GP) r.gpu[pn] = (prof.ran[pn] && prof.gpu[pn]) ? prof.gpu[pn] : 0;   // per-pass GPU this config
+        this.results.push(r);
+        if (++this.ci >= DIAG_CONFIGS.length) this.finish(); else this.apply(this.ci);
+      }
+    },
+    finish() {
+      drawTown = this.snap.town; drawTrees = this.snap.trees; drawLights = this.snap.lights;
+      if (renderScale !== this.snap.scale) { renderScale = this.snap.scale; resize(); }
+      const sT = document.getElementById("t_town"), sR = document.getElementById("t_trees"), sL = document.getElementById("t_lights");
+      if (sT) sT.checked = drawTown; if (sR) sR.checked = drawTrees; if (sL) sL.checked = drawLights;
+      this.active = false; this.done = true; this.report = this.build();
+      const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn");
+      if (cp) cp.disabled = false; if (bt) bt.disabled = false;
+      if (profEl) profEl.textContent = this.report;
+    },
+    build() {
+      const f = (v) => (v ? v.toFixed(2) : "–"), dprCap = Math.min(devicePixelRatio || 1, 2);
+      const back = `${Math.floor(canvas.clientWidth * dprCap)}x${Math.floor(canvas.clientHeight * dprCap)}`;
+      const info = adapter.info || {}, N = prof.n || {};
+      const L = [];
+      L.push("=== tank-combat ch4 — render diagnostics ===");
+      L.push("version: " + (window.TANK_VERSION || "?"));
+      L.push("ua: " + navigator.userAgent);
+      L.push("gpu: " + [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(" / ") + "  | timestamp-query: " + (canTimestamp ? "yes" : "no"));
+      L.push(`dpr: ${devicePixelRatio} (capped ${dprCap})  css: ${canvas.clientWidth}x${canvas.clientHeight}  backing@1.0x: ${back}`);
+      L.push(`refresh est: ~${this.gmin < Infinity ? Math.round(1000 / this.gmin) : "?"} Hz (fastest frame ${this.gmin.toFixed(1)} ms)`);
+      L.push(`view: ${this.view}`);
+      L.push(`draws@baseline: town ${N.staticRuns} runs · trees ${N.trees} (${N.treeRuns} runs) · opaque ${N.inst} inst · lights ${N.lights}`);
+      L.push(`cpu@baseline: sim ${prof.sim.toFixed(2)} ms · encode ${prof.enc.toFixed(2)} ms`);
+      L.push("");
+      L.push(`frame time per config — median / p95 / min ms  (~median fps), ${DIAG_N} samples each.`);
+      if (canTimestamp) L.push(`(gpu pass ms below are RELATIVE only — passes overlap on tile GPUs, so they over-sum; compare a pass across configs, not its absolute value.)`);
+      for (const r of this.results) {
+        L.push(`  ${r.k.padEnd(24)} ${r.med.toFixed(1)} / ${r.p95.toFixed(1)} / ${r.min.toFixed(1)}  (~${Math.round(1000 / r.med)} fps)`);
+        if (canTimestamp) L.push(`      gpu: geom ${f(r.gpu.geom)} light ${f(r.gpu.light)} plights ${f(r.gpu.plight)} fx ${f(r.gpu.fx)} tone ${f(r.gpu.tone)}`);
+      }
+      return L.join("\n");
+    },
+  };
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
   let camEye = [0, 0, 0];   // the eye in world subcells (set by viewWrite) — feeds the LOD distance test
   let invMVP = null;
@@ -932,9 +1015,20 @@ async function main() {
   // render-only controls (presentation): low-poly art toggle + a camera zoom slider
   const aT = document.getElementById("assetsToggle"); if (aT) aT.onchange = () => { useAssets = aT.checked; };
   // render-profile layer toggles: drop a layer to see its frame-time cost live
-  const tTown = document.getElementById("t_town"); if (tTown) tTown.onchange = () => { drawTown = tTown.checked; };
-  const tTrees = document.getElementById("t_trees"); if (tTrees) tTrees.onchange = () => { drawTrees = tTrees.checked; };
-  const tLights = document.getElementById("t_lights"); if (tLights) tLights.onchange = () => { drawLights = tLights.checked; };
+  const tTown = document.getElementById("t_town"); if (tTown) tTown.onchange = () => { drawTown = tTown.checked; diag.done = false; };
+  const tTrees = document.getElementById("t_trees"); if (tTrees) tTrees.onchange = () => { drawTrees = tTrees.checked; diag.done = false; };
+  const tLights = document.getElementById("t_lights"); if (tLights) tLights.onchange = () => { drawLights = tLights.checked; diag.done = false; };
+  // the controlled diagnostic sweep + copy-to-clipboard
+  const diagBtn = document.getElementById("diagBtn"), diagCopy = document.getElementById("diagCopy");
+  if (diagBtn) diagBtn.onclick = () => { if (diag.active) return; diagBtn.disabled = true; diagCopy.disabled = true; diag.start(); };
+  if (diagCopy) diagCopy.onclick = async () => {
+    try { await navigator.clipboard.writeText(diag.report); }
+    catch (e) {   // clipboard API blocked (insecure ctx / permissions) — fall back to a selection
+      const ta = document.createElement("textarea"); ta.value = diag.report; document.body.appendChild(ta);
+      ta.select(); try { document.execCommand("copy"); } catch (_) {} ta.remove();
+    }
+    const o = diagCopy.textContent; diagCopy.textContent = "copied!"; setTimeout(() => { diagCopy.textContent = o; }, 1200);
+  };
   const zR = document.getElementById("zoom"); if (zR) zR.oninput = () => { zoom = parseFloat(zR.value) || 1; clampCam(); };
   // live pitch (tilt off straight-down) + fov (lens) — presentation-only, like zoom
   const pR = document.getElementById("pitch"), pV = document.getElementById("pitchval");
@@ -989,12 +1083,12 @@ async function main() {
   // and the live draw counts. The GEOM pass time bundles town + trees + dynamic opaque, so to
   // read a single layer's GPU cost, toggle it off and watch GEOM (and the frame) drop.
   function updateProfPanel() {
-    const g = prof.gpu, ms = (v) => (v ? v.toFixed(2) : "–"), N = prof.n;
-    const gpuTotal = GP.reduce((a, p) => a + (g[p] || 0), 0);
+    const g = prof.gpu, R = prof.ran || {}, ms = (p) => (R[p] && g[p] ? g[p].toFixed(2) : "–"), N = prof.n;
+    const gpuTotal = GP.reduce((a, p) => a + (R[p] ? g[p] || 0 : 0), 0);
     let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps)    `
           + `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
     s += canTimestamp
-      ? `<b>GPU</b> geom ${ms(g.geom)} · light ${ms(g.light)} · plights ${ms(g.plight)} · fx ${ms(g.fx)} · tone ${ms(g.tone)} · <b>Σ ${gpuTotal.toFixed(2)} ms</b>\n`
+      ? `<b>GPU</b> geom ${ms("geom")} · light ${ms("light")} · plights ${ms("plight")} · fx ${ms("fx")} · tone ${ms("tone")} · <b>Σ ${gpuTotal.toFixed(2)} ms</b> (passes overlap on tile GPUs)\n`
       : `<b>GPU</b> per-pass timing unavailable here — toggle town / trees / point lights to A/B each layer's frame cost\n`;
     s += `<b>draws</b> town ${N.staticRuns || 0} runs · trees ${N.trees || 0} (${N.treeRuns || 0} runs) · opaque ${N.inst || 0} inst · lights ${N.lights || 0}`;
     profEl.innerHTML = s;
@@ -1003,6 +1097,7 @@ async function main() {
   function frame(now) {
     let dt = (now - last) / 1000; last = now; if (dt > 0.25) dt = 0.25;
     fps = fps * 0.9 + (1 / Math.max(dt, 1e-4)) * 0.1;
+    if (diag.active) diag.step(dt);   // the sweep sets the layer flags + render scale for THIS frame
     const sel = wasm.selected(), ts = view.tstate();
     const manual = sel !== 255 && ts[sel] === 2;
 
@@ -1145,6 +1240,7 @@ async function main() {
     ema(prof, "cpu", performance.now() - cpu0);    // CPU: prep + uploads + encode
     prof.sim = updMs; prof.dt = dt; prof.fps = fps;
     prof.n = { staticRuns: dStaticRuns, treeRuns: dTreeRuns, trees: dTrees, inst: n, lights: runLights ? nLights : 0 };
+    prof.ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0 };
 
     // read back the per-pass GPU times (a frame or two behind; that's fine for a running average)
     if (tsRead) {
@@ -1164,7 +1260,10 @@ async function main() {
     document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
     updateCamUI();
     dbg.update({ fps, dt, updMs, instCount: n, cam });
-    if (profEl && (++profFrame % 8 === 0)) updateProfPanel();
+    if (profEl) {
+      if (diag.active) profEl.textContent = `diagnostics… ${diag.ci + 1}/${DIAG_CONFIGS.length}  "${DIAG_CONFIGS[diag.ci].k}"  (${diag.phase === "warm" ? "settling" : diag.coll.length + "/" + DIAG_N})`;
+      else if (!diag.done && (++profFrame % 8 === 0)) updateProfPanel();   // diag.done keeps the report on screen
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
