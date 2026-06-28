@@ -725,6 +725,10 @@ async function main() {
     { k: "0.5x res, no lights",      town: 1, trees: 1, lights: 0, scale: 0.5 },
     { k: "0.5x res, minimal",        town: 1, trees: 0, lights: 0, scale: 0.5 },
     { k: "0.75x res (all)",          town: 1, trees: 1, lights: 1, scale: 0.75 },
+    // headroom probe: SUPERSAMPLE up until the frame can't hold 60 fps. The scale where the
+    // median jumps past ~17ms tells us how much GPU margin this view has under the vsync cap.
+    { k: "1.5x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 1.5 },
+    { k: "2.0x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 2.0 },
   ];
   const diag = {
     active: false, done: false, ci: 0, phase: "warm", warm: 0, coll: [], results: [],
