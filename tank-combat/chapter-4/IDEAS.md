@@ -54,9 +54,10 @@ every full-screen pass, so per-pixel byte count is a direct lever.
 
 Candidates, cheapest/safest first:
 
-- [ ] **Octahedral-encode the normal: `gNormal` rgba8 → rg8** (4 → 2 B/px, save 2). Standard,
-      near-lossless for unit normals; decode in the lighting passes. Frees the b/a channels (could
-      carry a material id / the sky mask, letting us drop it out of `gColor.a`).
+- [x] **Octahedral-encode the normal: `gNormal` rgba8 → rg8** (4 → 2 B/px). **DONE** (v…104533) —
+      `oct_encode`/`oct_decode` (Cigolle et al.) in both shader modules; verified round-trip 0.95°
+      worst-case with rg8 quantization. Strict G-buffer 12 → 10 B/px. The freed b/a channels are not
+      yet reclaimed (could still carry a material id / move the sky mask off `gColor.a`).
 - [ ] **Reconstruct the normal from depth derivatives** (eliminate `gNormalTex` entirely, save the
       whole 4 B/px + its write in geom + its read in every lighting pass). For our **flat-shaded
       faces** the depth-derivative *is* the face normal in interiors — exactly what we want — but it
