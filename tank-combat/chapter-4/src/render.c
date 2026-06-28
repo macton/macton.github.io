@@ -24,8 +24,8 @@
 /* per-tank identity colours: hull/turret, the darker barrel, and the lighter path */
 static const uint32_t COL_BODY[N_TANKS] = {
   RGBA(242, 158, 41, 255), RGBA(77, 179, 230, 255), RGBA(120, 205, 120, 255), RGBA(196, 140, 235, 255) };
-static const uint32_t COL_BARR[N_TANKS] = {
-  RGBA(150, 98, 26, 255), RGBA(48, 110, 142, 255), RGBA(74, 127, 74, 255), RGBA(121, 86, 145, 255) };
+/* (the tank's darker parts — tracks/wheels — now come from the baked mesh's per-material
+ * grey, multiplied by the body tint above, so a separate barrel colour is no longer needed) */
 static const uint32_t COL_PATH[N_TANKS] = {   /* a lighter, translucent shade of the body colour */
   RGBA(255, 205, 120, 205), RGBA(150, 215, 250, 205), RGBA(180, 240, 180, 205), RGBA(225, 190, 250, 205) };
 /* the selected tank's state highlight (UNSELECTED draws none), and the cursor highlight */
@@ -75,6 +75,7 @@ static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright 
 #define BARREL_H   (SUB / 6)        /* ~42 */
 #define BOLT_H     (SUB / 8)        /* 32: a thin bolt */
 #define MITE_HALF  40
+#define TANK_H     120              /* tank half-extent (subcells): the baked tank mesh's shared unit box scales by this */
 #define HULL_HX    87
 #define HULL_HY    67
 #define TURRET_HALF 42
@@ -210,22 +211,23 @@ static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b) 
   return k;
 }
 
+/* The tank is two baked meshes authored in ONE shared unit-box frame (M_TANK_HULL =
+ * body + tracks, M_TANK_TURRET = turret + gun). The renderer draws BOTH at the same
+ * centre + the same uniform half-extent and rests them on the floor (the mesh anchors the
+ * tank bottom at z = -1); only the rotation differs — the hull spins with the chassis
+ * heading, the turret with the aim — so they stay registered as one tank while the turret
+ * tracks independently. The gun lives inside the turret mesh, so K_BARREL emits nothing. */
 static uint32_t emit_tank_part(const World* w, Inst* out, uint32_t k, int part, const Box* b) {
+  if (part == K_BARREL) return k;                       /* the gun is part of the turret mesh now */
   for (uint32_t t = 0; t < N_TANKS; t++) {
     int px, py; interp_xy(w->tank_xy[t], g_prev_tank_xy, t, &px, &py);
     if (!in_box(b, px, py)) continue;
-    uint32_t bi = w->tank_ang[t] >> ANGLE_SHIFT;                              /* body on the 32-dir table */
-    int tco = fine_cos(w->tank_turret[t]), tsi = fine_sin(w->tank_turret[t]);  /* barrel at the fine turret angle */
-    if (part == K_HULL)
-      k = push(out, k, px, py, FLOOR_H + HULL_H / 2, HULL_HX, HULL_HY, HULL_H / 2,
-               dir_cos(bi), dir_sin(bi), COL_BODY[t]);
-    else if (part == K_TURRET)
-      k = push(out, k, px, py, FLOOR_H + HULL_H + TURRET_H / 2, TURRET_HALF, TURRET_HALF, TURRET_H / 2,
-               tco, tsi, COL_BODY[t]);
-    else { /* K_BARREL: a thin box reaching out from the turret along its aim */
-      int off = HULL_HX;
-      int bx = px + ((tco * off) >> TRIG_SHIFT), by = py + ((tsi * off) >> TRIG_SHIFT);
-      k = push(out, k, bx, by, FLOOR_H + HULL_H, 56, BARREL_HW, BARREL_H / 2, tco, tsi, COL_BARR[t]);
+    if (part == K_HULL) {
+      uint32_t bi = w->tank_ang[t] >> ANGLE_SHIFT;                            /* chassis on the 32-dir table */
+      k = push(out, k, px, py, FLOOR_H + TANK_H, TANK_H, TANK_H, TANK_H, dir_cos(bi), dir_sin(bi), COL_BODY[t]);
+    } else { /* K_TURRET (turret + gun) — same centre + scale as the hull, spun by the fine aim */
+      int tco = fine_cos(w->tank_turret[t]), tsi = fine_sin(w->tank_turret[t]);
+      k = push(out, k, px, py, FLOOR_H + TANK_H, TANK_H, TANK_H, TANK_H, tco, tsi, COL_BODY[t]);
     }
   }
   return k;

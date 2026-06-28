@@ -57,21 +57,57 @@ boundary reads as decoration, not an obstacle — there is no reason to expect a
 
 ## What ships in the repo
 
-**Procedural meshes** — original, CC0, no attribution. A packed `int8` vertex buffer
-(12 bytes/vertex: position + face normal + white colour), uploaded once. No glTF parser
-ships in the binary.
+**The dynamic mesh table** — a packed `int8` vertex buffer (12 bytes/vertex: position + face
+normal + colour), uploaded once. No glTF/OBJ parser ships in the binary: `tools/gen_meshes.c`
+bakes both the **original host-authored shapes** (CC0, no attribution) **and** a few **CC0
+external models** (read from a local download at bake time, OBJ → the same packed format —
+exactly the town's discipline) into one committed `src/mesh_data.c`.
 
 | mesh (`mesh_data.h`) | geometry | bound to kind | used for |
 |---|---|---|---|
-| `M_CUBE`    | unit box | every kind (placeholder pass) + `K_RING`, `K_BARREL`, `K_DEST` (asset pass) | overlays, barrels, beacons, and the placeholder for all kinds |
+| `M_CUBE`    | unit box | every kind (placeholder pass) + `K_RING`, `K_DEST` (asset pass) | overlays, beacons, and the placeholder for all kinds |
 | `M_PYLON`   | tapered tower | *(unbound)* | spare — the nest is a town landmark now |
-| `M_PYRAMID` | square pyramid | `K_MITE` | the swarm (a little spike) |
-| `M_HULL`    | tapered box | `K_HULL` | tank bodies (oriented by `tank_ang`) |
-| `M_TURRET`  | tapered dome | `K_TURRET` | tank turrets (oriented by `tank_turret`) |
+| `M_PYRAMID` | square pyramid | `K_MITE` (far LOD) | the swarm drawn cheap when the whole pool is in view |
+| `M_HULL`    | tapered box | *(fallback)* | the procedural tank body, used only if the OBJ art is absent at bake |
+| `M_TURRET`  | tapered dome | *(fallback)* | the procedural tank turret, same |
 | `M_TREE`    | thin trunk + faceted canopy | *(unbound — a STATIC prop)* | scenery scattered on grass corners (its own static-props buffer, not a per-frame kind) |
+| `M_TANK_HULL`   | **baked OBJ** — body + tracks | `K_HULL` | tank chassis (oriented by `tank_ang`); per-material grey keeps tracks dark under the identity tint |
+| `M_TANK_TURRET` | **baked OBJ** — turret + gun | `K_TURRET` | tank turret + barrel (oriented by `tank_turret`); the gun is part of this mesh, so `K_BARREL` draws nothing |
+| `M_MITE`        | **baked OBJ** — low-poly crab | `K_MITE` (near LOD) | the swarm drawn detailed when few are in view; baked white so the mode tint (idle/hunt/home) colours it |
 
-`M_TREE` is the one procedural mesh that carries its **own baked colours** (a brown trunk, a green
-canopy) instead of white — the same path the town meshes take, so its instance tint stays white.
+The two tank parts are baked in **one shared unit-box frame** (normalised over the whole tank,
+the bottom anchored to the floor), so the renderer draws both at the same centre + scale and only
+the **rotation** differs — the hull spins with the chassis heading, the turret with the aim — and
+they stay registered as one tank. The **mite LOD** is a per-frame mesh swap in `app.js`: the
+detailed skull binds only while ≤ `MITE_LOD_MAX` mites fall in the visible box (zoomed in); past
+that the whole swarm draws as the cheap `M_PYRAMID` spike, bounding the per-frame triangle budget
+for a pool up to 4096 strong (the mites never cast into the baked sun shadow map, so this is their
+only cost). `M_TREE` and the tank's tracks carry their **own baked colours** the same way the town
+meshes do; everything else is white so the instance tint shows through.
+
+### The dynamic OBJ art (Quaternius, CC0)
+
+The tank and the mite are **Quaternius CC0** models. Unlike the town's **large** Kenney kits (kept
+out of the repo), these two small **CC0** OBJs are **committed** at `tools/quaternius/` — because
+`build.sh` re-runs `gen_meshes.c` on every build, so the source must be present for the bake to
+reproduce the art (absent it, the build silently falls back to the procedural box/dome + pyramid).
+Committing them makes the build hermetic: `./build.sh` always reproduces `src/mesh_data.c` byte-for-
+byte. `tools/quaternius/LICENSE.txt` carries the CC0 dedication.
+
+`gen_meshes.c` splits the tank OBJ's object groups (`Tank_body` + the two `TrackMesh` → hull,
+`Tank_Turret` + `Tank_Gun` → turret), maps Blender Y-up to the engine's Z-up with the gun pointing
++x, and bakes the crab white with a −90° yaw so its claws lead. To swap in a different Quaternius
+model, drop its OBJ into `tools/quaternius/`, point the loader at it in `tools/gen_meshes.c`, and
+`./build.sh`. The packs:
+
+| model | pack (Quaternius, **CC0 1.0**) | file | becomes |
+|---|---|---|---|
+| tank | [Animated Tanks](https://quaternius.com/packs/animatedtanks.html) | `Tank.obj` | `M_TANK_HULL` + `M_TANK_TURRET` |
+| crab | [Cute Monsters](https://quaternius.com/packs/cutemonsters.html) | `Crab.obj` | `M_MITE` |
+
+Re-fetch (Google-Drive-hosted) with `pip install gdown` then
+`gdown --folder https://drive.google.com/drive/folders/11onydnSTchHz2MZDJ3tK7O3cazIEPQAJ` (tanks,
+OBJ) and `…/1LWGbuzCZ2qJwYoPRlMnqTOsFLAfMbBng` (Cute Monsters, OBJ).
 
 Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.
@@ -130,9 +166,10 @@ here. **Confirm the licence on each page before using it — terms change.**
 |------|---------|---------|--------|-------------|
 | [City Kit (Suburban / Commercial / Roads)](https://kenney.nl/assets/city-kit-suburban) | Kenney | **CC0** | OBJ/glTF | the static town (used here) |
 | [Tower Defense Kit](https://kenney.nl/assets/tower-defense-kit) | Kenney | **CC0** | OBJ/glTF | ground tile, props, turrets |
-| [Kenney 3-D kits](https://kenney.nl/assets) (Tanks, Top-down) | Kenney | **CC0** | glTF/OBJ | tank + prop meshes |
-| [FREE Stylized Tank](https://mreliptik.itch.io/free-lowpoly-tank-3d-model) (+ [4-tank pack](https://mreliptik.itch.io/4-low-poly-stylized-tanks)) | MrEliptik | free, **credit requested** | glTF/FBX | the four tank meshes |
-| [Quaternius low-poly packs](https://quaternius.com/) | Quaternius | **CC0** | glTF/OBJ/FBX | mite "creature" meshes, props |
+| [Kenney 3-D kits](https://kenney.nl/assets) (Tanks, Top-down) | Kenney | **CC0** | glTF/OBJ | prop meshes |
+| [Quaternius — Animated Tanks](https://quaternius.com/packs/animatedtanks.html) | Quaternius | **CC0** | OBJ/FBX/glTF | **the tank (used here)** — `M_TANK_HULL` / `M_TANK_TURRET` |
+| [Quaternius — Cute Monsters](https://quaternius.com/packs/cutemonsters.html) | Quaternius | **CC0** | OBJ/FBX/glTF | **the mite (used here)** — the crab, `M_MITE` |
+| [FREE Stylized Tank](https://mreliptik.itch.io/free-lowpoly-tank-3d-model) | MrEliptik | free, **credit requested** | glTF/FBX | alt tank meshes |
 
 Keep the imported set **small and sized to the need**: one tank mesh re-tinted four ways
 beats four near-identical downloads. The four tank identity colours are applied as the

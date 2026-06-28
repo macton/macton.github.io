@@ -469,6 +469,11 @@ async function main() {
   device.queue.writeBuffer(meshBuf, mProc * C.MVSTRIDE, new Uint8Array(mem(), wasm.map_mesh_data_ptr(), (C.MVTOTAL - mProc) * C.MVSTRIDE));
   const meshTable = []; for (let m = 0; m < C.MCOUNT; m++) meshTable.push({ off: wasm.mesh_voff(m), cnt: wasm.mesh_vcnt(m) });
   const meshForKind = []; for (let k = 0; k < C.KOC; k++) meshForKind.push(wasm.mesh_for_kind(k));
+  // mite level-of-detail: the swarm is up to 4096 strong, so the detailed CC0 crab mesh
+  // (M_MITE, the last procedural mesh, ~1.8k tris) is only bound when few mites are in view
+  // (zoomed in); once more than MITE_LOD_MAX fall in the visible box the whole swarm draws as
+  // the cheap M_PYRAMID spike (K_MITE's baked default), bounding the per-frame triangle budget.
+  const M_MITE_DETAIL = C.MPROC - 1, MITE_LOD_MAX = 260;
   // the LOD1 IMPOSTERS: their own 16-byte vertex buffer (they carry UVs) + a table indexed by base m.
   const IMP_VSTRIDE = 16, impTotal = wasm.map_imposter_vert_total();
   const imposterBuf = device.createBuffer({ size: Math.max(IMP_VSTRIDE, impTotal * IMP_VSTRIDE), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -1455,7 +1460,11 @@ async function main() {
     let first = 0;
     for (let k = 0; k < C.KOC; k++) {
       const cnt = wasm.draw_opaque(k);
-      if (cnt) { const m = meshTable[useAssets ? meshForKind[k] : C.CUBE]; gpass.draw(m.cnt, cnt, m.off, first); }
+      if (cnt) {
+        let mid = useAssets ? meshForKind[k] : C.CUBE;
+        if (useAssets && k === 1 /* K_MITE */ && cnt <= MITE_LOD_MAX) mid = M_MITE_DETAIL;   // skull up close, spike for the full swarm
+        const m = meshTable[mid]; gpass.draw(m.cnt, cnt, m.off, first);
+      }
       first += cnt;
     }
     gpass.end();

@@ -28,7 +28,14 @@
 /* The procedural meshes (the dynamic things). The town meshes are NOT in this enum —
  * they are indexed by their own group bases in map_mesh_data.h and offset by
  * M_PROC_COUNT into the shared GPU vertex buffer at draw time. */
-enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE, M_PROC_COUNT };
+/* M_HULL / M_TURRET are the procedural fallback tank (a tapered box + dome), kept for a
+ * build with no downloaded art; M_TANK_HULL / M_TANK_TURRET are baked from the CC0
+ * Quaternius tank OBJ when present (see ASSETS.md) and are what MESH_FOR_KIND binds. Both
+ * tank parts are authored in ONE shared unit-box frame so the renderer can spin the hull
+ * (body + tracks) by the chassis heading and the turret (turret + gun) by the aim while
+ * they stay registered — drawn at the same centre + scale, differing only in rotation. */
+enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE,
+       M_TANK_HULL, M_TANK_TURRET, M_MITE, M_PROC_COUNT };
 
 extern const int8_t   MESH_VERT[];                   /* procedural meshes, MESH_VSTRIDE bytes/vertex */
 extern const uint32_t MESH_VOFF[M_PROC_COUNT];       /* first vertex of each procedural mesh */
