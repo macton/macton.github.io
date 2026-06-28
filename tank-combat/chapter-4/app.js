@@ -170,7 +170,7 @@ struct Env {
   eye: vec4f,                                             // camera world position (subcells); .w = shadow-map normal-offset bias (subcells)
   mvp: mat4x4f,                                           // world (subcells) -> clip, to project the shadow ray to screen
   lightMvp: mat4x4f,                                      // world (subcells) -> SUN light clip, to sample the baked shadow map
-  shq: vec4f,                                             // shadow quality: x=town map mode(0 PCF2x2,1 Poisson PCF,2 revectorised), y=SSS blur(0 inline,1 buffer+bilateral), z=PCF texel radius, w=shadow-map texel size
+  shq: vec4f,                                             // shadow quality: x=town map mode(0 PCF2x2,1 Poisson PCF,2 revectorised), y=screen-space contact(0 inline,1 buffer+bilateral,2 OFF), z=PCF texel radius, w=shadow-map texel size
   invMvp: mat4x4f,                                        // clip -> world (subcells), to reconstruct position from depth
 };
 @group(0) @binding(0) var<uniform> env: Env;
@@ -286,9 +286,10 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
   var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
   if (sun > 0.0) {
-    // the contact/dynamic SSS is either marched inline (shq.y==0) or read from the pre-blurred buffer (==1)
+    // screen-space contact shadow: OFF (shq.y==2 — no march at all, just the baked town map),
+    // buffered+blurred (==1), or marched inline (==0). OFF is cheapest: it skips the per-pixel march.
     var sss = 1.0;
-    if (env.shq.y > 0.5) { sss = textureLoad(sssTex, p, 0).r; } else { sss = sun_shadow(pos, n); }
+    if (env.shq.y > 1.5) { sss = 1.0; } else if (env.shq.y > 0.5) { sss = textureLoad(sssTex, p, 0).r; } else { sss = sun_shadow(pos, n); }
     sun = sun * shadow_map(pos, n) * sss;   // baked town shadow + screen-space contact; ambient still fills
   }
   return vec4f(alb.rgb * (ambient + env.sunCol.rgb * sun), 1.0);
@@ -642,7 +643,7 @@ async function main() {
   // the BAKED SUN SHADOW MAP: one orthographic depth render of the static town from the sun,
   // re-baked only when the map re-bakes. SHADOW_RES is a one-time cost (the per-frame cost is one
   // PCF sample, independent of resolution); SHADOW_NBIAS is the receiver normal-offset (subcells).
-  const SHADOW_RES = 2048, SHADOW_NBIAS = 28;
+  const SHADOW_RES = 4096, SHADOW_NBIAS = 28;   // 2× the old 2048 — sharper town shadows; a ONE-TIME bake + 64MB depth map (per-frame cost unchanged: same tap count)
   let lightMVP = null;   // world (subcells) -> sun light clip; recomputed on re-bake (sun + world are otherwise fixed)
   // 224 bytes: the STATIC sun + ambient + shadow params (0..80); the per-frame eye + camera MVP
   // appended by viewWrite (80..160); the STATIC sun light MVP written by syncStatic (160..224).
@@ -875,10 +876,12 @@ async function main() {
   // the screen-space contact shadow is marched inline (0) or rendered to a buffer + bilateral-
   // blurred (1). Default = Poisson PCF + blurred SSS (the smoothest, chosen on-device). PCF radius
   // in shadow texels. The other modes stay live behind the render-profile controls for A/B.
-  // SSS (screen-space contact shadow + bilateral blur, 3 full-screen passes) measured ~9ms on an
-  // Apple phone — a quarter of the frame for a subtle refinement — so it's OFF by default now; the
-  // shq_sss toggle restores it. The town shadow map (Poisson PCF) carries the main shadows.
-  let townShadowMode = 1, sssBlur = 0; const PCF_RADIUS = 2.5;
+  // Screen-space contact shadow modes: 0 = marched inline in the lighting pass, 1 = marched to a
+  // buffer + bilateral-blurred (3 extra full-screen passes), 2 = OFF entirely (no per-pixel march;
+  // only the baked town shadow map). It measured ~9ms on an Apple phone for a subtle refinement, and
+  // even "inline" pays a per-pixel march — so default is now fully OFF (2). The town shadow map
+  // (Poisson PCF) carries the real shadows; the shq_sss control restores inline/blurred.
+  let townShadowMode = 1, sssBlur = 2; const PCF_RADIUS = 2.5;
 
   // GPU timing via timestamp-query (when supported): one write at the start + end of each pass.
   const GP = ["geom", "light", "plight", "fx", "tone", "sss"];   // the per-pass slots
@@ -960,7 +963,7 @@ async function main() {
       const sT = document.getElementById("t_town"), sR = document.getElementById("t_trees"), sL = document.getElementById("t_lights");
       if (sT) sT.checked = drawTown; if (sR) sR.checked = drawTrees; if (sL) sL.checked = drawLights;
       const sS = document.getElementById("shq_town"), sB = document.getElementById("shq_sss");
-      if (sS) sS.value = String(townShadowMode); if (sB) sB.checked = !!sssBlur;
+      if (sS) sS.value = String(townShadowMode); if (sB) sB.value = String(sssBlur);
       this.active = false; this.done = true; lastReport = this.report = this.build(); reportShown = true;
       const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn"), fb = document.getElementById("followDiagBtn");
       if (cp) cp.disabled = false; if (bt) bt.disabled = false; if (fb) fb.disabled = false;
@@ -1301,7 +1304,7 @@ async function main() {
   const tLights = document.getElementById("t_lights"); if (tLights) tLights.onchange = () => { drawLights = tLights.checked; diag.done = false; };
   // shadow-quality controls (opt-in): town shadow-map filter mode + the screen-space contact blur
   const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
-  const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
+  const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = parseInt(sqSss.value, 10); diag.done = false; };
   const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; };
   const ipT = document.getElementById("interp"); if (ipT) ipT.onchange = () => { interpEnabled = ipT.checked; if (!interpEnabled) wasm.set_interp(0); diag.done = false; };
   // any control change in the profile panel dismisses a finished report and resumes the live readout
@@ -1505,10 +1508,10 @@ async function main() {
     }
     gpass.end();
 
-    // 1b) SCREEN-SPACE CONTACT SHADOW as a buffer (shq.y==1): march once into sssTexA, then a
-    // separable bilateral blur (A->B->A). The lighting pass below reads sssTexA. When off, the
-    // lighting pass marches the SSS inline as before and these passes are skipped.
-    if (sssBlur) {
+    // 1b) SCREEN-SPACE CONTACT SHADOW as a buffer (shq.y==1 ONLY): march once into sssTexA, then a
+    // separable bilateral blur (A->B->A). The lighting pass reads sssTexA. For inline (0) the
+    // lighting pass marches it itself; for OFF (2) there's no march at all — both skip these passes.
+    if (sssBlur === 1) {
       const sp = enc.beginRenderPass({ colorAttachments: [{ view: sssTexA.createView(), loadOp: "clear", clearValue: { r: 1, g: 1, b: 1, a: 1 }, storeOp: "store" }], timestampWrites: tw("sss") });
       sp.setPipeline(sssPipe); sp.setBindGroup(0, sssBind); sp.draw(3); sp.end();
       const bh = enc.beginRenderPass({ colorAttachments: [{ view: sssTexB.createView(), loadOp: "clear", clearValue: { r: 1, g: 1, b: 1, a: 1 }, storeOp: "store" }] });
@@ -1571,7 +1574,7 @@ async function main() {
     ema(prof, "cpu", performance.now() - cpu0);    // CPU: prep + uploads + encode
     prof.sim = updMs; prof.dt = dt; prof.fps = fps;
     prof.n = { staticRuns: dStaticRuns, treeRuns: dTreeRuns, trees: dTrees, inst: n, lights: runLights ? nLights : 0 };
-    prof.ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0, sss: sssBlur ? 1 : 0 };
+    prof.ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0, sss: sssBlur === 1 ? 1 : 0 };
 
     // read back the per-pass GPU times (a frame or two behind; that's fine for a running average)
     if (tsRead) {
