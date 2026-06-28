@@ -474,7 +474,7 @@ async function main() {
   // (M_MITE, the last procedural mesh, ~1.8k tris) is only bound when few mites are in view
   // (zoomed in); once more than MITE_LOD_MAX fall in the visible box the whole swarm draws as
   // the cheap M_PYRAMID spike (K_MITE's baked default), bounding the per-frame triangle budget.
-  const M_MITE_DETAIL = C.MPROC - 1, MITE_LOD_MAX = 260;
+  const M_MITE_DETAIL = C.MPROC - 1, MITE_LOD_MAX = 40;
   // the LOD1 IMPOSTERS: their own 16-byte vertex buffer (they carry UVs) + a table indexed by base m.
   const IMP_VSTRIDE = 16, impTotal = wasm.map_imposter_vert_total();
   const imposterBuf = device.createBuffer({ size: Math.max(IMP_VSTRIDE, impTotal * IMP_VSTRIDE), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -994,6 +994,7 @@ async function main() {
       this.t = wasm.selected() !== 255 ? wasm.selected() : 0;
       wasm.select_tank(this.t); follow = true; followTank = this.t; followOffX = followOffY = 0;
       this.active = true; this.done = false; this.leg = 0; this.all = []; this.allSamp = []; this.byScreen = new Map(); this.gmin = Infinity;
+      this.gAcc = { geom: 0, light: 0, plight: 0, fx: 0, tone: 0, sss: 0, inst: 0, lights: 0, town: 0, trees: 0, n: 0 };   // GPU pass + draw-count averages
       this.route();
     },
     route() { const w = this.wps[this.leg]; wasm.set_dest(this.t, w.wcx, w.wcy);
@@ -1001,6 +1002,9 @@ async function main() {
     step(dt) {
       const ms = dt * 1000; if (ms > 0.2 && ms < this.gmin) this.gmin = ms;
       this.legSamp.push(ms); this.allSamp.push(ms);
+      const g = this.gAcc, gp = prof.gpu, N = prof.n || {};   // accumulate the per-pass GPU time + draw counts
+      g.geom += gp.geom || 0; g.light += gp.light || 0; g.plight += gp.plight || 0; g.fx += gp.fx || 0; g.tone += gp.tone || 0; g.sss += gp.sss || 0;
+      g.inst += N.inst || 0; g.lights += N.lights || 0; g.town += N.staticRuns || 0; g.trees += N.trees || 0; g.n++;
       const cam = camScreen(), key = `${cam.sx},${cam.sy}`;
       this.legScreens.add(key); if (!this.byScreen.has(key)) this.byScreen.set(key, []); this.byScreen.get(key).push(ms);
       this.legScaleMin = Math.min(this.legScaleMin, renderScale); this.legScaleMax = Math.max(this.legScaleMax, renderScale);
@@ -1033,6 +1037,9 @@ async function main() {
       L.push(`overall (${ov.n} frames, ~${sumS}s): median ${ov.med.toFixed(1)}ms (${(1000 / ov.med).toFixed(0)}fps) · mean ${ov.mean.toFixed(1)} · p95 ${ov.p95.toFixed(1)} · p99 ${ov.p99.toFixed(1)} · max ${ov.max.toFixed(1)} · jitter(sd) ${ov.sd.toFixed(1)}`);
       L.push(`  hitches >25ms ${hitch(25).toFixed(1)}% · dropped >33ms ${hitch(33).toFixed(1)}% · res ${scLo.toFixed(2)}..${scHi.toFixed(2)}×`);
       L.push(`histogram (ms): <14 ${hist[0]} · 14-18 ${hist[1]} · 18-22 ${hist[2]} · 22-28 ${hist[3]} · 28-40 ${hist[4]} · >40 ${hist[5]}`);
+      const g = this.gAcc, gm = (k) => g.n ? (g[k] / g.n).toFixed(2) : "–", gc = (k) => g.n ? Math.round(g[k] / g.n) : 0;
+      if (canTimestamp) L.push(`gpu pass avg ms (overlap on tile gpus — compare passes, geom=vertex/geometry, light/plights=fill): geom ${gm("geom")} · light ${gm("light")} · plights ${gm("plight")} · fx ${gm("fx")} · sss ${gm("sss")} · tone ${gm("tone")}`);
+      L.push(`draws avg: town ${gc("town")} runs · trees ${gc("trees")} · opaque ${gc("inst")} inst · lights ${gc("lights")}`);
       L.push("per-leg (dest · screens): median/p95/max ms · res:");
       for (let i = 0; i < this.all.length; i++) { const l = this.all[i];
         L.push(`  leg${i + 1} →${l.dest} [${l.screens.join(" ")}]${l.arrived ? "" : " (timeout)"}: ${l.st.med.toFixed(1)}/${l.st.p95.toFixed(1)}/${l.st.max.toFixed(1)} · ${l.scale[0].toFixed(2)}..${l.scale[1].toFixed(2)}×`); }
