@@ -109,6 +109,52 @@ static uint32_t mite_colour(const World* w, uint32_t m) {
   return COL_MITE_IDLE;
 }
 
+/* ---- render-time interpolation (presentation-only) ---------------------------------
+ * The sim runs at a fixed TICK_DT; a free-running display beats against it, so a thing
+ * that moves a constant amount per tick lands on a slightly different screen pixel each
+ * frame — visible judder even at a rock-steady frame rate. The cure is render-side: hold
+ * the PREVIOUS tick's positions alongside the current ones and draw each moving thing at
+ * lerp(prev, cur, alpha), alpha = (time since the last tick) / TICK_DT in [0,1). The
+ * display then glides between ticks (one tick of latency, no sim change).
+ *
+ * g_alpha_q8 = 0 (the DEFAULT) means "no interpolation": every read returns the current
+ * position byte-for-byte, so build_view stays identical to the un-interpolated emit — the
+ * determinism tests and the sim hash are untouched. The host opts in per frame by setting
+ * a non-zero alpha + the prev-position pointers (render_set_interp). Positions only; angles
+ * snap (a tick's worth of turn is small, and wrap-safe angle lerp isn't worth the risk).
+ *
+ * A TELEPORT GUARD snaps to the current position when a thing jumps more than INTERP_MAX
+ * subcells in one tick — a respawn, a toroidal wrap, or a slot reused by a new entity —
+ * so it never streaks across the map. INTERP_MAX (8 cells) sits well above any legit
+ * one-tick move of a tank or mite and below any wrap/respawn jump (those cross the arena). */
+#define INTERP_MAX (8 * SUB)         /* 2048: beyond this in a tick, treat as a teleport and snap */
+static uint32_t       g_alpha_q8     = 0;   /* 0..255 lerp weight toward the current tick (0 = off) */
+static const uint32_t* g_prev_tank_xy = 0;
+static const uint32_t* g_prev_mite_xy = 0;
+static const uint32_t* g_prev_proj_xy = 0;
+/* the bursts (fx_xy) are NOT interpolated: a burst is pinned to the spot a mite died / a
+ * bolt struck and only EXPANDS over its life, so its position never moves between ticks. */
+
+void render_set_interp(uint32_t alpha_q8, const uint32_t* prev_tank_xy,
+                       const uint32_t* prev_mite_xy, const uint32_t* prev_proj_xy) {
+  g_alpha_q8 = alpha_q8 > 255 ? 255 : alpha_q8;
+  g_prev_tank_xy = prev_tank_xy; g_prev_mite_xy = prev_mite_xy; g_prev_proj_xy = prev_proj_xy;
+}
+
+/* unpack `cur` to subcell x,y, interpolated from prev_arr[idx] by g_alpha_q8 when enabled
+ * (and not a teleport). With g_alpha_q8 == 0 or a null prev table this is just xy_lo/xy_hi. */
+static void interp_xy(uint32_t cur, const uint32_t* prev_arr, uint32_t idx, int* ox, int* oy) {
+  int cx = xy_lo(cur), cy = xy_hi(cur);
+  if (g_alpha_q8 == 0 || !prev_arr) { *ox = cx; *oy = cy; return; }
+  uint32_t p = prev_arr[idx];
+  int px = xy_lo(p), py = xy_hi(p), dx = cx - px, dy = cy - py;
+  if (dx > INTERP_MAX || dx < -INTERP_MAX || dy > INTERP_MAX || dy < -INTERP_MAX) {
+    *ox = cx; *oy = cy; return;                       /* teleport (respawn / wrap / reused slot): snap */
+  }
+  *ox = px + ((dx * (int)g_alpha_q8) >> 8);
+  *oy = py + ((dy * (int)g_alpha_q8) >> 8);
+}
+
 /* emit one box (centre, half-extent, facing, tint) into the kind-grouped buffer */
 static uint32_t push(Inst* out, uint32_t k, int cx, int cy, int cz,
                      int hx, int hy, int hz, int co, int si, uint32_t rgba) {
@@ -142,7 +188,7 @@ static int cell_in_box(const Box* b, uint32_t cell) {
 static uint32_t emit_rings(const World* w, Inst* out, uint32_t k, const Box* b) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     if (w->tstate[t] == TS_UNSELECTED) continue;
-    int px = xy_lo(w->tank_xy[t]), py = xy_hi(w->tank_xy[t]);
+    int px, py; interp_xy(w->tank_xy[t], g_prev_tank_xy, t, &px, &py);
     if (!in_box(b, px, py)) continue;
     uint32_t col = w->tstate[t] == TS_MANUAL ? COL_MANUAL : COL_AUTOPATH;
     k = push(out, k, px, py, FLOOR_H + RING_H / 2, RING_HALF, RING_HALF, RING_H / 2, 16384, 0, col);
@@ -155,7 +201,7 @@ static uint32_t emit_rings(const World* w, Inst* out, uint32_t k, const Box* b) 
 static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b) {
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                     /* dead mites aren't drawn (or indexed) */
-    int px = xy_lo(w->mite_xy[m]), py = xy_hi(w->mite_xy[m]);
+    int px, py; interp_xy(w->mite_xy[m], g_prev_mite_xy, m, &px, &py);
     if (!in_box(b, px, py)) continue;
     uint32_t di = w->mite_ang[m] >> ANGLE_SHIFT;
     k = push(out, k, px, py, FLOOR_H + MITE_H / 2, MITE_HALF, MITE_HALF, MITE_H / 2,
@@ -166,7 +212,7 @@ static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b) 
 
 static uint32_t emit_tank_part(const World* w, Inst* out, uint32_t k, int part, const Box* b) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
-    int px = xy_lo(w->tank_xy[t]), py = xy_hi(w->tank_xy[t]);
+    int px, py; interp_xy(w->tank_xy[t], g_prev_tank_xy, t, &px, &py);
     if (!in_box(b, px, py)) continue;
     uint32_t bi = w->tank_ang[t] >> ANGLE_SHIFT;                              /* body on the 32-dir table */
     int tco = fine_cos(w->tank_turret[t]), tsi = fine_sin(w->tank_turret[t]);  /* barrel at the fine turret angle */
@@ -210,7 +256,7 @@ static uint32_t emit_fx(const World* w, Inst* out, uint32_t k, const Box* b) {
      * the streak's tail clipped there. While still in the barrel, the bolt isn't drawn. */
     int beyond = (int)w->tank_proj_dist[bb] - (87 + 56);
     if (beyond <= 0) continue;
-    int bx = xy_lo(w->tank_proj_xy[bb]), by = xy_hi(w->tank_proj_xy[bb]);
+    int bx, by; interp_xy(w->tank_proj_xy[bb], g_prev_proj_xy, bb, &bx, &by);
     if (!in_box(b, bx, by)) continue;
     int co = fine_cos(w->tank_proj_dir[bb]), si = fine_sin(w->tank_proj_dir[bb]);  /* bolt at the fine turret angle */
     int seg = w->proj_speed; if (seg > beyond) seg = beyond;   /* clip the tail at the barrel tip */
@@ -339,7 +385,7 @@ uint32_t build_lights(const World* w, Inst* out, int32_t wx0, int32_t wy0, int32
   /* a faint light per visible mite, in its CURRENT role colour — hunters burn a little hotter */
   for (uint32_t m = 0; m < N_MITES; m++) {
     if (w->mite_resp[m]) continue;                                 /* dead mites cast no light */
-    int px = xy_lo(w->mite_xy[m]), py = xy_hi(w->mite_xy[m]);
+    int px, py; interp_xy(w->mite_xy[m], g_prev_mite_xy, m, &px, &py);
     if (!in_box(&b, px, py)) continue;
     uint8_t mode = w->mite_mode[m];
     int inten = mode == MM_HUNT ? 72 : mode == MM_HOME ? 56 : 38;
@@ -359,7 +405,7 @@ uint32_t build_lights(const World* w, Inst* out, int32_t wx0, int32_t wy0, int32
   for (uint32_t bb = 0; bb < N_TANKS * PROJ_MAX; bb++) {
     if (!w->tank_proj_live[bb]) continue;
     if ((int)w->tank_proj_dist[bb] - (87 + 56) <= 0) continue;
-    int bx = xy_lo(w->tank_proj_xy[bb]), by = xy_hi(w->tank_proj_xy[bb]);
+    int bx, by; interp_xy(w->tank_proj_xy[bb], g_prev_proj_xy, bb, &bx, &by);
     if (!in_box(&b, bx, by)) continue;
     k = push_light(out, k, bx, by, FLOOR_H + HULL_H, BOLT_LIGHT_R, light_rgba(RGBA(255, 120, 70, 0), 150));
   }

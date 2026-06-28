@@ -849,6 +849,10 @@ async function main() {
   // render-profiling: live A/B toggles for the heavy layers (watch the frame time move on the
   // actual device — the surest way to attribute GPU cost where timestamp-query isn't available).
   let drawTown = true, drawTrees = true, drawLights = true;
+  // render interpolation (on by default): draw moving things between sim ticks so motion stays
+  // smooth no matter how the display rate beats against the fixed timestep. Costs ~1 tick of
+  // latency; purely presentational (alpha 0 in the wasm is byte-identical to no interpolation).
+  let interpEnabled = true;
   // shadow quality: town map filter mode (0=2x2 PCF, 1=Poisson PCF, 2=revectorised) and whether
   // the screen-space contact shadow is marched inline (0) or rendered to a buffer + bilateral-
   // blurred (1). Default = Poisson PCF + blurred SSS (the smoothest, chosen on-device). PCF radius
@@ -1271,6 +1275,7 @@ async function main() {
   const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
   const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
   const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; };
+  const ipT = document.getElementById("interp"); if (ipT) ipT.onchange = () => { interpEnabled = ipT.checked; if (!interpEnabled) wasm.set_interp(0); diag.done = false; };
   // any control change in the profile panel dismisses a finished report and resumes the live readout
   const pc = document.getElementById("profctl"); if (pc) pc.addEventListener("input", () => { reportShown = false; });
   // the controlled diagnostic sweep, the roaming follow-cam capture, + copy-to-clipboard
@@ -1328,7 +1333,9 @@ async function main() {
   let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
-  const tick = () => { const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
+  // snapshot the pre-tick positions FIRST (the "previous" frame for render interpolation),
+  // then advance the sim; build_view lerps prev->current by the alpha set below each frame.
+  const tick = () => { wasm.snapshot_prev(); const t0 = performance.now(); wasm.tick(); updMs = updMs * 0.9 + (performance.now() - t0) * 0.1; };
   dbg.onPause = (v) => { paused = v; }; dbg.onStep = () => { stepOnce = true; };
   dbg.onReset = () => {
     wasm.init(); camX = C.BW * C.SUB / 2; camY = C.BH * C.SUB / 2; zoom = 1; follow = false; followTank = -1; followOffX = followOffY = 0;
@@ -1370,6 +1377,11 @@ async function main() {
     if (stepOnce) { tick(); stepOnce = false; acc = 0; }
     else if (!paused) { acc += dt; let s = 0; while (acc >= TICK_DT && s < 6) { tick(); acc -= TICK_DT; s++; } }
     else acc = 0;
+    // render interpolation: draw moving things partway between the last two ticks, by the
+    // fraction of a tick elapsed (acc/TICK_DT as Q8). 0 when off or paused/stepping → snap to
+    // the current tick (a no-op in the emit). Set BEFORE set_view, whose rebuild is what draws.
+    const alphaQ8 = (interpEnabled && !paused) ? Math.max(0, Math.min(255, Math.round((acc / TICK_DT) * 256))) : 0;
+    wasm.set_interp(alphaQ8);
 
     // follow-cam: track the chosen tank + your pan offset; pan/zoom/orbit stay relative to
     // the follow (they never drop it). Snap on the toroidal wrap.

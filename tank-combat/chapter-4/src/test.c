@@ -990,6 +990,43 @@ static void t_render_deterministic(void) {
   check(same, "the same view rebuilds byte-identical placements (the projection is a host uniform)");
 }
 
+/* RENDER INTERPOLATION (presentation-only): the host holds the previous tick's positions and,
+ * before each build_view, sets a lerp weight so moving things glide between ticks. It must be a
+ * NO-OP at alpha 0 (so the sim hash + every other render test are untouched), lerp cleanly at a
+ * mid-tick alpha, and SNAP over a teleport-sized jump (a respawn / toroidal wrap / reused slot). */
+static void t_render_interp(void) {
+  printf("render interpolation glides moving things between ticks (presentation-only, off by default):\n");
+  sim_init(&W);
+  uint32_t prev[N_TANKS];
+  for (uint32_t t = 0; t < N_TANKS; t++) prev[t] = W.tank_xy[t];
+  int px0 = xy_lo(prev[0]), py0 = xy_hi(prev[0]);
+  int cdx = 200, cdy = 120;                              /* a normal one-tick move (< INTERP_MAX = 2048) */
+  W.tank_xy[0] = xy_pack(px0 + cdx, py0 + cdy);
+  /* the hull range begins right after the (selected-only) rings + the mites; at init no tank is
+   * selected, so the first hull instance is tank 0 — the one we moved. */
+  DrawList d; uint32_t hb;
+
+  render_set_interp(0, prev, 0, 0);                      /* alpha 0 = OFF: the hull sits at the current tick */
+  build_view(&W, g_a, &d, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);
+  hb = d.opaque[K_RING] + d.opaque[K_MITE];
+  check(g_a[hb].wx == px0 + cdx && g_a[hb].wy == py0 + cdy, "alpha 0 is a no-op (hull drawn at the current tick)");
+
+  render_set_interp(128, prev, 0, 0);                    /* ~half a tick: the hull sits at the midpoint */
+  build_view(&W, g_b, &d, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);
+  hb = d.opaque[K_RING] + d.opaque[K_MITE];
+  check(g_b[hb].wx == px0 + (cdx * 128 >> 8) && g_b[hb].wy == py0 + (cdy * 128 >> 8),
+        "alpha 128 draws the hull halfway between the two ticks");
+
+  int jump = (px0 + 6000 < ARENA_W_SUB - 1) ? 6000 : -6000;   /* a teleport-sized jump, kept in-band */
+  W.tank_xy[0] = xy_pack(px0 + jump, py0);
+  render_set_interp(128, prev, 0, 0);
+  build_view(&W, g_a, &d, 0, 0, ARENA_W_SUB - 1, ARENA_H_SUB - 1, REC_EMPTY);
+  hb = d.opaque[K_RING] + d.opaque[K_MITE];
+  check(g_a[hb].wx == px0 + jump, "a teleport-sized jump snaps to the current position (no streak across the map)");
+
+  render_set_interp(0, 0, 0, 0);                         /* leave interpolation OFF for the later tests */
+}
+
 static void t_render_visibility(void) {
   printf("render scales with what the camera SHOWS, not the world or the pool:\n");
   sim_init(&W);
@@ -1252,6 +1289,7 @@ int main(void) {
   t_sim_is_chapter3();
   t_depth_key();
   t_render_deterministic();
+  t_render_interp();
   t_render_visibility();
   t_static_map();
   t_static_props();

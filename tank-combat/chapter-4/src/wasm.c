@@ -58,6 +58,17 @@ static void rebuild(void) {
   g_inst_count = build_view(&g_world, g_inst, &g_dl, g_wx0, g_wy0, g_wx1, g_wy1, g_hover);
   g_light_count = build_lights(&g_world, g_lights, g_wx0, g_wy0, g_wx1, g_wy1);
 }
+
+/* RENDER-TIME INTERPOLATION (presentation-only). The fixed-timestep sim beats against the
+ * free-running display, so the host smooths motion by drawing each moving thing partway
+ * between two ticks. We keep the PREVIOUS tick's positions here; the host snapshots them
+ * just before each tick (snapshot_prev), then per frame sets the lerp weight (set_interp)
+ * — the fraction of a tick elapsed — before the build_view that emits the drawn frame.
+ * Disabled (alpha 0) it is a pure no-op, so the sim exports stay byte-identical. */
+static uint32_t g_prev_tank_xy[N_TANKS];
+static uint32_t g_prev_mite_xy[N_MITES];
+static uint32_t g_prev_proj_xy[N_TANKS * PROJ_MAX];
+static void copy_u32(uint32_t* dst, const uint32_t* src, uint32_t n) { for (uint32_t i = 0; i < n; i++) dst[i] = src[i]; }
 static void rebuild_static(void) {
   g_static_inst_count = build_static_map(g_world.grid, g_world.nest_cell,
                                          g_static_inst, g_static_runs, &g_static_run_count);
@@ -73,6 +84,19 @@ EXPORT(init) void init(void) {
   rebuild();
 }
 EXPORT(tick) uint32_t tick(void) { sim_tick(&g_world); rebuild(); return g_inst_count; }
+
+/* INTERPOLATION protocol (host-driven, presentation-only). snapshot_prev() saves the
+ * positions of every moving thing as the PREVIOUS tick BEFORE the host calls tick(); after
+ * its tick loop the host calls set_interp(alpha_q8) with the fraction of a tick elapsed
+ * (0..255), which arms build_view to lerp prev->current. alpha 0 disables it entirely. */
+EXPORT(snapshot_prev) void snapshot_prev(void) {
+  copy_u32(g_prev_tank_xy, g_world.tank_xy,      N_TANKS);
+  copy_u32(g_prev_mite_xy, g_world.mite_xy,      N_MITES);
+  copy_u32(g_prev_proj_xy, g_world.tank_proj_xy, N_TANKS * PROJ_MAX);
+}
+EXPORT(set_interp) void set_interp(uint32_t alpha_q8) {
+  render_set_interp(alpha_q8, g_prev_tank_xy, g_prev_mite_xy, g_prev_proj_xy);
+}
 
 EXPORT(set_input)   void set_input(uint32_t tank, uint32_t bits) { if (tank < N_TANKS) g_world.tank_in[tank] = (uint8_t)bits; }
 EXPORT(cycle_tank)  void cycle_tank(uint32_t tank) { sim_cycle_tank(&g_world, tank); rebuild(); }

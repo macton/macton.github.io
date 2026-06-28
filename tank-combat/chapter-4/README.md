@@ -110,6 +110,16 @@ toggle, the live scale shown in the panel) and a **depth-reconstructed G-buffer*
 is rebuilt from the depth buffer via the inverse MVP instead of a fat `rgba32f` position target, so
 the geometry writes one fewer 16-byte channel and every full-screen pass reads less.
 
+Motion is decoupled from the display rate by **render interpolation** (an "interpolate" toggle, on by
+default). The sim is a fixed timestep, so on a display that beats against it a steadily-moving thing
+lands on a slightly different pixel each frame — judder even at a rock-steady frame rate. The host
+keeps the previous tick's positions and, before each `build_view`, sets a lerp weight (the fraction
+of a tick elapsed); the renderer draws every moving thing — tanks, the swarm, bolts and their point
+lights — at `lerp(prev, cur, alpha)`, so it glides between ticks (one tick of latency, no sim change).
+It is presentation-only: at weight 0 (disabled) every position read is byte-identical to the
+un-interpolated emit, so the sim hash and the determinism tests are untouched, and a teleport guard
+snaps over respawns / toroidal wraps / reused pool slots rather than streaking a thing across the map.
+
 ### The connected world & the instance layout (`render.h`)
 
 The whole **8×8 world is one connected map**: placements are world positions (anchor =

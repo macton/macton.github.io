@@ -202,6 +202,7 @@
     <label>town shadow <select id="shq_town"><option value="0">PCF 2×2</option><option value="1" selected>Poisson PCF</option><option value="2">revectorised</option></select></label>
     <label><input type="checkbox" id="shq_sss" checked> SSS blur</label>
     <label><input type="checkbox" id="autores" checked> auto-res</label>
+    <label><input type="checkbox" id="interp" checked> interpolate</label>
     <button id="diagBtn" type="button">run diagnostics</button>
     <button id="followDiagBtn" type="button">follow diag</button>
     <button id="diagCopy" type="button" disabled>copy</button>
@@ -484,11 +485,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.28-053555"></script>
+  <script src="version.js?v=2026.06.28-055602"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.28-053555");</script>
+  <script type="module">import("./app.js?v=2026.06.28-055602");</script>
 </body>
 </html>

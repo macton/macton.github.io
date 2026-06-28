@@ -87,6 +87,18 @@ typedef struct {
 uint32_t build_view(const World* w, Inst* out, DrawList* dl,
                     int32_t wx0, int32_t wy0, int32_t wx1, int32_t wy1, uint32_t hover_cell);
 
+/* RENDER-TIME INTERPOLATION (presentation-only). The display beats against the fixed
+ * sim tick, so a steadily-moving thing judders even at a stable frame rate. The host
+ * holds the previous tick's positions and, before each build_view, sets a lerp weight
+ * (alpha_q8 in [0,255], the fraction of a tick elapsed since the last one) and the prev
+ * position tables; build_view then draws each MOVING thing (tanks, the swarm, bolts +
+ * their lights) at lerp(prev, cur, alpha). alpha_q8 == 0 (the default) is a no-op: every
+ * read returns the current position byte-for-byte, so the determinism tests and the sim
+ * hash are untouched. A teleport guard snaps over respawns / toroidal wraps / reused
+ * slots. Bursts (fx_xy) don't move (they only expand), so they take no prev table. */
+void render_set_interp(uint32_t alpha_q8, const uint32_t* prev_tank_xy,
+                       const uint32_t* prev_mite_xy, const uint32_t* prev_proj_xy);
+
 /* The DYNAMIC point lights for the DEFERRED renderer: one per visible mite (its mode tint,
  * a faint glow) and per visible FX (a burst or a bolt — bright, fading). Each reuses the
  * Inst layout as a light VOLUME: a cube of half-extent = radius centred on the light, with
