@@ -1151,6 +1151,36 @@ static void t_static_props(void) {
         "the prop bake is a pure function — same map rebuilds byte-identical trees");
 }
 
+/* the roads are ONE connected network: a building cluster stranded in the grass would
+ * otherwise bake a closed ring of road touching no street (a "traffic island"). The static
+ * map bridges every such ring to the network (and drops the few sealed-inside-a-block pockets
+ * back to grass), so a flood-fill over the baked road cells must find exactly one component. */
+static uint8_t rc_road[N_WORLD_CELLS];
+static int32_t rc_comp[N_WORLD_CELLS];
+static int32_t rc_q[N_WORLD_CELLS];
+static void t_road_connectivity(void) {
+  printf("the town's roads are one connected network (no stranded traffic islands):\n");
+  sim_init(&W);
+  uint32_t nr = 0, ni = build_static_map(W.grid, W.nest_cell, g_si, g_sr, &nr); (void)ni;
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) rc_road[c] = 0;
+  uint32_t RD0 = (uint32_t)(M_PROC_COUNT + MAP_ROAD_BASE), RD1 = RD0 + MAP_ROAD_N, nroad = 0;
+  for (uint32_t r = 0; r < nr; r++) { uint32_t m = g_sr[r].mesh; if (m < RD0 || m >= RD1) continue;
+    for (uint32_t i = g_sr[r].first; i < g_sr[r].first + g_sr[r].count; i++) {
+      int32_t cx = g_si[i].wx / SUB, cy = g_si[i].wy / SUB; rc_road[wc_pack(cx, cy)] = 1; nroad++; } }
+  /* 4-connected components over the road cells, toroidal (matching driving adjacency) */
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) rc_comp[c] = -1;
+  int ncomp = 0; const int DX[4] = { 1, -1, 0, 0 }, DY[4] = { 0, 0, 1, -1 };
+  for (int y = 0; y < BIG_H; y++) for (int x = 0; x < BIG_W; x++) { uint32_t c0 = wc_pack(x, y);
+    if (!rc_road[c0] || rc_comp[c0] >= 0) continue;
+    int head = 0, tail = 0; rc_q[tail++] = (int32_t)c0; rc_comp[c0] = ncomp;
+    while (head < tail) { int c = rc_q[head++]; int cx = c % BIG_W, cy = c / BIG_W;
+      for (int k = 0; k < 4; k++) { int nx = ((cx + DX[k]) % BIG_W + BIG_W) % BIG_W, ny = ((cy + DY[k]) % BIG_H + BIG_H) % BIG_H;
+        uint32_t nc = wc_pack(nx, ny); if (rc_road[nc] && rc_comp[nc] < 0) { rc_comp[nc] = ncomp; rc_q[tail++] = (int32_t)nc; } } }
+    ncomp++; }
+  check(nroad > 0, "the town has roads");
+  check(ncomp == 1, "every road cell is in ONE connected component (no isolated traffic islands)");
+}
+
 static void t_render_overlays(void) {
   printf("interaction overlays are render-only (derived from the sim + one host hover cell):\n");
   sim_init(&W);
@@ -1225,6 +1255,7 @@ int main(void) {
   t_render_visibility();
   t_static_map();
   t_static_props();
+  t_road_connectivity();
   t_render_overlays();
   t_lights();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

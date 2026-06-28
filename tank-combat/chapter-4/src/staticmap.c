@@ -36,8 +36,90 @@ static int any_wall8(const uint32_t* grid, int32_t x, int32_t y) {
       if ((dx || dy) && cell_is_wall(grid, x + dx, y + dy)) return 1;
   return 0;
 }
+/* wrap a (possibly out-of-range) cell coordinate into the toroidal world */
+static int wrap_c(int v, int n) { v %= n; return v < 0 ? v + n : v; }
+
+/* The RENDERED road map, baked once. A cell renders as road iff it is open, not a nest, and has
+ * a wall in its 8-neighbourhood. A building cluster stranded in the grass otherwise becomes a
+ * CLOSED RING of road touching no other street — a "traffic island" you can't drive off of.
+ * compute_road_map() lays that base ring down, then BRIDGES every isolated ring to the main
+ * network by carving the shortest grass corridor to it. Render-only: a corridor cell just
+ * classifies as road; the sim never sees a road, a ring, or a bridge. is_road() reads this map,
+ * so the autotile and the grass/tree split all follow the connected result. */
+static uint8_t s_road[N_WORLD_CELLS];     /* 1 = renders as road (base ring + connectivity bridges) */
+static int32_t s_comp[N_WORLD_CELLS];     /* connected-component label per road cell (-1 = none) */
+static int32_t s_bfs[N_WORLD_CELLS];      /* BFS queue (cell indices) */
+static int32_t s_prev[N_WORLD_CELLS];     /* BFS parent for path reconstruction (-1 source, -2 unseen) */
+static uint8_t s_conn[N_WORLD_CELLS];     /* 1 = road cell proven connected to the main network */
+
 static int is_road(const uint32_t* grid, int32_t x, int32_t y) {
-  return !cell_is_wall(grid, x, y) && any_wall8(grid, x, y);
+  (void)grid; return s_road[wc_pack(wrap_c(x, BIG_W), wrap_c(y, BIG_H))];
+}
+
+/* Bake s_road: the base ring, then bridge every isolated ring to the main road network so no
+ * circular road section is left unconnected. A pure function of (grid, nest_at); rebuilt with
+ * the town on a wall/nest edit. */
+static void compute_road_map(const uint32_t* grid, const int16_t* nest_at) {
+  static const int DX[4] = { 1, -1, 0, 0 }, DY[4] = { 0, 0, 1, -1 };
+  /* base ring: open, non-nest, a wall in the 8-neighbourhood */
+  for (int y = 0; y < BIG_H; y++)
+    for (int x = 0; x < BIG_W; x++) {
+      uint32_t c = wc_pack(x, y);
+      s_road[c] = (!cell_is_wall(grid, x, y) && nest_at[c] < 0 && any_wall8(grid, x, y)) ? 1 : 0;
+    }
+  /* label the 4-connected road components (toroidal); the largest is the main street network */
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_comp[c] = -1;
+  int ncomp = 0, mainc = -1, mainsz = -1;
+  for (int y = 0; y < BIG_H; y++)
+    for (int x = 0; x < BIG_W; x++) {
+      uint32_t c0 = wc_pack(x, y);
+      if (!s_road[c0] || s_comp[c0] >= 0) continue;
+      int head = 0, tail = 0, sz = 0; s_bfs[tail++] = (int32_t)c0; s_comp[c0] = ncomp;
+      while (head < tail) {
+        int c = s_bfs[head++]; sz++; int cx = c % BIG_W, cy = c / BIG_W;
+        for (int k = 0; k < 4; k++) {
+          uint32_t nc = wc_pack(wrap_c(cx + DX[k], BIG_W), wrap_c(cy + DY[k], BIG_H));
+          if (s_road[nc] && s_comp[nc] < 0) { s_comp[nc] = ncomp; s_bfs[tail++] = (int32_t)nc; }
+        }
+      }
+      if (sz > mainsz) { mainsz = sz; mainc = ncomp; }
+      ncomp++;
+    }
+  if (ncomp <= 1) return;   /* already one network — nothing stranded */
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_conn[c] = (s_comp[c] == mainc) ? 1 : 0;
+  /* connect each non-main ring to the network by the shortest GRASS corridor: a multi-source BFS
+   * from the ring's cells, stepping only through grass (open, non-nest, non-road) until it meets
+   * a connected road cell, then carve that path into road. Islands already merged (e.g. a prior
+   * bridge ran past them) come pre-connected, so the loop converges to one network. */
+  for (int comp = 0; comp < ncomp; comp++) {
+    if (comp == mainc) continue;
+    for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_prev[c] = -2;
+    int head = 0, tail = 0, found = -1, already = 0;
+    for (uint32_t c = 0; c < N_WORLD_CELLS; c++)
+      if (s_road[c] && s_comp[c] == comp) { if (s_conn[c]) already = 1; s_prev[c] = -1; s_bfs[tail++] = (int32_t)c; }
+    if (already) continue;   /* this ring was already linked in by an earlier bridge */
+    while (head < tail && found < 0) {
+      int c = s_bfs[head++]; int cx = c % BIG_W, cy = c / BIG_W;
+      for (int k = 0; k < 4; k++) {
+        int nx = wrap_c(cx + DX[k], BIG_W), ny = wrap_c(cy + DY[k], BIG_H);
+        uint32_t nc = wc_pack(nx, ny);
+        if (s_prev[nc] != -2) continue;                                  /* already seen */
+        if (cell_is_wall(grid, nx, ny) || nest_at[nc] >= 0) continue;    /* never carve through a building/landmark */
+        if (s_road[nc] && !s_conn[nc]) continue;                         /* don't route through another island */
+        s_prev[nc] = c;
+        if (s_conn[nc]) { found = (int)nc; break; }                      /* reached the network */
+        s_bfs[tail++] = (int32_t)nc;                                     /* grass: keep walking */
+      }
+    }
+    if (found < 0) continue;   /* sealed off by walls — handled in the cleanup pass below */
+    for (int c = found; c >= 0; c = s_prev[c]) { s_road[c] = 1; s_conn[c] = 1; }   /* carve the corridor */
+    for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (s_comp[c] == comp) s_conn[c] = 1;  /* the ring is connected now */
+  }
+  /* any ring we still couldn't reach is sealed INSIDE a building block (no grass to bridge
+   * through, and we won't carve a road across a wall — the sim has a building there). Rather
+   * than leave a stranded patch of asphalt, drop it back to grass (an open courtyard), so every
+   * remaining road cell belongs to the one connected network. */
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) if (s_road[c] && !s_conn[c]) s_road[c] = 0;
 }
 
 /* road autotile. Neighbour mask: N=1 E=2 S=4 W=8 (bit set if that neighbour is road).
@@ -104,6 +186,7 @@ uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
   /* reverse the nest list into a per-cell lookup for the classify */
   for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_nest_at[c] = -1;
   for (uint32_t n = 0; n < NEST_COUNT; n++) s_nest_at[nest_cell[n]] = (int16_t)n;
+  compute_road_map(grid, s_nest_at);   /* bake the connected road map (base ring + island bridges) */
 
   uint32_t ni = 0, nr = 0;
   /* walk screen by screen so instances bucket naturally by (screen, mesh): the host
@@ -148,7 +231,6 @@ uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
  * nest lookup wraps explicitly so the scatter tiles seamlessly like the town. */
 #define TREE_DENSITY  22    /* % of eligible (all-grass) corners that grow a tree */
 
-static int wrap_c(int v, int n) { v %= n; return v < 0 ? v + n : v; }
 static int is_grass(const uint32_t* grid, const int16_t* nest_at, int32_t x, int32_t y) {
   if (nest_at[wc_pack(wrap_c(x, BIG_W), wrap_c(y, BIG_H))] >= 0) return 0;   /* nest -> landmark */
   if (cell_is_wall(grid, x, y)) return 0;                                    /* wall -> building */
@@ -167,6 +249,7 @@ uint32_t build_static_props(const uint32_t* grid, const uint16_t* nest_cell,
                             Inst* inst, StaticRun* runs, uint32_t* n_runs) {
   for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_nest_at[c] = -1;
   for (uint32_t n = 0; n < NEST_COUNT; n++) s_nest_at[nest_cell[n]] = (int16_t)n;
+  compute_road_map(grid, s_nest_at);   /* same road map the town bakes, so trees avoid the bridges too */
 
   uint32_t ni = 0, nr = 0;
   /* walk screen by screen so trees bucket by screen (all share M_TREE); a corner is owned

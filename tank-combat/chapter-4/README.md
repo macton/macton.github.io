@@ -167,18 +167,19 @@ GitHub Pages serves it with no build step.
 
 ## Testing
 
-`./test.sh` builds natively (no wasm, no GPU) and runs **172 checks**: every chapter-3
+`./test.sh` builds natively (no wasm, no GPU) and runs **174 checks**: every chapter-3
 sim test unchanged, then the chapter-4 render tests — the
 sim-hash-equals-chapter-3 thesis, the translucent depth key, the host-uniform camera, the
 linear (uniform) camera, the emit-for-visible bound, that every emitted placement keeps
-its true (un-truncated) world coordinate, that every nest gets a colour, and that the
+its true (un-truncated) world coordinate, that every nest gets a colour, that the
 static **trees** sit only on grass corners (on open, non-nest ground), partition into
-per-screen `M_TREE` runs, and re-bake deterministically. `render.c` / `staticmap.c` are
+per-screen `M_TREE` runs, and re-bake deterministically, and that the **roads are one
+connected network** (no stranded traffic-island rings). `render.c` / `staticmap.c` are
 plain C over the `World`, so they are exercised on the host with no browser.
 
 ## Verified
 
-- Chapter 4 builds freestanding to wasm and natively; `test.sh` passes all 172 checks.
+- Chapter 4 builds freestanding to wasm and natively; `test.sh` passes all 174 checks.
 - The sim state-hash after the scripted run equals chapter 3's golden `0x5786043F`.
 - The first pass renders from primitives only (the unit cube); the second pass swaps in
   baked low-poly meshes via the kind→mesh table; neither pass touches the sim.

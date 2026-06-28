@@ -23,6 +23,14 @@ the *town* it becomes is known too, and it is baked **once** — never re-derive
   autotiled road**, **a wide-open interior → grass**, **a nest → a landmark** (tinted in
   that nest's hue) — and packs **one instance per cell**, grouped by `(screen, mesh)` into
   a small run table.
+- **Road connectivity** (`compute_road_map`): a building cluster stranded in the grass
+  would otherwise bake a *closed ring* of road that touches no street — a **"traffic
+  island"** you can't drive off. So before classifying, the bake lays the base ring down,
+  labels the road's connected components, and **bridges every isolated ring to the main
+  network** by carving the shortest **grass corridor** to it (never through a building — the
+  sim has a wall there). The few road pockets sealed *inside* a block (no grass to bridge
+  through) are dropped back to grass, so **every road cell ends up in one connected network**.
+  Still render-only and baked once: the sim never sees a road, a ring, or a bridge.
 - `app.js` uploads that instance buffer **once** and, per frame, only **frustum-culls the
   screen buckets** and draws the visible runs — no re-emit, no re-classification. (The one
   exception is cosmetic: a building **struck by a bolt** buzzes for a few ticks, so the host
