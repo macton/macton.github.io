@@ -835,7 +835,11 @@ async function main() {
     const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1], p95 = s[Math.floor(0.95 * s.length)]; arWin = []; arSince++;
     // trim on a high median OR a high p95 (frequent SPIKES — the jitter case the median hides)
     if ((med > AR_BUDGET || p95 > AR_P95) && renderScale > AR_MIN) { renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arSince = 0; }
-    else if (arSince >= AR_PROBE && renderScale < 1) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); arSince = 0; }
+    // probe back up only with REAL headroom. Fill cost can jump sharply near native res (a bandwidth
+    // cliff), so a bare "under budget" probe kept climbing into the cliff and trimming back — a
+    // periodic spike that read as stutter. Requiring slack means we hold a stable scale at a loaded
+    // view and only recover resolution when the scene genuinely got cheaper (e.g. zoomed out).
+    else if (arSince >= AR_PROBE && renderScale < 1 && med < AR_BUDGET * 0.72 && p95 < AR_BUDGET) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); arSince = 0; }
   }
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, 2) * renderScale;
@@ -863,7 +867,10 @@ async function main() {
   // the screen-space contact shadow is marched inline (0) or rendered to a buffer + bilateral-
   // blurred (1). Default = Poisson PCF + blurred SSS (the smoothest, chosen on-device). PCF radius
   // in shadow texels. The other modes stay live behind the render-profile controls for A/B.
-  let townShadowMode = 1, sssBlur = 1; const PCF_RADIUS = 2.5;
+  // SSS (screen-space contact shadow + bilateral blur, 3 full-screen passes) measured ~9ms on an
+  // Apple phone — a quarter of the frame for a subtle refinement — so it's OFF by default now; the
+  // shq_sss toggle restores it. The town shadow map (Poisson PCF) carries the main shadows.
+  let townShadowMode = 1, sssBlur = 0; const PCF_RADIUS = 2.5;
 
   // GPU timing via timestamp-query (when supported): one write at the start + end of each pass.
   const GP = ["geom", "light", "plight", "fx", "tone", "sss"];   // the per-pass slots
@@ -1345,7 +1352,7 @@ async function main() {
   // --- frame loop ---------------------------------------------------------
   let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
   const camLabelEl = document.getElementById("camlabel");   // cached: was a getElementById per frame
-  const BARE_VIEW = true;   // TEMP: stutter debugging — only the 3D view + diagnostics run (see index.html hide rule)
+  const BARE_VIEW = false;   // (was a stutter-debug switch; page work is gated by visibility, proven not the cause)
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
   // snapshot the pre-tick positions FIRST (the "previous" frame for render interpolation),
