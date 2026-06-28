@@ -159,6 +159,9 @@
 </style>
 </head>
 <body>
+  <!-- TEMP (stutter debugging): strip the page to just the 3D view + diagnostics. Remove this
+       block and set BARE_VIEW=false in app.js to restore the full page. -->
+  <style>header, #status, #help, article { display: none !important; }</style>
   <div id="version">v…</div>
   <header>
     <div class="crumb"><a href="../">Data-Oriented Design, by picture</a> · Chapter 4</div>
@@ -485,11 +488,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.28-082006"></script>
+  <script src="version.js?v=2026.06.28-083554"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.28-082006");</script>
+  <script type="module">import("./app.js?v=2026.06.28-083554");</script>
 </body>
 </html>

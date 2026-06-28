@@ -1338,6 +1338,7 @@ async function main() {
   // --- frame loop ---------------------------------------------------------
   let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
   const camLabelEl = document.getElementById("camlabel");   // cached: was a getElementById per frame
+  const BARE_VIEW = true;   // TEMP: stutter debugging — only the 3D view + diagnostics run (see index.html hide rule)
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
   // snapshot the pre-tick positions FIRST (the "previous" frame for render interpolation),
@@ -1570,12 +1571,17 @@ async function main() {
     // nothing; when you scroll to look at them they update live per-frame (you're not panning then).
     // THROTTLING this instead just concentrated the cost into a periodic spike (worse p95), so we
     // run per-frame and rely on the visibility gates. camlabel/camUI stay (the toolbar's always up).
-    const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
-    articleMap.update(camIdx);
-    if (pickerOpen) pickerMap.update(camIdx);
-    camLabelEl.textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
-    updateCamUI();
-    dbg.update({ fps, dt, updMs, instCount: n, cam });
+    // TEMP (stutter debugging): BARE_VIEW skips ALL per-frame page work except the diagnostics
+    // panel, so only the WebGPU render + the prof readout run. Pair with the index.html rule that
+    // hides everything but the view + diagnostics. Set back to false (or delete) to restore.
+    if (!BARE_VIEW) {
+      const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
+      articleMap.update(camIdx);
+      if (pickerOpen) pickerMap.update(camIdx);
+      camLabelEl.textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
+      updateCamUI();
+      dbg.update({ fps, dt, updMs, instCount: n, cam });
+    }
     if (profEl) {
       if (diag.active) profEl.textContent = `diagnostics… ${diag.ci + 1}/${DIAG_CONFIGS.length}  "${DIAG_CONFIGS[diag.ci].k}"  (${diag.phase === "warm" ? "settling" : diag.coll.length + "/" + DIAG_N})`;
       else if (followDiag.active) profEl.textContent = `follow diag… leg ${followDiag.leg + 1}/${followDiag.wps.length} → cell ${followDiag.wps[followDiag.leg].wcx},${followDiag.wps[followDiag.leg].wcy}  (${followDiag.legSamp.length} frames)`;
