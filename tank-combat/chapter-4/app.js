@@ -22,10 +22,10 @@ const TICK_DT = 1 / 60;
 // axis, then projects it with the mvp — clip.z/w is the real depth written to the
 // z-buffer; the opaque pass flat-shades by the face normal, the translucent pass blends.
 const WGSL = `
-struct View { mvp: mat4x4f };                                  // the model-view-projection (subcells -> clip)
+struct View { mvp: mat4x4f, invMvp: mat4x4f };                 // subcells -> clip, and its inverse (clip -> subcells, for depth->world)
 @group(0) @binding(0) var<uniform> view: View;
 struct VOut { @builtin(position) pos: vec4f, @location(0) col: vec4f, @location(1) nrm: vec3f, @location(2) world: vec3f };
-struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f, @location(2) position: vec4f };   // G-buffer: albedo+mask, normal, world position
+struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f };   // G-buffer: albedo+mask, normal (world position is reconstructed from depth)
 
 @vertex fn vs(
     @location(0) mpos: vec4f, @location(1) mnrm: vec4f,        // baked mesh: pos + normal in [-1,1]
@@ -68,7 +68,6 @@ struct GOut { @location(0) color: vec4f, @location(1) normal: vec4f, @location(2
   var o: GOut;
   o.color    = vec4f(i.col.rgb, 1.0);
   o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
-  o.position = vec4f(i.world, 1.0);                            // world position (subcells), for the point lights
   return o;
 }
 @fragment fn fs_flat(i: VOut) -> @location(0) vec4f { return i.col; }  // forward FX, blended into the lit HDR
@@ -104,7 +103,6 @@ struct VOutI { @builtin(position) pos: vec4f, @location(0) mcol: vec4f, @locatio
   var o: GOut;
   o.color    = vec4f(base * i.tint.rgb, 1.0);                    // baked albedo x instance tint (nest hue / white)
   o.normal   = vec4f(normalize(i.nrm) * 0.5 + 0.5, 1.0);
-  o.position = vec4f(i.world, 1.0);
   return o;
 }
 
@@ -115,7 +113,16 @@ struct VOutI { @builtin(position) pos: vec4f, @location(0) mcol: vec4f, @locatio
 // for the pixels it actually covers — a thousand of them stay cheap.
 @group(0) @binding(1) var gColorTex: texture_2d<f32>;
 @group(0) @binding(2) var gNormalTex: texture_2d<f32>;
-@group(0) @binding(3) var gPosTex: texture_2d<f32>;
+@group(0) @binding(3) var depthTex: texture_depth_2d;
+// reconstruct world position (subcells) from the depth buffer + the inverse MVP (no fat G-buffer
+// position target). uv -> ndc (y flipped for the framebuffer) -> invMvp -> perspective divide.
+fn recon(p: vec2<i32>) -> vec3f {
+  let d = textureLoad(depthTex, p, 0);
+  let res = vec2f(textureDimensions(depthTex));
+  let uv = (vec2f(p) + vec2f(0.5)) / res;
+  let wh = view.invMvp * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
+  return wh.xyz / wh.w;
+}
 struct LVOut {
   @builtin(position) pos: vec4f,
   @location(0) @interpolate(flat) center: vec3f,    // light centre (world)
@@ -140,7 +147,7 @@ struct LVOut {
   let p = vec2<i32>(i32(i.pos.x), i32(i.pos.y));
   let alb = textureLoad(gColorTex, p, 0);
   if (alb.a < 0.5) { discard; }                               // sky: nothing to light
-  let surf = textureLoad(gPosTex, p, 0).xyz;
+  let surf = recon(p);
   let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
   let toL = i.center - surf;
   let dist = length(toL);
@@ -164,11 +171,12 @@ struct Env {
   mvp: mat4x4f,                                           // world (subcells) -> clip, to project the shadow ray to screen
   lightMvp: mat4x4f,                                      // world (subcells) -> SUN light clip, to sample the baked shadow map
   shq: vec4f,                                             // shadow quality: x=town map mode(0 PCF2x2,1 Poisson PCF,2 revectorised), y=SSS blur(0 inline,1 buffer+bilateral), z=PCF texel radius, w=shadow-map texel size
+  invMvp: mat4x4f,                                        // clip -> world (subcells), to reconstruct position from depth
 };
 @group(0) @binding(0) var<uniform> env: Env;
 @group(0) @binding(1) var gColorTex: texture_2d<f32>;
 @group(0) @binding(2) var gNormalTex: texture_2d<f32>;
-@group(0) @binding(3) var gPosTex: texture_2d<f32>;
+@group(0) @binding(3) var depthTex: texture_depth_2d;        // the scene depth — world position is reconstructed from it
 @group(0) @binding(4) var hdrTex: texture_2d<f32>;
 @group(0) @binding(5) var shadowMap: texture_depth_2d;        // the baked sun depth map (static town)
 @group(0) @binding(6) var shadowSamp: sampler_comparison;     // hardware PCF compare
@@ -185,6 +193,15 @@ struct Env {
 // (Bend's contribution is the wavefront SCHEDULING that shares depth reads; the test is this.)
 // Medium-range + many small steps gives a clean HARD grounding shadow; no dither (an undenoised
 // jitter just reads as grain, and a long march only smears a tall occluder's truncated silhouette).
+// reconstruct world position (subcells) from the depth buffer + the inverse MVP — replaces the
+// fat rgba32f world-position G-buffer target. uv -> ndc (y flipped) -> invMvp -> perspective divide.
+fn recon(p: vec2<i32>) -> vec3f {
+  let d = textureLoad(depthTex, p, 0);
+  let res = vec2f(textureDimensions(depthTex));
+  let uv = (vec2f(p) + vec2f(0.5)) / res;
+  let wh = env.invMvp * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);
+  return wh.xyz / wh.w;
+}
 fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
   let steps = i32(env.shp.y);
   let stepv = normalize(env.sun.xyz) * (env.shp.x / env.shp.y);          // one ray step (subcells)
@@ -198,7 +215,7 @@ fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { break; }   // marched off-screen
     let px = vec2<i32>(i32(uv.x * res.x), i32(uv.y * res.y));
     if (textureLoad(gColorTex, px, 0).a < 0.5) { continue; }               // sky there — no occluder
-    let occ = textureLoad(gPosTex, px, 0).xyz;
+    let occ = recon(px);
     let delta = length(rp - env.eye.xyz) - length(occ - env.eye.xyz);     // >0: the stored surface is in front of the ray
     if (delta > env.shp.w && delta < env.shp.z) { return 0.0; }            // blocked within the thickness window
   }
@@ -263,7 +280,7 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let p = vec2<i32>(i32(fc.x), i32(fc.y));
   let alb = textureLoad(gColorTex, p, 0);
   if (alb.a < 0.5) { return vec4f(env.sky.rgb, 1.0); }
-  let pos = textureLoad(gPosTex, p, 0).xyz;
+  let pos = recon(p);
   let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
@@ -281,7 +298,7 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
 @fragment fn fs_sss(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let p = vec2<i32>(i32(fc.x), i32(fc.y));
   if (textureLoad(gColorTex, p, 0).a < 0.5) { return vec4f(1.0); }   // sky: lit
-  let pos = textureLoad(gPosTex, p, 0).xyz;
+  let pos = recon(p);
   let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
   return vec4f(sun_shadow(pos, n), 0.0, 0.0, 1.0);
 }
@@ -289,13 +306,13 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
 // the shadow softens but doesn't bleed across silhouettes / depth discontinuities.
 fn sss_blur(p: vec2<i32>, dir: vec2<i32>) -> f32 {
   let res = vec2<i32>(textureDimensions(sssInTex));
-  let cz = length(textureLoad(gPosTex, p, 0).xyz - env.eye.xyz);
+  let cz = length(recon(p) - env.eye.xyz);
   var sum = textureLoad(sssInTex, p, 0).r; var wsum = 1.0;
   for (var i = 1; i <= 5; i = i + 1) {
     let w0 = exp(-f32(i * i) * 0.12);
     for (var s = -1; s <= 1; s = s + 2) {
       let q = clamp(p + dir * (i * s), vec2<i32>(0, 0), res - vec2<i32>(1, 1));
-      let qz = length(textureLoad(gPosTex, q, 0).xyz - env.eye.xyz);
+      let qz = length(recon(q) - env.eye.xyz);
       let we = w0 * exp(-abs(qz - cz) * 0.02);
       sum = sum + textureLoad(sssInTex, q, 0).r * we; wsum = wsum + we;
     }
@@ -467,7 +484,7 @@ async function main() {
   }).catch((e) => console.warn("town_atlas.png load failed:", e));
 
   const instBuf = device.createBuffer({ size: C.MAX_INST * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-  const viewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const viewBuf = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });   // mvp + invMvp
 
   // the STATIC TOWN instance buffer: the bake (one Inst per cell, build_static_map),
   // uploaded ONCE and re-uploaded only when the map re-bakes. Same 24-byte Inst layout as
@@ -560,12 +577,12 @@ async function main() {
   // lighting is then a screen pass that reads the G-buffer. That is what makes per-mite /
   // per-FX point lights affordable later: their cost is the lit pixels they cover, not the
   // object count times the light count. For now the screen pass is just the environment.
-  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", GBUF_POS = "rgba32float", HDR = "rgba16float", DEPTH = "depth24plus";
+  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", HDR = "rgba16float", DEPTH = "depth32float";   // depth32float so the lighting can sample it + reconstruct world position
 
   // GEOMETRY: fill the G-buffer (albedo, normal, world position) + depth. No lighting here.
   const geometryPipe = device.createRenderPipeline({ layout,
     vertex: { module, entryPoint: "vs", buffers: vbuffers },
-    fragment: { module, entryPoint: "fs_gbuffer", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }, { format: GBUF_POS }] },
+    fragment: { module, entryPoint: "fs_gbuffer", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }] },
     primitive: { topology: "triangle-list", cullMode: "none" },
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: "less" } });
   // IMPOSTER (LOD1): same G-buffer write, but a 16-byte vertex (adds a UV) and an extra bind group
@@ -582,7 +599,7 @@ async function main() {
     { binding: 0, resource: atlasTex.createView() }, { binding: 1, resource: atlasSampler } ] });
   const imposterPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [bgl, atlasBGL] }),
     vertex: { module, entryPoint: "vs_imp", buffers: vbuffersImp },
-    fragment: { module, entryPoint: "fs_imp", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }, { format: GBUF_POS }] },
+    fragment: { module, entryPoint: "fs_imp", targets: [{ format: GBUF_COLOR }, { format: GBUF_NORMAL }] },
     primitive: { topology: "triangle-list", cullMode: "none" },
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: "less" } });
   // FORWARD FX: the translucent pass, now blended into the lit HDR, depth-tested against the
@@ -615,7 +632,7 @@ async function main() {
   let lightMVP = null;   // world (subcells) -> sun light clip; recomputed on re-bake (sun + world are otherwise fixed)
   // 224 bytes: the STATIC sun + ambient + shadow params (0..80); the per-frame eye + camera MVP
   // appended by viewWrite (80..160); the STATIC sun light MVP written by syncStatic (160..224).
-  const envBuf = device.createBuffer({ size: 240, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const envBuf = device.createBuffer({ size: 304, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   function writeEnv() {
     const s = norm3(env.sunDir);
     device.queue.writeBuffer(envBuf, 0, new Float32Array([
@@ -653,7 +670,7 @@ async function main() {
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
     { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },   // gPosition (for the shadow march)
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },                // scene depth (reconstruct world pos)
     { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },                // the baked sun depth map
     { binding: 6, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } },                 // PCF compare sampler
     { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // the pre-blurred SSS buffer
@@ -667,10 +684,10 @@ async function main() {
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
     { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } } ] });           // scene depth (reconstruct world pos)
   const blurBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },   // gPosition (bilateral depth weight)
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },                // scene depth (bilateral weight)
     { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // the SSS axis input
   const sssPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [sssBGL] }),
     vertex: { module: screenModule, entryPoint: "vs_full" }, fragment: { module: screenModule, entryPoint: "fs_sss", targets: [{ format: SSS_FMT }] },
@@ -694,10 +711,10 @@ async function main() {
   // the pixels to light; the fragment reads the G-buffer there. The vs needs the view uniform,
   // the fs reads the three G-buffer textures — one bind group across both.
   const lightVolBGL = device.createBindGroupLayout({ entries: [
-    { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+    { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },   // vs: mvp; fs: invMvp (recon)
     { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
     { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
-    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } } ] });           // scene depth (reconstruct world pos)
   const lightVolPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [lightVolBGL] }),
     vertex: { module, entryPoint: "vs_light", buffers: vbuffers },
     fragment: { module, entryPoint: "fs_lightvol", targets: [{ format: HDR, blend: {
@@ -715,7 +732,7 @@ async function main() {
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
   const shadowView = shadowTex.createView();
   const shadowSampler = device.createSampler({ compare: "less", magFilter: "linear", minFilter: "linear" });   // 2x2 hardware PCF
-  const lightViewBuf = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const lightViewBuf = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });   // View struct is mvp+invMvp now; vs_shadow only reads mvp
   const shadowBind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: lightViewBuf } }] });
   const shadowPipe = device.createRenderPipeline({ layout,
     vertex: { module, entryPoint: "vs_shadow", buffers: vbuffers },
@@ -744,39 +761,39 @@ async function main() {
 
   // the viewport-sized targets (G-buffer + HDR + depth), rebuilt on resize; the screen-pass and
   // light-volume bind groups reference them, so they rebuild together.
-  let gColorTex = null, gNormalTex = null, gPosTex = null, hdrTex = null, depthTex = null, lightBind = null, lightVolBind = null, tonemapBind = null;
+  let gColorTex = null, gNormalTex = null, hdrTex = null, depthTex = null, lightBind = null, lightVolBind = null, tonemapBind = null;
   let sssTexA = null, sssTexB = null, sssBind = null, blurHBind = null, blurVBind = null;
   function ensureTargets() {
     if (gColorTex && gColorTex.width === canvas.width && gColorTex.height === canvas.height) return;
-    for (const t of [gColorTex, gNormalTex, gPosTex, hdrTex, depthTex, sssTexA, sssTexB]) if (t) t.destroy();
+    for (const t of [gColorTex, gNormalTex, hdrTex, depthTex, sssTexA, sssTexB]) if (t) t.destroy();
     const size = [canvas.width, canvas.height], RA = GPUTextureUsage.RENDER_ATTACHMENT, TB = GPUTextureUsage.TEXTURE_BINDING;
     gColorTex  = device.createTexture({ size, format: GBUF_COLOR,  usage: RA | TB });
     gNormalTex = device.createTexture({ size, format: GBUF_NORMAL, usage: RA | TB });
-    gPosTex    = device.createTexture({ size, format: GBUF_POS,    usage: RA | TB });
     hdrTex     = device.createTexture({ size, format: HDR,         usage: RA | TB });
-    depthTex   = device.createTexture({ size, format: DEPTH,       usage: RA });
+    depthTex   = device.createTexture({ size, format: DEPTH,       usage: RA | TB });   // sampled by the lighting/SSS passes to reconstruct world pos
     sssTexA    = device.createTexture({ size, format: SSS_FMT,     usage: RA | TB });   // SSS march -> blurV out -> lighting in
     sssTexB    = device.createTexture({ size, format: SSS_FMT,     usage: RA | TB });   // blurH out (ping-pong)
+    const depthView = depthTex.createView();
     lightBind = device.createBindGroup({ layout: lightBGL, entries: [
       { binding: 0, resource: { buffer: envBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() },
-      { binding: 3, resource: gPosTex.createView() },
+      { binding: 3, resource: depthView },
       { binding: 5, resource: shadowView },                  // the baked sun depth map (static)
       { binding: 6, resource: shadowSampler },
       { binding: 7, resource: sssTexA.createView() } ] });   // the pre-blurred SSS (final = sssTexA)
     sssBind = device.createBindGroup({ layout: sssBGL, entries: [
       { binding: 0, resource: { buffer: envBuf } }, { binding: 1, resource: gColorTex.createView() },
-      { binding: 2, resource: gNormalTex.createView() }, { binding: 3, resource: gPosTex.createView() } ] });
+      { binding: 2, resource: gNormalTex.createView() }, { binding: 3, resource: depthView } ] });
     blurHBind = device.createBindGroup({ layout: blurBGL, entries: [   // reads sssTexA -> writes sssTexB
-      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: gPosTex.createView() }, { binding: 8, resource: sssTexA.createView() } ] });
+      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: depthView }, { binding: 8, resource: sssTexA.createView() } ] });
     blurVBind = device.createBindGroup({ layout: blurBGL, entries: [   // reads sssTexB -> writes sssTexA
-      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: gPosTex.createView() }, { binding: 8, resource: sssTexB.createView() } ] });
+      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: depthView }, { binding: 8, resource: sssTexB.createView() } ] });
     lightVolBind = device.createBindGroup({ layout: lightVolBGL, entries: [
       { binding: 0, resource: { buffer: viewBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() },
-      { binding: 3, resource: gPosTex.createView() } ] });
+      { binding: 3, resource: depthView } ] });
     tonemapBind = device.createBindGroup({ layout: tonemapBGL, entries: [{ binding: 4, resource: hdrTex.createView() }] });
   }
   // internal render scale (presentation-only): the deferred passes (lighting, point lights, FX,
@@ -988,10 +1005,12 @@ async function main() {
     const mvp = m4mul(flipX, m4mul(m4mul(proj, view), m4scale(1 / C.SUB)));   // subcells -> clip
     invMVP = m4invert(mvp);
     device.queue.writeBuffer(viewBuf, 0, new Float32Array(mvp));
+    device.queue.writeBuffer(viewBuf, 64, new Float32Array(invMVP));   // for fs_lightvol's depth->world reconstruction
     camEye = [eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB];   // subcells — for the shadow march + the LOD distance
     // append the per-frame camera (eye in subcells) + MVP for the screen-space shadow march
     device.queue.writeBuffer(envBuf, 80, new Float32Array([ ...camEye, SHADOW_NBIAS, ...mvp ]));   // eye.w = shadow-map normal-offset bias
     device.queue.writeBuffer(envBuf, 224, new Float32Array([ townShadowMode, sssBlur, PCF_RADIUS, 1 / SHADOW_RES ]));   // shq: shadow-quality modes
+    device.queue.writeBuffer(envBuf, 240, new Float32Array(invMVP));   // clip -> world, for the screen passes' depth->world reconstruction
   }
   // The LOD distance: at MAX zoom + 56-degree pitch, EVERYTHING visible is highest detail (the
   // user's reference), so the LOD0/LOD1 split is the eye-to-farthest-visible-ground distance of
@@ -1289,12 +1308,12 @@ async function main() {
     const enc = device.createCommandEncoder();
     let dStaticRuns = 0, dTreeRuns = 0, dTrees = 0;   // draw counts, for the profiler
 
-    // 1) GEOMETRY -> the G-buffer (albedo + world normal + world position) + depth. Drawn once.
+    // 1) GEOMETRY -> the G-buffer (albedo + world normal) + depth. Drawn once. World position is
+    // reconstructed from depth in the lighting passes, so there's no fat rgba32f position target.
     const gpass = enc.beginRenderPass({
       colorAttachments: [
         { view: gColorTex.createView(),  clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
-        { view: gNormalTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
-        { view: gPosTex.createView(),    clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
+        { view: gNormalTex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" } ],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1.0, depthLoadOp: "clear", depthStoreOp: "store" },
       timestampWrites: tw("geom") });
     gpass.setBindGroup(0, bind); gpass.setVertexBuffer(0, meshBuf); gpass.setPipeline(geometryPipe);

@@ -103,6 +103,13 @@ silhouette AA, after Macedo et al., CGF 2019) and a screen-space contact-shadow 
 to a buffer and separably bilateral-blurs it. The default is **rotated-Poisson PCF + blurred SSS**
 (the smoothest, chosen on-device); the rest stay live behind the controls for A/B.
 
+The deferred passes are full-screen and fill/bandwidth-bound (the diagnostics showed the close-up
+drop is resolution-bound, not geometry), so two perf levers ship with them: **adaptive resolution**
+(trim the internal render scale to hold ~60fps, probe back up when there's slack — an "auto-res"
+toggle, the live scale shown in the panel) and a **depth-reconstructed G-buffer** — world position
+is rebuilt from the depth buffer via the inverse MVP instead of a fat `rgba32f` position target, so
+the geometry writes one fewer 16-byte channel and every full-screen pass reads less.
+
 ### The connected world & the instance layout (`render.h`)
 
 The whole **8×8 world is one connected map**: placements are world positions (anchor =
