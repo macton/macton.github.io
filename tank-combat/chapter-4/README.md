@@ -97,10 +97,11 @@ obstacle. Same bake-once / scales-with-visibility discipline as the town.
 A **render-profile** panel (presentation-only) sits under the view: CPU section timing, per-pass
 GPU time via `timestamp-query` where the platform exposes it, draw counts, live **layer toggles**
 (town / trees / point lights), and a **run-diagnostics** sweep that A/B's each layer and the
-internal render scale by real frame time and copies a text report. Alongside it are **opt-in
-shadow-quality** experiments (default = the original look): the town shadow-map filter
-(2×2 PCF → rotated-Poisson PCF → revectorised silhouette AA, after Macedo et al., CGF 2019) and a
-screen-space contact-shadow path that renders to a buffer and separably bilateral-blurs it.
+internal render scale by real frame time and copies a text report. Alongside it are switchable
+**shadow-quality** modes: the town shadow-map filter (2×2 PCF → rotated-Poisson PCF → revectorised
+silhouette AA, after Macedo et al., CGF 2019) and a screen-space contact-shadow path that renders
+to a buffer and separably bilateral-blurs it. The default is **rotated-Poisson PCF + blurred SSS**
+(the smoothest, chosen on-device); the rest stay live behind the controls for A/B.
 
 ### The connected world & the instance layout (`render.h`)
 

@@ -802,10 +802,11 @@ async function main() {
   // render-profiling: live A/B toggles for the heavy layers (watch the frame time move on the
   // actual device — the surest way to attribute GPU cost where timestamp-query isn't available).
   let drawTown = true, drawTrees = true, drawLights = true;
-  // shadow quality (opt-in; default reproduces the original look): town map filter mode
-  // (0=2x2 PCF, 1=Poisson PCF, 2=revectorised) and whether the screen-space contact shadow is
-  // marched inline (0) or rendered to a buffer + bilateral-blurred (1). PCF radius in shadow texels.
-  let townShadowMode = 0, sssBlur = 0; const PCF_RADIUS = 2.5;
+  // shadow quality: town map filter mode (0=2x2 PCF, 1=Poisson PCF, 2=revectorised) and whether
+  // the screen-space contact shadow is marched inline (0) or rendered to a buffer + bilateral-
+  // blurred (1). Default = Poisson PCF + blurred SSS (the smoothest, chosen on-device). PCF radius
+  // in shadow texels. The other modes stay live behind the render-profile controls for A/B.
+  let townShadowMode = 1, sssBlur = 1; const PCF_RADIUS = 2.5;
 
   // GPU timing via timestamp-query (when supported): one write at the start + end of each pass.
   const GP = ["geom", "light", "plight", "fx", "tone", "sss"];   // the per-pass slots
@@ -844,11 +845,12 @@ async function main() {
     // median jumps past ~17ms tells us how much GPU margin this view has under the vsync cap.
     { k: "1.5x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 1.5 },
     { k: "2.0x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 2.0 },
-    // shadow-quality A/B (all layers, 1.0x): town-map filter mode + the SSS buffer/blur
-    { k: "town shadow: Poisson",     town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 1 },
-    { k: "town shadow: revect",      town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2 },
-    { k: "SSS blur on",              town: 1, trees: 1, lights: 1, scale: 1.0, sss: 1 },
-    { k: "shadow hi (revect+SSS)",   town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2, sss: 1 },
+    // shadow-quality A/B (all layers, 1.0x): town-map filter mode + the SSS buffer/blur, each
+    // pinned explicitly so the rows compare regardless of the live default (Poisson + SSS).
+    { k: "shadow: PCF 2x2, no SSS",  town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 0, sss: 0 },
+    { k: "shadow: Poisson, no SSS",  town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 1, sss: 0 },
+    { k: "shadow: revect, no SSS",   town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2, sss: 0 },
+    { k: "shadow: Poisson + SSS",    town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 1, sss: 1 },
   ];
   const diag = {
     active: false, done: false, ci: 0, phase: "warm", warm: 0, coll: [], results: [],
