@@ -1,330 +1,359 @@
-# Prompt — Create Chapter 4: The View (isometric 3D)
+# Prompt — Create Chapter 4: The View (top-down perspective 3D)
 
 You are building **chapter 4** of the interactive book that teaches *data-oriented
 design* by growing one small game, one feature at a time. Chapter 1 is a two-tank
-Atari-*Combat* game; chapter 2 grew the world to a 4×4 toroidal grid of screens with
-self-pathing tanks; chapter 3 added an enemy faction — a thousand gossiping **mites**
-that swarm the tanks, with combat. Chapter 4 changes **nothing about the
-simulation** and **everything about the picture**: the same world, the same tanks,
-the same thousand mites, redrawn as an **isometric 3D** scene.
+Atari-*Combat* game; chapter 2 grew the world to an **8×8 toroidal grid of screens**
+(`160×120 = 19,200` cells) with self-pathing tanks; chapter 3 added an enemy faction —
+a thousand gossiping **mites** that swarm the tanks, with combat. Chapter 4 changes
+**nothing about the simulation** and **everything about the picture**: the same world,
+the same tanks, the same swarm, redrawn as a **top-down perspective 3-D town** — a
+deferred-lit, shadowed, LOD'd city baked from the frozen map.
 
 Each chapter is a self-contained web page: the running game on top, a written
-walk-through below, and the game's live data shown and editable *in the context of
-the text*.
+walk-through below, and the game's live data shown and editable *in the context of the
+text*.
+
+> **This prompt describes the chapter as it was actually built** — a recreate-the-work
+> spec, not the original sketch. The view is **top-down perspective** (an orbiting,
+> tilting camera), not fixed isometric; lighting is a **deferred** pass with point
+> lights and shadows, not flat face-shading; the world is a **static baked town** from
+> Kenney CC0 kits, not per-cell primitive blocks. Build it incrementally (a legible
+> primitive pass first), but the target is the full town below.
 
 ## The lesson — the render is a projection; the simulation does not know it is drawn
 
-Chapters 1–3 earned the payoff this chapter spends: a strict **sim / render / wasm
-split with a one-way dependency** (render reads the sim; the sim never reads the
-render). Chapter 4 is the proof. We replace the top-down 2D view with a full
-**isometric 3D** view — new projection, depth, shading, camera, and art — and we do
-it **without editing a single line of the simulation**. `sim.c`, `mites.c`,
-`tanks_fire.c`, `tanks_path.c`, `agent_turn`/`agent_move`, the per-cell index, the
-gossip, the route fields, the RNG — all **byte-for-byte identical to chapter 3**. The
-only things that change are the **render half** (`render.c`, the WGSL shader, the view
-uniform, `app.js`) and a folder of **art assets**.
+Chapters 1–3 earned the payoff this chapter spends: a strict **sim / render / wasm split
+with a one-way dependency** (render reads the sim; the sim never reads the render).
+Chapter 4 is the proof. We replace the top-down 2-D view with a full **top-down
+perspective 3-D** view — new projection, depth, deferred shading, lights, shadows, a
+camera, LOD, and art — and we do it **without editing a single line of the
+simulation**. `sim.c`, `mites.c`, `tanks_path.c`, `agent_turn`/`agent_move`, the
+per-cell index, the gossip, the route fields, the RNG — all **byte-for-byte identical
+to chapter 3** (the only diverged "sim" file is `tanks_fire.c`, and only because the
+laser became a travelling **bolt** — a model change carried over deliberately, with its
+own golden hash). The things that change are the **render half** (`render.c`, the WGSL,
+the view uniform, `app.js`, the static-map bake) and a folder of **baked art**.
 
 That is the whole point, stated as a falsifiable claim and pinned by a test: *for the
 same seed and the same inputs, chapter 4 produces the identical sim state-hash as
-chapter 3, tick for tick.* If the hash diverges, presentation leaked into the model
-and the chapter has failed its own thesis. The DOD rules this chapter exercises are
-**one-way dependency**, **presentation-only data stays out of the sim**, **match the
-work to the frequency of change** (the geometry of the world changes on a wall edit —
-rare; the projection runs every frame — constant; the assets load once), and **render
-scales with what is visible, not with the population**.
+chapter 3 (modulo the bolt change, which has its own golden hash), tick for tick.* If
+the hash diverges unexpectedly, presentation leaked into the model and the chapter has
+failed its thesis. The DOD rules this chapter exercises: **one-way dependency**,
+**presentation-only data stays out of `World`**, **match the work to the frequency of
+change** (the town is baked once and re-baked only on a wall/nest edit — rare; the
+projection runs every frame — constant; the art loads once), and **render scales with
+what is visible, not with the population**.
 
-A second, smaller lesson rides along: assets are **late-bound data**. We ship a first
-pass with **zero external art** — the scene is legible from procedural primitives
-alone — then swap in real low-poly models in a second pass that touches only the
-asset table and the kind→mesh binding. The picture is data you replace; the pipeline
-that draws it does not move.
+A second lesson rides along: the world's geometry is **a projection of the map, too**.
+The map is *static and totally known* (which cells are walls, where the nests sit), so
+the **town it becomes is known too** — and it is baked **once** into a GPU instance
+buffer, never re-derived per frame. The sim never learns it became a town; the town is
+a *projection* of the sim's walls and nests, the same bake-it-once discipline as the
+escape table.
 
 ## Starting point — copy chapter 3 verbatim, then freeze the sim
 
 1. Copy `tank-combat/chapter-3/` to `tank-combat/chapter-4/` verbatim and get it
-   building/running first (`build.sh`, `test.sh`) before changing anything. Chapter 4
-   is an *increment* on chapter 3, not a rewrite.
-2. **Freeze the simulation.** The sim sources — everything under `src/` that is not
-   `render.c`/`render.h`/`wasm.c`'s render exports, plus `app.js`'s draw path — are
-   **closed for edits** in this chapter. Treat any need to touch them as a design
-   smell to escalate, not a license to refactor. The chapter-3 native sim/gossip/cap/
-   combat/determinism tests must keep passing **unchanged** (same checks, same
-   counts). Add a regression that the **state-hash after K ticks equals chapter 3's**
-   for a fixed seed + scripted inputs — copy chapter 3's hash into the test as the
-   golden value. This is the chapter's contract.
-3. **Strip and rewrite the page's article text** for the new concepts (the projection,
-   depth, shading, the asset pipeline), keeping the page *structure*: the canvas, the
-   controls, the follow camera + screen picker, the **top-down minimap** (keep it
-   top-down — see below), the live debug-widget anchors, the version badge, the
-   styling.
-4. Add a chapter-4 entry to the book's table of contents (`tank-combat/index.html`)
-   and give chapter 4 its own `README.md` and `CONTRACT.md`.
+   building/running first (`build.sh`, `test.sh`) before changing anything. Chapter 4 is
+   an *increment*, not a rewrite.
+2. **Freeze the simulation.** Everything under `src/` that is not `render.{c,h}`,
+   `staticmap.{c,h}`, `wasm.c`'s render exports, the mesh/map data, plus `app.js`'s draw
+   path, is **closed for edits**. The chapter-3 native sim/gossip/cap/combat/determinism
+   tests must keep passing **unchanged**. Add a regression that the **state-hash after K
+   ticks equals chapter 3's golden value** for a fixed seed + scripted inputs. (When you
+   later change the laser to a bolt, that touches `tanks_fire.c` and re-stamps a new
+   golden hash — the *only* sanctioned sim divergence; everything else stays equal.)
+3. **Rewrite the page's article** for the new concepts (the projection, depth, the
+   deferred renderer, lights, shadows, the static town, LOD, the asset pipeline), keeping
+   the page *structure*: the canvas, the camera toolbar (follow buttons + free + screen
+   picker), the **top-down minimap** (keep it top-down), the live debug widgets, the
+   version badge, the styling.
+4. Add/keep the chapter-4 entry in the book TOC (`tank-combat/index.html`) and give
+   chapter 4 its own `README.md`, `CONTRACT.md`, `ASSETS.md`, and `screen-capture.md`
+   (how to render/capture the WebGPU page headlessly — see that file; do not relearn it).
 
-## What chapter 4 adds — an isometric 3D renderer over the same data
+## What chapter 4 adds — a top-down perspective 3-D renderer over the same data
 
-Everything below lives in the **render half**. None of it is allowed to feed back into
-the sim.
+Everything below lives in the **render half**. None of it feeds back into the sim.
 
-### The projection — dimetric 2:1, computed in the shader
+### The projection — a real perspective MVP camera, in a host uniform
 
-The world is the chapter-2/3 `BIG_W × BIG_H` toroidal grid of cells in subcell units
-(`SUB` per cell). Chapter 3's renderer placed each instance at a 2D screen position and
-drew an axis-aligned quad. Chapter 4 keeps the **instance-per-thing** model but gives
-each instance a **3-D world placement** — a cell `(wx, wy)` in subcells, a **height
-`wz`** (a render-only attribute; the sim has no z), a **facing** (reuse the body /
-turret angle the sim already stores), a **kind** (which mesh/sprite), and a **tint** —
-and lets the **vertex shader** do the isometric projection:
+`render.c` emits **world placements**, never screen positions: per opaque instance a
+cell `(wx, wy)` in subcells, a render-only **height `wz` + half-height `hz`** (the sim
+has no z), **half-extents `(hx, hy)`**, a **facing** `(cos, sin)` (reuse the sim's
+`tank_ang`/`tank_turret`), and a packed **rgba tint**. The shader applies a **model-
+view-projection** matrix built host-side each frame:
 
-    screenX = (wx - wy) * ISO_X
-    screenY = (wx + wy) * ISO_Y - wz * ISO_Z
+- A `lookAt` eye orbiting a ground target by **yaw** (orbit) and **pitch** (tilt off
+  straight-down), a **perspective** projection (live **fov**), and a **zoom** (eye
+  distance). All live, all **presentation-only**, all in the **view uniform** — the only
+  thing that moves the picture; panning/following/zooming change no placement.
+- **Mirror clip-x** (a `FLIPX` factor in the MVP) so east is on the right, matching the
+  flat top-down minimap. Because the geometry pass culls nothing (`cullMode: "none"`),
+  the flipped winding is harmless; keep the **inverse MVP** so pick/pan/hover unproject
+  consistently (cast a screen ray to the ground plane `z=0`).
+- Clamp pitch so the **top frustum edge stays under the horizon** (`(90°−pitch) −
+  fov/2 > 0`), and reach the far plane to the farthest visible ground.
 
-Use the classic **dimetric 2:1** ratio (`ISO_X : ISO_Y = 2 : 1`), so tiles read as the
-familiar game-isometric diamond; `ISO_Z` is the world-units-to-screen height scale.
-This is the **only** new math, and it is a pure function — put the iso basis, the
-height scale, the ortho zoom, and the follow offset in the **view uniform** (the
-camera), exactly where chapter 3 kept its 2D `scale`/`offset`. Panning, following, the
-slide, and the picker stay **presentation-only** and keep working untouched. Keep the
-projection in the **shader** (and the iso constants in a header so both the host and
-any native test can read them) — do **not** bake screen positions into `render.c`;
-`render.c` emits **world placements**, the shader projects them. That keeps the camera
-a uniform, not a rebuild.
+This is the whole camera. Provide live **pitch / fov / zoom** controls (and a **lod
+dist** slider, below), clearly labelled presentation-only.
 
-Provide a true **orthographic** camera (no perspective foreshortening) — isometric is
-an orthographic projection viewed along a diagonal. Two pure functions are worth
-isolating and testing: `iso_project(wx, wy, wz) → (screenX, screenY)` and the **depth
-key** below.
+### Depth — a real z-buffer for opaque; the painter's key only for translucent
 
-### Depth — a z-buffer for the meshes, the painter's key for anything translucent
+Opaque geometry draws with a **depth buffer** (a `depth24plus` texture; the GPU resolves
+occlusion from `clip.z/clip.w`, no CPU sort). Translucent/additive FX (the **bolt** glow
++ head, the destruction bursts) draw in a **later pass** with depth-test on but depth-
+write off, painter-sorted back-to-front by `wx + wy + wz` so blending is ordered. Keep
+the depth key a pure function and test it is monotonic along the view diagonal.
 
-Opaque geometry (terrain blocks, tanks, mites, nests) draws with a **depth buffer**:
-give each projected vertex a depth `z = (wx + wy + wz)` mapped into NDC, enable
-depth-test/-write, and let the GPU resolve occlusion — no per-instance CPU sort. (Add
-a depth texture to the render pass; chapter 3 had none.) Anything **translucent or
-additive** (the laser glow, the destruction burst) draws in a **second pass after**
-the opaque pass with depth-test on but depth-write off, sorted back-to-front by the
-**painter's key** `wx + wy + wz` so blending is ordered. Pin the depth key as a pure
-function and test that it is monotonic along the view diagonal (a thing one cell
-"north-west" never sorts in front of a thing one cell "south-east").
+### The deferred renderer — lighting is a screen pass
 
-### Shading — flat low-poly faces, no asset required
+Don't shade in the geometry pass; **defer it**. Render the opaque scene once into a
+**G-buffer** (MRT): `gColor` (`rgba8`, `.a` = a 1/0 surface-vs-sky mask), `gNormal`
+(`rgba8`, world normal `*0.5+0.5`), `gPosition` (`rgba32float`, world position in
+subcells). Then a **full-screen lighting pass** reads the G-buffer and writes an **HDR**
+target (`rgba16float`): a **hemisphere ambient** (sky overhead lerped to a dim ground
+bounce by `normal.z`) plus one **directional sun**. A final **tonemap** pass rolls the
+HDR down to the swapchain (an exposure roll-off, e.g. `1 − exp(−c·hdr)`). Background
+(mask 0) is the sky.
 
-The first pass must already look like a 3-D scene, from primitives alone. Get that for
-free with **flat per-face shading**: one directional light direction (a constant), and
-each face tinted by `dot(faceNormal, light)` clamped to a small ambient floor. For an
-axis-aligned box that is three brightnesses — **top brightest, the two visible sides
-darker** — which is exactly the cue that reads "isometric block." Compute it in the
-shader from the face normal; no normals texture, no per-vertex lighting. Keep it
-integer-friendly and cheap; this runs for every visible instance every frame.
+This is the point of deferring: lighting cost scales with **lit pixels, not objects ×
+lights**, which is what makes the next two features affordable.
 
-### First pass — procedural primitives, zero external art
+> **Float-texture traps (you will hit these):** `rgba16float`/`rgba32float` are **not
+> filterable** — declare explicit bind-group layouts with `sampleType:
+> "unfilterable-float"` and read them with `textureLoad` (a `layout:"auto"` infers a
+> filtering sampler and you get `[Invalid CommandBuffer]`). `texture COPY_DST = 0x02`
+> (not `0x08`, which is `STORAGE_BINDING`). `textureSample` under a branch fails — use
+> `textureSampleLevel`. See `screen-capture.md`.
 
-Ship a complete, legible isometric scene built **only** from a unit cube (and maybe a
-unit quad), instanced, projected, depth-tested, flat-shaded. Map the sim's data to
-placements:
+### Point lights — one per visible mite and per FX, as additive volumes
 
-- **Terrain.** For each **visible** cell, emit a block: an **open floor** is a thin
-  slab (`wz ≈ 0`, low height); a **wall** cell is a **full-height cube** (`wz = 1`).
-  Tint floors and walls distinctly; the face shading does the rest. (Only the visible
-  screen's cells, plus a one-cell margin so tall walls at the far edge don't pop —
-  render still scales with visibility, not with the 4800-cell world.)
-- **Tanks (4).** A body box + a turret box + a thin barrel, placed at the tank's
-  subcell position, the body oriented by `tank_ang` and the turret/barrel by
-  `tank_turret` — the sim already stores both. Keep the per-tank identity colours.
-- **Mites (1000).** A **tiny cube** (or a low pyramid) per **visible** mite, sitting on
-  the floor, tinted by mode (wander / hunt / homing-by-nest) exactly as chapter 3 tints
-  them. Instanced — a thousand mites is one instanced draw of one small mesh, the same
-  "where there's one, there's many" batch as before.
-- **Nests.** A short coloured **pylon/marker** per nest (the 15 nests, one per screen
-  but the tank start), in the nest's colour.
-- **Combat FX.** The **laser** is a thin elongated box from the muzzle to the wall-hit
-  cell, drawn in the translucent pass; the **destruction burst** is an expanding cube
-  (or billboarded quad) that fades over its lifetime — both read straight from the
-  chapter-3 combat/FX state, no new sim data.
+Give the swarm and the combat real light. In C, `build_lights` walks the **same sim
+state** (alive mites in view, active bolts/bursts) and packs a small light buffer (world
+position, radius, colour, intensity in the alpha). On the GPU each light is a **cube
+VOLUME** (the unit cube, instanced from the light buffer), **additively blended** into
+the HDR, **front-faces only, no depth test** — the volume just marks the pixels it
+covers, and the fragment reads the G-buffer there, falls off with distance, and adds its
+colour. (Because the camera's `FLIPX` inverts winding, the volume pass uses
+`cullMode: "front"`.) A light pays only for the pixels it covers, so a thousand of them
+stay cheap. Pin in native tests: a light per alive mite, all positive-radius volumes at
+valid positions, culled to the visible box, `build_lights` a pure function.
 
-This first pass is **shippable on its own** — it is genuinely isometric 3-D, just
-primitive — and it is the thing the asset pass later dresses.
+### Shadows — a baked sun map for the static town + a screen-space march for the actors
 
-### Second pass — real low-poly art, late-bound
+Split the sun's shadow by **frequency of change**:
 
-Swap the primitive meshes for real models **without touching the projection, the
-depth, the shading model, or the sim**. The only new machinery is: load a small set of
-meshes/atlases once at startup (a vertex+index buffer per kind, or a texture atlas for
-sprite tiles), and bind **kind → mesh** when emitting instances. The instance data
-(placement, facing, tint) is unchanged; a glTF tank simply replaces the body-box, a
-Kenney tile replaces the slab. Keep an `ASSETS.md` recording each asset's source, URL,
-licence, and where it is used.
+- **The static town is baked, so its shadow is too.** Render the town's depth from the
+  sun through one **orthographic** pass into a depth map at init, re-baked **only** when
+  the town re-bakes (the same trigger as the instance buffer). Fit the ortho frustum to
+  the world AABB. In the lighting pass, project each pixel into the sun's light clip and
+  **PCF-compare** against the stored depth — long, correct building shadows. **Cull
+  FRONT faces** in the bake (store the occluders' *far* side — second-depth shadow
+  mapping) so a sun-lit roof never self-shadows: kills acne with no per-surface bias and
+  no LOD-match needed.
+- **The moving actors aren't in the bake**, so they get the complementary technique:
+  **Bend Studio's screen-space shadow march** (from *Days Gone*). For each lit pixel,
+  step a ray toward the sun, project each step back to screen, and if an on-screen
+  surface sits in front of the ray within a thickness window, the sun is blocked. Its
+  honest limit is one depth layer (it can't see an occluder's far side), so keep it
+  **medium range** — it *grounds* what moves; a long march just smears a tall occluder.
+  Many small steps, **no dither** (an undenoised jitter reads as grain).
 
-Two viable art directions — pick one and state why; both keep the renderer above
-intact:
+The two visibilities multiply. Light it for **evening**: a low, raking, warm sun over a
+dim dusk ambient, so the shadows carry the contrast.
 
-- **(A) Low-poly 3-D meshes** (recommended; matches "isometric 3D" literally). Parse a
-  minimal **glTF**/`.obj` into a vertex+index buffer at load; instance it with the same
-  placement/facing/tint. Tanks, nests, and even mites become little models; terrain
-  blocks can stay procedural or become tile-blocks. Rotation is free (any facing).
-- **(B) 2.5-D isometric sprites.** Billboard a textured quad per instance and sample a
-  **pre-rendered isometric tile/sprite atlas**; tanks use an 8- or 16-direction sheet
-  keyed by facing. Lighter, "classic iso" look; needs the painter's sort for the
-  transparent sprites and loses free rotation.
+### The world is a static town — bake the frozen map once
 
-### Sourcing the art — itch.io, prefer CC0
+The map is static and totally known, so the **town it becomes is baked once**, in C
+(`staticmap.c`, `build_static_map`), never re-derived per frame. Classify every world
+cell:
 
-The user wants a short, **curated** list of assets they can actually get from
-<https://itch.io/game-assets>, to drop into the second pass. Prefer **CC0** (public
-domain, no attribution) so the swap is zero-friction; where a pack only allows "free +
-credit," note it and keep the credit in `ASSETS.md`. Confirm the licence on each page
-before using it — terms change.
+- **wall** → a **building** (hash-picked variant + a 90° rotation, for variety)
+- **open cell touching a wall** (8-neighbourhood) → an **autotiled road** (streets hug
+  the building blocks). The road's rotation comes from matching the cell's neighbour mask
+  against each road mesh's **canonical connection mask measured from the art at bake
+  time** (`MAP_ROAD_CANON` — hand-guessing it is exactly how the streets first came out
+  180° wrong).
+- **wide-open interior** → **grass**
+- **nest** → a **skyscraper landmark**, tinted in that nest's hue (keeps nest identity)
 
-**Recommended (verified at time of writing):**
+Pack **one instance per cell**, grouped by `(screen, mesh)` into a small run table.
+Town meshes carry their own palette colour, so the instance tint is white (the shader
+does `meshColour × tint`) — except the landmark. The host uploads the instance buffer
+**once** and, per frame, only **frustum-culls the screen buckets** and draws the visible
+runs — no re-emit, no re-classification. It re-bakes (in wasm) **only** when the map
+changes (a wall toggled, a nest moved); a **version counter** tells the page to
+re-upload. (The one per-frame exception is cosmetic — see *wall-shake* below.)
 
-| asset | creator | licence | format | use in ch.4 |
-|------|---------|---------|--------|-------------|
-| [Isometric Blocks](https://kenney-assets.itch.io/isometric-blocks) (130+ tiles) | Kenney | **CC0** | PNG tiles + sheets | terrain tiles (sprite path B) |
-| [Isometric Prototypes Tiles](https://kenney-assets.itch.io/isometric-prototypes-tiles) (walls/floors/objects, 8-dir character) | Kenney | **CC0** | PNG | floors/walls + a stand-in unit |
-| [Kenney 3-D kits](https://kenney.nl/assets) (Tower-Defense Kit, Tanks, City/Top-down kits) | Kenney | **CC0** | glTF/OBJ | tank + nest + prop meshes (mesh path A) |
-| [FREE Stylized Tank](https://mreliptik.itch.io/free-lowpoly-tank-3d-model) (+ [4-tank pack](https://mreliptik.itch.io/4-low-poly-stylized-tanks)) | MrEliptik | free, **credit requested** | **glTF**/FBX | the four tank meshes (path A) |
-| [Quaternius low-poly packs](https://quaternius.com/) (animals, nature, ultimate kits) | Quaternius | **CC0** | glTF/OBJ/FBX | mite "creature" meshes, nests, props |
+### The art — Kenney CC0 kits, baked offline; procedural meshes for the actors
 
-**Browse for more (filtered):**
-[isometric + tanks](https://itch.io/game-assets/tag-isometric/tag-tanks) ·
-[CC0 + isometric](https://itch.io/game-assets/assets-cc0/tag-isometric) ·
-[CC0 + free + low-poly](https://itch.io/game-assets/assets-cc0/free/tag-low-poly) ·
-[free + low-poly + tanks](https://itch.io/game-assets/free/tag-low-poly/tag-tanks).
+Two mesh tables share one GPU vertex buffer, split by *frequency of change*:
 
-Practical guidance to put in the prompt's spirit: keep the imported set **small and
-sized to the need** (one tank mesh re-tinted four ways beats four near-identical
-downloads; one mite mesh; a handful of tile kinds). Convert/strip at **build time**
-into the engine's own compact vertex buffers (host-baked, like the escape table) so the
-runtime loads packed integer/float-lite data, not a glTF parser in the hot path — and
-so the wasm/page stays allocation-light. Pre-quantise tile atlases to power-of-two.
-Don't ship multi-megabyte source art in the repo; commit the **baked** buffers and
-record provenance in `ASSETS.md`.
+- **Procedural meshes** (`tools/gen_meshes.c` → committed `src/mesh_data.c`) for the
+  **dynamic** things: `M_CUBE` (overlays, barrels, beacons, bolt FX, placeholder),
+  `M_PYRAMID` (a mite spike), `M_HULL` (tank body), `M_TURRET` (tank turret), `M_PYLON`
+  (spare). `MESH_FOR_KIND[]` binds each opaque kind to its mesh; tanks are hull + turret
+  + a barrel cube, oriented by the sim's angles. Original, CC0, no parser ships.
+- **Town meshes** baked from **Kenney CC0** kits by an **offline** builder
+  (`tools/bake_map_assets.mjs`, run by hand against a local download — **source art is
+  not committed**) → committed `src/map_mesh_data.{c,h}` + `town_atlas.png`. Kits used:
+
+  | group | kit (Kenney, **CC0**) | meshes |
+  |---|---|---|
+  | `ROAD` | [City Kit (Roads)](https://kenney.nl/assets/city-kit-roads) | `road-square`, `-end`, `-straight`, `-bend`, `-intersection`, `-crossroad` (autotiled) |
+  | `BUILD` | [City Kit (Suburban)](https://kenney.nl/assets/city-kit-suburban) + [(Commercial)](https://kenney.nl/assets/city-kit-commercial) | `building-type-{a,c,e,h,k,q}` + commercial `building-{a,c}` (8 variants; roofs recoloured to contrast the grass) |
+  | `GRASS` | [Tower Defense Kit](https://kenney.nl/assets/tower-defense-kit) | `tile` (the ground) |
+  | `LANDMARK` | City Kit (Commercial) | `building-skyscraper-a` (each nest) |
+
+  The baker decodes each kit's indexed-PNG palette, parses the OBJ, rotates Kenney's
+  Y-up to the engine's Z-up, **normalises each mesh per-axis into the unit box `[-1,1]`**
+  (footprint `x/y`, base at `z=-1`) and records a per-mesh height half-extent (`MAP_MESH_HZ`,
+  subcells) so one instance restores real proportions. It also CPU-rasterises the LOD
+  imposter atlas (below). Nothing runs at game time; the committed tables + atlas are the
+  deliverable (CC0, derived from CC0). Record all provenance in `ASSETS.md`.
+
+### LOD — three levels per town mesh, including a projected imposter
+
+A full Kenney building is ~3,500 verts; a hundred cells away it is a smear. Bake **three
+levels**, picked **per screen by distance**:
+
+- **LOD0** — the full art (~3,500 verts), near screens.
+- **LOD1 — a textured *imposter*** (~40-vert cage + a texture): the cheap box-and-roof
+  massing, but each face samples `town_atlas.png` — the LOD0 model rendered
+  orthographically (offline, by a tiny **CPU rasteriser** in the baker) from the **top +
+  4 sides** and packed into one atlas. The cage's UVs index it, so a mid-distance block
+  keeps its windows/doors for forty vertices. (This is the *render-to-texture lowest-LOD
+  imposter* workflow, done in JS.)
+- **LOD2** — the same cage in a flat, colour-matched **massing** (no texture), far
+  screens.
+
+Classify the cage's roof by the **area-weighted slope** of the upper roof faces (flat vs
+gable + ridge axis) — *not* by the span of the top vertices, which rooftop clutter (AC
+units, parapets) fakes into false gables. A flat roof gets full-height walls + a thin top
+cap. The 12-byte table holds LOD0 in `[0,16)` and LOD2 at `MAP_LOD2_OFFSET`; the LOD1
+imposters are a **separate 16-byte table** (they carry a `i16×2` UV) indexed by base mesh.
+The static map emits LOD0 ids only; the host swaps to the imposter/massing by distance.
+Selection: derive the LOD0→LOD1 crossover from a reference framing (max zoom, 56° pitch),
+scale to LOD1→LOD2; expose a live **lod dist** slider. LOD0/LOD2 share the flat geometry
+pipeline; the imposter draws in its own textured pass (sample the atlas, branch on the UV
+sentinel) writing the **same G-buffer**, so the deferred lighting/shadows treat it as art.
+
+### Combat FX — a travelling bolt (the one sanctioned sim change)
+
+Chapter 3's instant laser becomes a **3-D projectile bolt** with a tunable speed
+(`proj_speed`). This is the one place `tanks_fire.c` diverges from chapter 3; update the
+combat test's fields and **re-stamp the golden hash** to the new value. The bolt streak +
+head and the destruction bursts draw as `M_CUBE` in the translucent pass.
+
+### Wall-shake — jolt the struck building (don't lose it to the static town)
+
+Chapter 3 buzzed a wall struck by a shot (`wall_shake`: amplitude decays over the
+shake's life, flipping each tick). The sim still computes it — but the walls are now the
+**upload-once** town, so restore the effect host-side: export `wall_shake_cell/_t`; build
+a **cell → static-instance index** when the town bakes; per frame read `wall_shake` and
+patch just the struck buildings' `wx/wy` with the same buzz, snapping any that stopped
+back to centre. At most `WALL_SHAKE_MAX` instances while a shot is fresh — a handful of
+bytes, not a re-bake. (Note this small per-frame exception in `ASSETS.md`.)
 
 ### Keep the minimap top-down — two projections of one model
 
-Leave the **minimap top-down** (a literal map) while the main view is isometric. The
-page then shows the **same sim data drawn two ways at once** — the chapter's lesson made
-visible. Don't iso-skew the minimap; legibility-as-a-map is its job.
+Leave the **minimap top-down** (a literal map) while the main view is perspective 3-D.
+The page then shows the **same sim data drawn two ways at once** — the chapter's lesson
+made visible. Don't skew the minimap.
 
-## Shared/structural guidance
+## Build order (incremental — each step ships)
 
-- **Render placements come from the sim SoA, every frame, for visible things only.**
-  `render.c` reads `tank_xy`/`tank_ang`/`tank_turret`, `mite_xy`/`mite_ang`/`mite_mode`/
-  `mite_resp`, the wall `grid`, the nests, and the FX ring — exactly the chapter-3
-  inputs — and emits the 3-D instance buffer. It gains **height + facing + kind** per
-  instance; it gains **no new sim state**.
-- **The instance layout grows; state it.** Chapter 3's instance was `{cx, cy, hx, hy,
-  co, si, rgba}`. Chapter 4's is that plus a **z/height**, a **kind/mesh id**, and
-  (mesh path) the facing already encoded in `co/si`. Keep it packed; report the new
-  stride and the raised instance-buffer cap (visible cells × up-to-`MITE_CAP` mites +
-  tanks + nests + FX, now possibly two layers of geometry per cell).
-- **The depth buffer is new render state**, not sim state — a texture in the render
-  pass.
-- **Assets load once** (frequency of change: once) — the opposite end of the spectrum
-  from the per-frame projection. Don't re-upload meshes per frame; upload at init,
-  instance per frame.
-- **No floating-point creep into the sim.** The projection/shading may use floats in the
-  shader (the GPU is float-native, as in chapter 3's WGSL), but the **sim stays integer
-  fixed-point** and untouched. The boundary is `render.c`/WGSL.
+1. Copy ch3, freeze the sim, add the golden-hash regression.
+2. **Primitive 3-D first:** `render.c` emits world placements; the shader projects them
+   (perspective MVP in a uniform); a depth buffer; everything a flat-shaded `M_CUBE`,
+   shaped per instance. A legible 3-D scene from one cube — shippable.
+3. Procedural meshes (`gen_meshes.c`): tank hull/turret, mite pyramid; bind `MESH_FOR_KIND`.
+4. Perspective camera controls (orbit/tilt/fov/zoom/pan) + world-anchored frustum cull
+   over all screens; unproject for pick/hover.
+5. The **static town** (`staticmap.c`) + the Kenney bake + upload-once/cull. Asset toggle.
+6. The **deferred** renderer (G-buffer → lighting → tonemap), then **point lights**, then
+   **shadows** (SSS, then the baked sun map), then evening light.
+7. **LOD** (massing, then the textured imposter); the bolt; the wall-shake.
+
+Each step keeps the sim frozen and the golden hash equal.
 
 ## Binding guidance — read first, follow strictly
 
-These are requirements, not suggestions.
-
 1. **`data-oriented-design.md`** — Mike Acton's rules (raw:
    `https://raw.githubusercontent.com/macton/nagent/master/context/data-oriented-design.md`).
-   Especially relevant here: solve the problem you have (draw the existing data, do not
-   re-model the world in 3-D); the simplest machine that turns input into output (one
-   cube, instanced and projected, before any asset); exploit the constraint (the world
-   is a grid — terrain is one instanced block per cell, depth is `x+y+z`).
+   Solve the problem you have (draw the existing data; bake the known town once); the
+   simplest machine first (one cube, instanced + projected, before any asset); exploit
+   the constraint (the map is static → the town is baked data; lighting is a screen pass
+   → cost scales with lit pixels).
 2. **`AGENTS.md`** at the repo root — every rule applies. Chapter 4 is the textbook case
-   for **one-way dependency / sim never depends on render**, **presentation-only data
-   stays out of `World`** (height, mesh id, light, camera are render-side), **match the
-   work to the frequency of change** (assets load once, geometry rebuilds on wall edit,
-   projection runs per frame), **render scales with what's visible**, and **host-bake
-   pure data** (convert art to compact vertex buffers at build time, as chapter 1 bakes
-   the escape table). If anything here is ambiguous, prefer the interpretation that keeps
-   the sim frozen.
-3. **Chapter 3's sources** — the render path you are replacing and the sim you must
-   leave alone. Read `render.c`, `wasm.c`'s render exports, and `app.js`'s draw/upload
-   path; identify the exact seam between "sim" and "render" and cut only on the render
-   side.
+   for **one-way dependency**, **presentation-only data stays out of `World`** (height,
+   mesh id, lights, camera, shadows, LOD, the town instances are all render-side),
+   **match the work to the frequency of change** (art once; town on a wall edit;
+   projection per frame), **render scales with what's visible**, and **host-bake pure
+   data** (the town meshes + atlas + imposter, baked offline like the escape table).
+3. **Chapter 3's sources** — the render path you replace and the sim you must leave
+   alone. Cut only on the render side.
 
 ## What to deliver
 
-- **Chapter-4 render core** over the frozen chapter-3 sim: the isometric projection +
-  depth key (pure functions in a shared header), the rebuilt `render.c` emitting 3-D
-  instances for **visible** terrain/tanks/mites/nests/FX, the new WGSL (iso projection,
-  ortho camera uniform, depth, flat face-shading, an opaque pass + a translucent FX
-  pass), and the asset pipeline (placeholder primitives first; a host-bake step + a
-  small loader for the real meshes/atlas second). One-way dependency preserved.
-- **Native tests** (no browser/GPU):
-  - **Sim is untouched (the thesis):** every chapter-3 sim/gossip/cap/combat/
-    determinism check still passes **unchanged**, and the **state-hash after K ticks
-    equals chapter 3's golden hash** for a fixed seed + scripted inputs.
-  - **Projection:** `iso_project` maps known cells to known screen offsets; it is the
-    pure dimetric transform; the **depth key is monotonic** along the view diagonal
-    (occlusion order is correct); the camera uniform is the only thing that moves the
-    picture (panning changes no placement).
-  - **Visibility:** the instance count scales with the visible region, not with
-    `N_MITES` / `N_WORLD_CELLS` (emit-for-visible holds).
-- **The WebGPU page:** the world + tanks + thousand mites, drawn isometric-3-D in the
-  main view, with the **top-down minimap** beside it (same data, two projections), the
-  follow camera + picker working, and the chapter-3 live debug widgets retained
-  (pool, occupancy, belief field, nests, distinct-destinations/`N_FIELDS`, seed +
-  tunables). A small **render-only control** is welcome (e.g. camera zoom, or a
-  placeholder↔assets toggle) — clearly labelled presentation-only.
-- `build.sh`/`test.sh` (extended for the host-bake + projection tests), a visible
-  cache-busted version, `ASSETS.md` (provenance + licences), `README.md`, and a
-  `CONTRACT.md` whose central promise is *the view is a projection: the sim hash is
-  identical to chapter 3*, tested.
+- **Chapter-4 render core** over the frozen ch3 sim: the perspective MVP camera (a host
+  uniform) + the depth key (a pure function), `render.c` emitting 3-D instances for
+  **visible** dynamic things, `staticmap.c` baking the **static town**, the **deferred**
+  WGSL (G-buffer, screen-space lighting, HDR/tonemap, additive light volumes, the SSS
+  march, the baked-sun-map sample, the textured imposter pass), and the asset pipeline
+  (procedural `gen_meshes.c` + the offline `bake_map_assets.mjs` → committed tables +
+  `town_atlas.png`). One-way dependency preserved.
+- **Native tests** (no browser/GPU): the ch3 sim suite passes **unchanged**; the
+  **state-hash equals chapter 3's golden** (the bolt re-stamps its own); the projection
+  is a pure transform and the **depth key is monotonic**; **visibility** holds (instance
+  count scales with the visible region, not `N_MITES`/`N_WORLD_CELLS`); the **static
+  bake** is a pure function (same map → byte-identical town, one instance per cell, valid
+  runs, nests→landmarks); **`build_lights`** is pure (a light per alive mite, culled to
+  the box).
+- **The WebGPU page:** the world + tanks + swarm drawn **top-down perspective 3-D** as a
+  deferred-lit, shadowed, LOD'd town, the **top-down minimap** beside it, the follow
+  camera + picker working, live pitch/fov/zoom + **lod dist** + low-poly-art toggle
+  (presentation-only), and the ch3 debug widgets in context.
+- `build.sh`/`gen.sh`/`test.sh`, a visible cache-busted version, `ASSETS.md` (provenance
+  + licences + the kits + the imposter atlas), `README.md`, `CONTRACT.md` (central
+  promise: *the view is a projection — the sim hash equals chapter 3*, tested), and
+  `screen-capture.md` (headless WebGPU render/capture).
 
 ## Behaviour to pin (so it's reproducible)
 
-- **The simulation is byte-identical to chapter 3** for the same seed + inputs (state
-  hash equal); presentation never feeds back.
-- **The projection is a pure function** (dimetric 2:1) living in the shader/header; the
-  camera is a uniform; depth is resolved by a z-buffer (opaque) with the painter's key
-  `x+y+z` for the translucent FX pass.
-- **Render scales with what is visible** — instances are emitted for the visible
-  screen's cells/units (+ a one-cell margin), not for the whole world or the whole pool.
-- **Assets are late-bound data** — the first pass needs none; the second pass swaps
-  meshes/atlas via a kind→mesh table and a host-baked buffer, touching neither the
-  projection nor the sim.
-- **Presentation-only data stays out of `World`** — height, mesh id, light, camera,
-  depth texture are all render-side.
+- **Sim byte-identical to chapter 3** (state hash equal; the bolt is the lone, golden-
+  re-stamped exception). Presentation never feeds back.
+- **The camera is a pure-function MVP in a uniform**; depth is a z-buffer (opaque) +
+  painter's key `x+y+z` (translucent FX).
+- **Lighting is a deferred screen pass** — cost scales with lit pixels; point lights are
+  additive volumes; sun shadows are a **baked ortho map (static town) + a screen-space
+  march (actors)**.
+- **The town is a once-baked projection of the frozen map** — uploaded once, frustum-
+  culled per frame, re-baked only on a wall/nest edit.
+- **Three-level LOD** picked per screen by distance; the imposter is LOD0 projected onto
+  a cheap cage via `town_atlas.png`.
+- **Presentation-only data stays out of `World`** — height, mesh id, lights, camera,
+  shadows, LOD, the town instances, the wall-shake patch are all render-side.
 
 ## Memory budget (state it; static, no dynamic allocation in the sim)
 
-The **sim** memory is unchanged from chapter 3 (state it as inherited). New **render**
-memory to size and report: the raised instance buffer (new stride × max visible
-instances, now up to two geometry layers per visible cell + mites + tanks + nests +
-FX), the **depth texture** (viewport-sized), and the **baked asset buffers** (vertex +
-index per kind, or the tile atlas) — loaded once. Keep the baked art small and sized to
-the need; confirm the wasm linear memory and the GPU buffers hold, and state the new
-instance-buffer cap.
-
-## Definition of done
-
-- Chapter 4 builds freestanding to wasm and natively; `test.sh` passes, including the
-  **unchanged** chapter-3 sim tests, the **sim-hash-equals-chapter-3** regression, and
-  the new projection/visibility tests.
-- The page shows the world, the tanks, and the thousand mites in **isometric 3-D**,
-  depth-correct and flat-shaded, with the **top-down minimap** beside it — the same data
-  drawn two ways — and the chapter-3 debug widgets live in context.
-- The **first pass renders with zero external assets** (primitives only); the **second
-  pass** swaps in CC0/low-poly art via the asset table, with provenance + licences in
-  `ASSETS.md`, and **neither pass touches the sim**.
-- You can state, for each render structure, what it costs, how often it is built vs read
-  (assets once, geometry on wall edit, projection per frame), and why it is render-side —
-  and the page makes the chapter's lesson legible: **the simulation does not know it is
-  being drawn; the view is a projection you can replace wholesale.**
+The **sim** memory is unchanged from chapter 3 (inherited). New **render** memory: the
+dynamic instance buffer (24-byte `Inst` × the in-view swarm/tanks/FX/overlays), the
+**static town** buffer (24-byte `Inst` × `N_WORLD_CELLS = 19,200`, one per cell, built
+once), the run table, the procedural + **town mesh** data segments (the latter ~400 KB
+of packed `int8`), the 16-byte **imposter** table, the **G-buffer + HDR + depth**
+textures (viewport-sized), the **baked sun shadow map** (one ortho depth texture), and
+`town_atlas.png`. All static, integer-positioned, allocation-free; the per-frame map
+cost is a cull (plus the tiny wall-shake patch).
 
 ## Deferred (not built — no speculative generality)
 
-Perspective camera / free 3-D orbit (keep the fixed iso angle; a zoom is fine);
-animated/rigged models or skeletal animation (static low-poly meshes, oriented by the
-sim's existing facing); shadows, ambient occlusion, normal/PBR materials (flat
-face-shading only); height/elevation in the **simulation** (z is render-only — the world
-stays a 2-D grid); terrain autotiling / corner-aware tilesets; a 3-D minimap (it stays
-top-down); per-mite distinct models or LOD (one instanced mesh for the swarm). Each is
-its own future step; note it here, not in the code.
+No camera roll or first-person fly-through (the camera stays an up-right orbit — yaw,
+pitch/tilt, fov, pan, zoom are all provided); animated/rigged meshes or skeletal
+animation (static low-poly, oriented by the sim's existing facing); ambient occlusion,
+normal/PBR materials (flat baked albedo + the deferred sun/ambient/shadow — sun shadows
+*are* built); height/elevation in the **simulation** (`z` is render-only — the world
+stays a 2-D grid); a 3-D minimap (it stays top-down); per-mite distinct models (one
+instanced mesh for the swarm); grass props/trees, normal-mapped imposters. Each is its
+own future step; note it here, not in the code.
