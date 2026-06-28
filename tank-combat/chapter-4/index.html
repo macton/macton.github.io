@@ -199,6 +199,8 @@
     <label><input type="checkbox" id="t_town" checked> town</label>
     <label><input type="checkbox" id="t_trees" checked> trees</label>
     <label><input type="checkbox" id="t_lights" checked> point lights</label>
+    <label>town shadow <select id="shq_town"><option value="0">PCF 2×2</option><option value="1">Poisson PCF</option><option value="2">revectorised</option></select></label>
+    <label><input type="checkbox" id="shq_sss"> SSS blur</label>
     <button id="diagBtn" type="button">run diagnostics</button>
     <button id="diagCopy" type="button" disabled>copy</button>
     <pre id="prof">profiling…</pre>
@@ -480,11 +482,11 @@
     <a href="ASSETS.md">ASSETS</a></p>
   </article>
 
-  <script src="version.js?v=2026.06.28-041156"></script>
+  <script src="version.js?v=2026.06.28-044500"></script>
   <!-- The ?v= cache-busts here are stamped inline by build.sh on every build, so a
        reload always fetches the app.js/version.js that match THIS page document. (Routing
        the app.js bust through a separately-cached version.js could pin a stale app.js;
        the page document is the one thing a reload reliably refreshes.) -->
-  <script type="module">import("./app.js?v=2026.06.28-041156");</script>
+  <script type="module">import("./app.js?v=2026.06.28-044500");</script>
 </body>
 </html>

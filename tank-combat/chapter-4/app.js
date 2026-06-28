@@ -163,6 +163,7 @@ struct Env {
   eye: vec4f,                                             // camera world position (subcells); .w = shadow-map normal-offset bias (subcells)
   mvp: mat4x4f,                                           // world (subcells) -> clip, to project the shadow ray to screen
   lightMvp: mat4x4f,                                      // world (subcells) -> SUN light clip, to sample the baked shadow map
+  shq: vec4f,                                             // shadow quality: x=town map mode(0 PCF2x2,1 Poisson PCF,2 revectorised), y=SSS blur(0 inline,1 buffer+bilateral), z=PCF texel radius, w=shadow-map texel size
 };
 @group(0) @binding(0) var<uniform> env: Env;
 @group(0) @binding(1) var gColorTex: texture_2d<f32>;
@@ -171,6 +172,8 @@ struct Env {
 @group(0) @binding(4) var hdrTex: texture_2d<f32>;
 @group(0) @binding(5) var shadowMap: texture_depth_2d;        // the baked sun depth map (static town)
 @group(0) @binding(6) var shadowSamp: sampler_comparison;     // hardware PCF compare
+@group(0) @binding(7) var sssTex: texture_2d<f32>;            // the (blurred) screen-space sun shadow, sampled by fs_light when shq.y==1
+@group(0) @binding(8) var sssInTex: texture_2d<f32>;          // blur input (one axis), read by fs_blur*
 @vertex fn vs_full(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
   var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));   // one screen-covering triangle
   return vec4f(p[vi], 0.0, 1.0);
@@ -207,12 +210,51 @@ fn sun_shadow(pos: vec3f, n: vec3f) -> f32 {
 // building shadows a single-layer screen-space march can't (it can't see an occluder's far side);
 // the SSS still adds contact + the DYNAMIC actors, which aren't in this static bake. A normal-
 // offset bias (push the receiver toward the sun along its normal) kills the self-shadow acne.
+// 12-tap Poisson disk (unit), rotated per-pixel so the soft edge dithers instead of banding.
+const POISSON = array<vec2f, 12>(
+  vec2f(-0.326, -0.406), vec2f(-0.840, -0.074), vec2f(-0.696,  0.457), vec2f(-0.203,  0.621),
+  vec2f( 0.962, -0.195), vec2f( 0.473, -0.480), vec2f( 0.519,  0.767), vec2f( 0.185, -0.893),
+  vec2f( 0.507,  0.064), vec2f( 0.896,  0.412), vec2f(-0.322, -0.933), vec2f(-0.792, -0.598));
+// binary shadow test at an integer shadow-map texel: 1 = the receiver is BEHIND the stored
+// nearest-to-sun depth (in shadow), 0 = lit. Clamped so off-map reads stay lit.
+fn sm_at(texel: vec2f, recvZ: f32) -> f32 {
+  let res = 1.0 / env.shq.w;
+  let p = clamp(texel, vec2f(0.0), vec2f(res - 1.0));
+  let d = textureLoad(shadowMap, vec2<i32>(p), 0);
+  return select(0.0, 1.0, recvZ > d);
+}
 fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let clip = env.lightMvp * vec4f(pos + n * env.eye.w, 1.0);
   let ndc = clip.xyz / clip.w;
   let uv = ndc.xy * vec2f(0.5, -0.5) + vec2f(0.5);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z < 0.0 || ndc.z > 1.0) { return 1.0; }
-  return textureSampleCompareLevel(shadowMap, shadowSamp, uv, ndc.z - 0.0008);   // lit where receiver is nearer than the stored occluder
+  let recvZ = ndc.z - 0.0008;
+  let mode = i32(env.shq.x + 0.5);
+  if (mode == 1) {                                   // ---- rotated-Poisson PCF (soft) ----
+    let a = fract(sin(dot(pos.xy, vec2f(12.9898, 78.233))) * 43758.5453) * 6.2831853;
+    let cs = cos(a); let sn = sin(a); let r = env.shq.z * env.shq.w;
+    var s = 0.0;
+    for (var i = 0; i < 12; i = i + 1) {
+      let o = POISSON[i]; let ro = vec2f(o.x * cs - o.y * sn, o.x * sn + o.y * cs) * r;
+      s = s + textureSampleCompareLevel(shadowMap, shadowSamp, uv + ro, recvZ);
+    }
+    return s / 12.0;
+  }
+  if (mode == 2) {                                   // ---- revectorised silhouette AA (RBSM-style) ----
+    let res = 1.0 / env.shq.w;
+    let t = uv * res; let c = floor(t); let fr = t - c - vec2f(0.5);   // frag offset from texel centre
+    let vC = sm_at(c, recvZ);
+    let gx = sm_at(c + vec2f(1.0, 0.0), recvZ) - sm_at(c + vec2f(-1.0, 0.0), recvZ);
+    let gy = sm_at(c + vec2f(0.0, 1.0), recvZ) - sm_at(c + vec2f(0.0, -1.0), recvZ);
+    let g = vec2f(gx, gy);
+    if (dot(g, g) < 1e-4) { return 1.0 - vC; }       // interior: flat lit/shadow, no silhouette
+    // signed distance (texels) from the fragment ACROSS the silhouette; the edge sits ~half a
+    // texel from the shadowed centre toward the lit side. Blend visibility over that one texel.
+    let nrm = normalize(g);                          // points from lit -> shadow
+    let d = dot(fr, nrm) + select(-0.5, 0.5, vC > 0.5);   // signed distance into shadow (texels)
+    return clamp(0.5 - d, 0.0, 1.0);                 // lit visibility, blended over one texel at the edge
+  }
+  return textureSampleCompareLevel(shadowMap, shadowSamp, uv, recvZ);   // ---- mode 0: 2x2 hardware PCF ----
 }
 // ENVIRONMENTAL lighting: a hemisphere ambient (sky overhead, a dim ground bounce below,
 // lerped by how "up" the face points — +z is up) plus one directional sun, the sun SHADOWED in
@@ -226,8 +268,45 @@ fn shadow_map(pos: vec3f, n: vec3f) -> f32 {
   let up = clamp(n.z * 0.5 + 0.5, 0.0, 1.0);
   let ambient = mix(env.ground.rgb, env.sky.rgb, up);
   var sun = clamp(dot(n, normalize(env.sun.xyz)), 0.0, 1.0) * env.sun.w;
-  if (sun > 0.0) { sun = sun * shadow_map(pos, n) * sun_shadow(pos, n); }  // baked town shadow + screen-space (dynamic + contact); ambient still fills
+  if (sun > 0.0) {
+    // the contact/dynamic SSS is either marched inline (shq.y==0) or read from the pre-blurred buffer (==1)
+    var sss = 1.0;
+    if (env.shq.y > 0.5) { sss = textureLoad(sssTex, p, 0).r; } else { sss = sun_shadow(pos, n); }
+    sun = sun * shadow_map(pos, n) * sss;   // baked town shadow + screen-space contact; ambient still fills
+  }
   return vec4f(alb.rgb * (ambient + env.sunCol.rgb * sun), 1.0);
+}
+// SSS as a SEPARATE BUFFER (shq.y==1): march once per pixel into an R8 target, then separably
+// bilateral-blur it (below) before the lighting pass reads it. Smooths the hard binary march.
+@fragment fn fs_sss(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  let p = vec2<i32>(i32(fc.x), i32(fc.y));
+  if (textureLoad(gColorTex, p, 0).a < 0.5) { return vec4f(1.0); }   // sky: lit
+  let pos = textureLoad(gPosTex, p, 0).xyz;
+  let n = normalize(textureLoad(gNormalTex, p, 0).xyz * 2.0 - 1.0);
+  return vec4f(sun_shadow(pos, n), 0.0, 0.0, 1.0);
+}
+// one axis of a depth-aware (bilateral) blur: gaussian weights gated by the eye-distance gap, so
+// the shadow softens but doesn't bleed across silhouettes / depth discontinuities.
+fn sss_blur(p: vec2<i32>, dir: vec2<i32>) -> f32 {
+  let res = vec2<i32>(textureDimensions(sssInTex));
+  let cz = length(textureLoad(gPosTex, p, 0).xyz - env.eye.xyz);
+  var sum = textureLoad(sssInTex, p, 0).r; var wsum = 1.0;
+  for (var i = 1; i <= 5; i = i + 1) {
+    let w0 = exp(-f32(i * i) * 0.12);
+    for (var s = -1; s <= 1; s = s + 2) {
+      let q = clamp(p + dir * (i * s), vec2<i32>(0, 0), res - vec2<i32>(1, 1));
+      let qz = length(textureLoad(gPosTex, q, 0).xyz - env.eye.xyz);
+      let we = w0 * exp(-abs(qz - cz) * 0.02);
+      sum = sum + textureLoad(sssInTex, q, 0).r * we; wsum = wsum + we;
+    }
+  }
+  return sum / wsum;
+}
+@fragment fn fs_blurH(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  return vec4f(sss_blur(vec2<i32>(i32(fc.x), i32(fc.y)), vec2<i32>(1, 0)), 0.0, 0.0, 1.0);
+}
+@fragment fn fs_blurV(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  return vec4f(sss_blur(vec2<i32>(i32(fc.x), i32(fc.y)), vec2<i32>(0, 1)), 0.0, 0.0, 1.0);
 }
 // TONEMAP: exposure roll-off (1 - e^-cx) — near-linear in the mid-tones, never clips, so the
 // additive point lights stay graceful when they push pixels past 1.
@@ -536,7 +615,7 @@ async function main() {
   let lightMVP = null;   // world (subcells) -> sun light clip; recomputed on re-bake (sun + world are otherwise fixed)
   // 224 bytes: the STATIC sun + ambient + shadow params (0..80); the per-frame eye + camera MVP
   // appended by viewWrite (80..160); the STATIC sun light MVP written by syncStatic (160..224).
-  const envBuf = device.createBuffer({ size: 224, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const envBuf = device.createBuffer({ size: 240, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   function writeEnv() {
     const s = norm3(env.sunDir);
     device.queue.writeBuffer(envBuf, 0, new Float32Array([
@@ -576,10 +655,31 @@ async function main() {
     { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
     { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },   // gPosition (for the shadow march)
     { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "depth" } },                // the baked sun depth map
-    { binding: 6, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } } ] });             // PCF compare sampler
+    { binding: 6, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } },                 // PCF compare sampler
+    { binding: 7, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // the pre-blurred SSS buffer
   const lightingPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [lightBGL] }),
     vertex: { module: screenModule, entryPoint: "vs_full" },
     fragment: { module: screenModule, entryPoint: "fs_light", targets: [{ format: HDR }] },
+    primitive: { topology: "triangle-list" } });
+  // SSS-as-a-buffer (shq.y==1): a march pass (fs_sss -> r8) then a separable bilateral blur (H, V).
+  const SSS_FMT = "r8unorm";
+  const sssBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+    { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+    { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });
+  const blurBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+    { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } },   // gPosition (bilateral depth weight)
+    { binding: 8, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "unfilterable-float" } } ] });   // the SSS axis input
+  const sssPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [sssBGL] }),
+    vertex: { module: screenModule, entryPoint: "vs_full" }, fragment: { module: screenModule, entryPoint: "fs_sss", targets: [{ format: SSS_FMT }] },
+    primitive: { topology: "triangle-list" } });
+  const blurHPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [blurBGL] }),
+    vertex: { module: screenModule, entryPoint: "vs_full" }, fragment: { module: screenModule, entryPoint: "fs_blurH", targets: [{ format: SSS_FMT }] },
+    primitive: { topology: "triangle-list" } });
+  const blurVPipe = device.createRenderPipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [blurBGL] }),
+    vertex: { module: screenModule, entryPoint: "vs_full" }, fragment: { module: screenModule, entryPoint: "fs_blurV", targets: [{ format: SSS_FMT }] },
     primitive: { topology: "triangle-list" } });
   // TONEMAP: the HDR light target -> the display.
   const tonemapBGL = device.createBindGroupLayout({ entries: [
@@ -645,22 +745,33 @@ async function main() {
   // the viewport-sized targets (G-buffer + HDR + depth), rebuilt on resize; the screen-pass and
   // light-volume bind groups reference them, so they rebuild together.
   let gColorTex = null, gNormalTex = null, gPosTex = null, hdrTex = null, depthTex = null, lightBind = null, lightVolBind = null, tonemapBind = null;
+  let sssTexA = null, sssTexB = null, sssBind = null, blurHBind = null, blurVBind = null;
   function ensureTargets() {
     if (gColorTex && gColorTex.width === canvas.width && gColorTex.height === canvas.height) return;
-    for (const t of [gColorTex, gNormalTex, gPosTex, hdrTex, depthTex]) if (t) t.destroy();
+    for (const t of [gColorTex, gNormalTex, gPosTex, hdrTex, depthTex, sssTexA, sssTexB]) if (t) t.destroy();
     const size = [canvas.width, canvas.height], RA = GPUTextureUsage.RENDER_ATTACHMENT, TB = GPUTextureUsage.TEXTURE_BINDING;
     gColorTex  = device.createTexture({ size, format: GBUF_COLOR,  usage: RA | TB });
     gNormalTex = device.createTexture({ size, format: GBUF_NORMAL, usage: RA | TB });
     gPosTex    = device.createTexture({ size, format: GBUF_POS,    usage: RA | TB });
     hdrTex     = device.createTexture({ size, format: HDR,         usage: RA | TB });
     depthTex   = device.createTexture({ size, format: DEPTH,       usage: RA });
+    sssTexA    = device.createTexture({ size, format: SSS_FMT,     usage: RA | TB });   // SSS march -> blurV out -> lighting in
+    sssTexB    = device.createTexture({ size, format: SSS_FMT,     usage: RA | TB });   // blurH out (ping-pong)
     lightBind = device.createBindGroup({ layout: lightBGL, entries: [
       { binding: 0, resource: { buffer: envBuf } },
       { binding: 1, resource: gColorTex.createView() },
       { binding: 2, resource: gNormalTex.createView() },
       { binding: 3, resource: gPosTex.createView() },
       { binding: 5, resource: shadowView },                  // the baked sun depth map (static)
-      { binding: 6, resource: shadowSampler } ] });
+      { binding: 6, resource: shadowSampler },
+      { binding: 7, resource: sssTexA.createView() } ] });   // the pre-blurred SSS (final = sssTexA)
+    sssBind = device.createBindGroup({ layout: sssBGL, entries: [
+      { binding: 0, resource: { buffer: envBuf } }, { binding: 1, resource: gColorTex.createView() },
+      { binding: 2, resource: gNormalTex.createView() }, { binding: 3, resource: gPosTex.createView() } ] });
+    blurHBind = device.createBindGroup({ layout: blurBGL, entries: [   // reads sssTexA -> writes sssTexB
+      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: gPosTex.createView() }, { binding: 8, resource: sssTexA.createView() } ] });
+    blurVBind = device.createBindGroup({ layout: blurBGL, entries: [   // reads sssTexB -> writes sssTexA
+      { binding: 0, resource: { buffer: envBuf } }, { binding: 3, resource: gPosTex.createView() }, { binding: 8, resource: sssTexB.createView() } ] });
     lightVolBind = device.createBindGroup({ layout: lightVolBGL, entries: [
       { binding: 0, resource: { buffer: viewBuf } },
       { binding: 1, resource: gColorTex.createView() },
@@ -691,9 +802,13 @@ async function main() {
   // render-profiling: live A/B toggles for the heavy layers (watch the frame time move on the
   // actual device — the surest way to attribute GPU cost where timestamp-query isn't available).
   let drawTown = true, drawTrees = true, drawLights = true;
+  // shadow quality (opt-in; default reproduces the original look): town map filter mode
+  // (0=2x2 PCF, 1=Poisson PCF, 2=revectorised) and whether the screen-space contact shadow is
+  // marched inline (0) or rendered to a buffer + bilateral-blurred (1). PCF radius in shadow texels.
+  let townShadowMode = 0, sssBlur = 0; const PCF_RADIUS = 2.5;
 
   // GPU timing via timestamp-query (when supported): one write at the start + end of each pass.
-  const GP = ["geom", "light", "plight", "fx", "tone"];   // the per-pass slots
+  const GP = ["geom", "light", "plight", "fx", "tone", "sss"];   // the per-pass slots
   const tsCount = GP.length * 2;
   let tsQuery = null, tsResolve = null; const tsFree = [];
   if (canTimestamp) {
@@ -729,19 +844,26 @@ async function main() {
     // median jumps past ~17ms tells us how much GPU margin this view has under the vsync cap.
     { k: "1.5x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 1.5 },
     { k: "2.0x res (headroom)",      town: 1, trees: 1, lights: 1, scale: 2.0 },
+    // shadow-quality A/B (all layers, 1.0x): town-map filter mode + the SSS buffer/blur
+    { k: "town shadow: Poisson",     town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 1 },
+    { k: "town shadow: revect",      town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2 },
+    { k: "SSS blur on",              town: 1, trees: 1, lights: 1, scale: 1.0, sss: 1 },
+    { k: "shadow hi (revect+SSS)",   town: 1, trees: 1, lights: 1, scale: 1.0, tsm: 2, sss: 1 },
   ];
   const diag = {
     active: false, done: false, ci: 0, phase: "warm", warm: 0, coll: [], results: [],
     snap: null, gmin: Infinity, report: "", view: "",
     start() {
       if (this.active) return;
-      this.snap = { town: drawTown, trees: drawTrees, lights: drawLights, scale: renderScale };
+      this.snap = { town: drawTown, trees: drawTrees, lights: drawLights, scale: renderScale, tsm: townShadowMode, sss: sssBlur };
       this.active = true; this.done = false; this.ci = 0; this.results = []; this.gmin = Infinity;
       try { const c = camScreen(); this.view = `screen ${c.sx},${c.sy} · zoom ${zoom.toFixed(2)} · pitch ${Math.round(pitch / DEG)}°`; }
       catch (e) { this.view = "?"; }
       this.apply(0);
     },
     apply(i) { const c = DIAG_CONFIGS[i]; drawTown = !!c.town; drawTrees = !!c.trees; drawLights = !!c.lights;
+      townShadowMode = c.tsm == null ? this.snap.tsm : c.tsm;   // shadow fields default to the user's setting
+      sssBlur = c.sss == null ? this.snap.sss : c.sss;
       if (renderScale !== c.scale) { renderScale = c.scale; resize(); }
       this.phase = "warm"; this.warm = DIAG_WARM; this.coll = []; },
     step(dt) {                                    // called at the top of each frame while active
@@ -758,9 +880,12 @@ async function main() {
     },
     finish() {
       drawTown = this.snap.town; drawTrees = this.snap.trees; drawLights = this.snap.lights;
+      townShadowMode = this.snap.tsm; sssBlur = this.snap.sss;
       if (renderScale !== this.snap.scale) { renderScale = this.snap.scale; resize(); }
       const sT = document.getElementById("t_town"), sR = document.getElementById("t_trees"), sL = document.getElementById("t_lights");
       if (sT) sT.checked = drawTown; if (sR) sR.checked = drawTrees; if (sL) sL.checked = drawLights;
+      const sS = document.getElementById("shq_town"), sB = document.getElementById("shq_sss");
+      if (sS) sS.value = String(townShadowMode); if (sB) sB.checked = !!sssBlur;
       this.active = false; this.done = true; this.report = this.build();
       const cp = document.getElementById("diagCopy"), bt = document.getElementById("diagBtn");
       if (cp) cp.disabled = false; if (bt) bt.disabled = false;
@@ -785,7 +910,7 @@ async function main() {
       if (canTimestamp) L.push(`(gpu pass ms below are RELATIVE only — passes overlap on tile GPUs, so they over-sum; compare a pass across configs, not its absolute value.)`);
       for (const r of this.results) {
         L.push(`  ${r.k.padEnd(24)} ${r.med.toFixed(1)} / ${r.p95.toFixed(1)} / ${r.min.toFixed(1)}  (~${Math.round(1000 / r.med)} fps)`);
-        if (canTimestamp) L.push(`      gpu: geom ${f(r.gpu.geom)} light ${f(r.gpu.light)} plights ${f(r.gpu.plight)} fx ${f(r.gpu.fx)} tone ${f(r.gpu.tone)}`);
+        if (canTimestamp) L.push(`      gpu: geom ${f(r.gpu.geom)} sss ${f(r.gpu.sss)} light ${f(r.gpu.light)} plights ${f(r.gpu.plight)} fx ${f(r.gpu.fx)} tone ${f(r.gpu.tone)}`);
       }
       return L.join("\n");
     },
@@ -848,6 +973,7 @@ async function main() {
     camEye = [eye[0] * C.SUB, eye[1] * C.SUB, eye[2] * C.SUB];   // subcells — for the shadow march + the LOD distance
     // append the per-frame camera (eye in subcells) + MVP for the screen-space shadow march
     device.queue.writeBuffer(envBuf, 80, new Float32Array([ ...camEye, SHADOW_NBIAS, ...mvp ]));   // eye.w = shadow-map normal-offset bias
+    device.queue.writeBuffer(envBuf, 224, new Float32Array([ townShadowMode, sssBlur, PCF_RADIUS, 1 / SHADOW_RES ]));   // shq: shadow-quality modes
   }
   // The LOD distance: at MAX zoom + 56-degree pitch, EVERYTHING visible is highest detail (the
   // user's reference), so the LOD0/LOD1 split is the eye-to-farthest-visible-ground distance of
@@ -1022,6 +1148,9 @@ async function main() {
   const tTown = document.getElementById("t_town"); if (tTown) tTown.onchange = () => { drawTown = tTown.checked; diag.done = false; };
   const tTrees = document.getElementById("t_trees"); if (tTrees) tTrees.onchange = () => { drawTrees = tTrees.checked; diag.done = false; };
   const tLights = document.getElementById("t_lights"); if (tLights) tLights.onchange = () => { drawLights = tLights.checked; diag.done = false; };
+  // shadow-quality controls (opt-in): town shadow-map filter mode + the screen-space contact blur
+  const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
+  const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
   // the controlled diagnostic sweep + copy-to-clipboard
   const diagBtn = document.getElementById("diagBtn"), diagCopy = document.getElementById("diagCopy");
   if (diagBtn) diagBtn.onclick = () => { if (diag.active) return; diagBtn.disabled = true; diagCopy.disabled = true; diag.start(); };
@@ -1092,7 +1221,7 @@ async function main() {
     let s = `<b>frame</b> ${((prof.dt || 0) * 1000).toFixed(1)} ms (${(prof.fps || 0).toFixed(0)} fps)    `
           + `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
     s += canTimestamp
-      ? `<b>GPU</b> geom ${ms("geom")} · light ${ms("light")} · plights ${ms("plight")} · fx ${ms("fx")} · tone ${ms("tone")} · <b>Σ ${gpuTotal.toFixed(2)} ms</b> (passes overlap on tile GPUs)\n`
+      ? `<b>GPU</b> geom ${ms("geom")} · sss ${ms("sss")} · light ${ms("light")} · plights ${ms("plight")} · fx ${ms("fx")} · tone ${ms("tone")} · <b>Σ ${gpuTotal.toFixed(2)} ms</b> (passes overlap on tile GPUs)\n`
       : `<b>GPU</b> per-pass timing unavailable here — toggle town / trees / point lights to A/B each layer's frame cost\n`;
     s += `<b>draws</b> town ${N.staticRuns || 0} runs · trees ${N.trees || 0} (${N.treeRuns || 0} runs) · opaque ${N.inst || 0} inst · lights ${N.lights || 0}`;
     profEl.innerHTML = s;
@@ -1190,6 +1319,18 @@ async function main() {
     }
     gpass.end();
 
+    // 1b) SCREEN-SPACE CONTACT SHADOW as a buffer (shq.y==1): march once into sssTexA, then a
+    // separable bilateral blur (A->B->A). The lighting pass below reads sssTexA. When off, the
+    // lighting pass marches the SSS inline as before and these passes are skipped.
+    if (sssBlur) {
+      const sp = enc.beginRenderPass({ colorAttachments: [{ view: sssTexA.createView(), loadOp: "clear", clearValue: { r: 1, g: 1, b: 1, a: 1 }, storeOp: "store" }], timestampWrites: tw("sss") });
+      sp.setPipeline(sssPipe); sp.setBindGroup(0, sssBind); sp.draw(3); sp.end();
+      const bh = enc.beginRenderPass({ colorAttachments: [{ view: sssTexB.createView(), loadOp: "clear", clearValue: { r: 1, g: 1, b: 1, a: 1 }, storeOp: "store" }] });
+      bh.setPipeline(blurHPipe); bh.setBindGroup(0, blurHBind); bh.draw(3); bh.end();
+      const bv = enc.beginRenderPass({ colorAttachments: [{ view: sssTexA.createView(), loadOp: "clear", clearValue: { r: 1, g: 1, b: 1, a: 1 }, storeOp: "store" }] });
+      bv.setPipeline(blurVPipe); bv.setBindGroup(0, blurVBind); bv.draw(3); bv.end();
+    }
+
     // 2) LIGHTING -> HDR. One screen pass reads the G-buffer and applies the environment
     // (hemisphere ambient + a directional sun); the background (mask 0) becomes the sky. This
     // is where the next per-mite / per-FX point lights will additively accumulate.
@@ -1244,7 +1385,7 @@ async function main() {
     ema(prof, "cpu", performance.now() - cpu0);    // CPU: prep + uploads + encode
     prof.sim = updMs; prof.dt = dt; prof.fps = fps;
     prof.n = { staticRuns: dStaticRuns, treeRuns: dTreeRuns, trees: dTrees, inst: n, lights: runLights ? nLights : 0 };
-    prof.ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0 };
+    prof.ran = { geom: 1, light: 1, tone: 1, plight: runLights ? 1 : 0, fx: tc ? 1 : 0, sss: sssBlur ? 1 : 0 };
 
     // read back the per-pass GPU times (a frame or two behind; that's fine for a running average)
     if (tsRead) {

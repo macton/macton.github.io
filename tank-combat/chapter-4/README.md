@@ -94,6 +94,14 @@ frustum-culled per screen, shadow-casting, in their own buffer. They are pure sc
 never sees (no collision); the **thin trunk** on a cell boundary reads as decoration, not an
 obstacle. Same bake-once / scales-with-visibility discipline as the town.
 
+A **render-profile** panel (presentation-only) sits under the view: CPU section timing, per-pass
+GPU time via `timestamp-query` where the platform exposes it, draw counts, live **layer toggles**
+(town / trees / point lights), and a **run-diagnostics** sweep that A/B's each layer and the
+internal render scale by real frame time and copies a text report. Alongside it are **opt-in
+shadow-quality** experiments (default = the original look): the town shadow-map filter
+(2×2 PCF → rotated-Poisson PCF → revectorised silhouette AA, after Macedo et al., CGF 2019) and a
+screen-space contact-shadow path that renders to a buffer and separably bilateral-blurs it.
+
 ### The connected world & the instance layout (`render.h`)
 
 The whole **8×8 world is one connected map**: placements are world positions (anchor =
