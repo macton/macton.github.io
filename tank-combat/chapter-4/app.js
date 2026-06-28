@@ -1336,7 +1336,7 @@ async function main() {
   if (statusEl) statusEl.style.display = "none";
 
   // --- frame loop ---------------------------------------------------------
-  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0, uiTick = 0;
+  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
   const camLabelEl = document.getElementById("camlabel");   // cached: was a getElementById per frame
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
@@ -1562,19 +1562,20 @@ async function main() {
       }).catch(() => {});   // buffer can be discarded on teardown; ignore
     }
 
-    // Per-frame UI is THROTTLED to ~10Hz. Redrawing the 64-canvas overview minimap (a full
-    // sweep of every screen's cells + the whole 4096-mite swarm + 64 putImageData) and the live
-    // debug widgets EVERY frame is heavy main-thread work — and it runs AFTER the prof.cpu window,
-    // so the profiler never saw it. That main-thread cost competes with touch-event delivery and
-    // shows up as pan judder (worse on already-heavy frames). An overview map at 10Hz is plenty.
-    if ((uiTick++ % 6) === 0) {
-      const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
-      articleMap.update(camIdx);
-      if (pickerOpen) pickerMap.update(camIdx);
-      camLabelEl.textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
-      updateCamUI();
-      dbg.update({ fps, dt, updMs, instCount: n, cam });
-    }
+    // The 64-canvas overview minimap (a full sweep of every screen's cells + the 4096-mite swarm
+    // + 64 putImageData) and the live debug widgets (heatmap / belief-field redraws) are heavy
+    // main-thread work that runs AFTER the prof.cpu window — so the profiler never saw it — and it
+    // competes with touch-event delivery, showing up as pan judder. Both now SELF-SKIP when their
+    // panel is scrolled off-screen (the usual case while you play), so during play this costs
+    // nothing; when you scroll to look at them they update live per-frame (you're not panning then).
+    // THROTTLING this instead just concentrated the cost into a periodic spike (worse p95), so we
+    // run per-frame and rely on the visibility gates. camlabel/camUI stay (the toolbar's always up).
+    const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
+    articleMap.update(camIdx);
+    if (pickerOpen) pickerMap.update(camIdx);
+    camLabelEl.textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
+    updateCamUI();
+    dbg.update({ fps, dt, updMs, instCount: n, cam });
     if (profEl) {
       if (diag.active) profEl.textContent = `diagnostics… ${diag.ci + 1}/${DIAG_CONFIGS.length}  "${DIAG_CONFIGS[diag.ci].k}"  (${diag.phase === "warm" ? "settling" : diag.coll.length + "/" + DIAG_N})`;
       else if (followDiag.active) profEl.textContent = `follow diag… leg ${followDiag.leg + 1}/${followDiag.wps.length} → cell ${followDiag.wps[followDiag.leg].wcx},${followDiag.wps[followDiag.leg].wcy}  (${followDiag.legSamp.length} frames)`;
@@ -1639,7 +1640,19 @@ function makeMiniMap(container, onPick, R) {
 }
 
 function mountWidgets(wasm, view, C) {
-  const updaters = [], api = { update(info) { for (const u of updaters) u(info); } };
+  // Skip every widget update while the widget area is scrolled off-screen — the heatmap /
+  // belief-field / mite-pool redraws are heavy main-thread work that otherwise competes with
+  // the game's render + touch input (pan judder). During play these sit below the fold; you
+  // only see them when you've scrolled down (and aren't panning). Defaults visible.
+  let widgetsVisible = 1;
+  const updaters = [], api = { update(info) { if (widgetsVisible > 0) for (const u of updaters) u(info); } };
+  if (typeof IntersectionObserver !== "undefined") {
+    const seen = new Set();
+    const io = new IntersectionObserver((es) => { for (const e of es) e.isIntersecting ? seen.add(e.target) : seen.delete(e.target); widgetsVisible = seen.size; });
+    for (const id of ["w-stats", "w-controls", "w-tanks", "w-grid", "w-occupancy", "w-belief", "w-mite-pool", "w-mite-tunables"]) {
+      const el = document.getElementById(id); if (el) io.observe(el);
+    }
+  }
   const focused = () => document.activeElement;
   const at = (id) => document.getElementById(id);
 
