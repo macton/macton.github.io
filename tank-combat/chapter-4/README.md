@@ -105,10 +105,18 @@ to a buffer and separably bilateral-blurs it. The default is **rotated-Poisson P
 
 The deferred passes are full-screen and fill/bandwidth-bound (the diagnostics showed the close-up
 drop is resolution-bound, not geometry), so two perf levers ship with them: **adaptive resolution**
-(trim the internal render scale to hold ~60fps, probe back up when there's slack — an "auto-res"
-toggle, the live scale shown in the panel) and a **depth-reconstructed G-buffer** — world position
+(an "auto-res" toggle, the live scale + target shown in the panel) and a **depth-reconstructed G-buffer** — world position
 is rebuilt from the depth buffer via the inverse MVP instead of a fat `rgba32f` position target, so
 the geometry writes one fewer 16-byte channel and every full-screen pass reads less.
+
+Auto-res targets the **display's actual refresh rate, discovered at runtime** — not a hardcoded
+60fps. A fixed budget left content at ~59fps on a faster panel (77/120Hz), and 59fps on a 77Hz
+display *beats*: each frame is shown for 1 or 2 panel refreshes, a micro-stutter even when the
+frame *time* is rock-steady. The content can't reveal a fast panel while stuck at 59fps, so auto-res
+**probes**: it trial-trims the render scale and watches the frame time — if it drops, the panel has
+headroom (faster than we were running), so it adopts the faster period and trims to fit it 1:1; if
+it holds, the panel is vsync-locked there, so it reverts and rests (no churn). The quality floor
+protects sharpness; a genuine overload always trims. The panel target (Hz) shows in the profiler.
 
 Motion is decoupled from the display rate by **render interpolation** (an "interpolate" toggle, on by
 default). The sim is a fixed timestep, so on a display that beats against it a steadily-moving thing

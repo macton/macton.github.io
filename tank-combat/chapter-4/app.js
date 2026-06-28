@@ -825,16 +825,44 @@ async function main() {
     return { n, med: a[n >> 1], mean: m, p95: pct(0.95), p99: pct(0.99), max: a[n - 1], min: a[0], sd };
   }
   let autoRes = true;
-  const AR_BUDGET = 18.5, AR_P95 = 26, AR_MIN = 0.5, AR_STEP = 0.1, AR_PROBE = 8;   // median / spike thresholds (ms)
-  let arWin = [], arSince = 0;
+  const AR_MIN = 0.5, AR_STEP = 0.1;
+  let arWin = [];
+  // ADAPTIVE RESOLUTION with ACTIVE REFRESH DISCOVERY. A fixed 60fps budget left content at
+  // ~59fps on a faster panel (e.g. 77/120Hz), and 59fps on a 77Hz display BEATS — each frame is
+  // shown for 1 or 2 panel refreshes, a micro-stutter even though the frame TIME is rock-steady.
+  // We can't just "measure" the panel rate: stuck at 59fps the content never renders fast enough
+  // to reveal a 77Hz panel. So we DISCOVER it — periodically trial-trim the resolution and watch:
+  //   • frame time DROPS  -> the panel has headroom (it's faster than we were running) -> adopt the
+  //     faster period and keep trimming toward it, so the content fits the real refresh 1:1.
+  //   • frame time HOLDS  -> vsync-locked at this rate -> revert, and rest a long while (no churn).
+  // refreshMs is the discovered panel PERIOD (ms); the readout shows the target Hz. Quality floor
+  // AR_MIN protects sharpness; a genuine overload (p95 far past the refresh) always trims.
+  let refreshMs = 16.7;
+  let arBaseMed = 99, arProbe = false, arCooldown = 6;   // arProbe: a trial trim awaiting its verdict
   function autoResTick(dtMs) {
     if (!autoRes || diag.active) return;   // stays live during the follow-diag — we want to see it act
     arWin.push(dtMs);
     if (arWin.length < 30) return;
-    const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1], p95 = s[Math.floor(0.95 * s.length)]; arWin = []; arSince++;
-    // trim on a high median OR a high p95 (frequent SPIKES — the jitter case the median hides)
-    if ((med > AR_BUDGET || p95 > AR_P95) && renderScale > AR_MIN) { renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arSince = 0; }
-    else if (arSince >= AR_PROBE && renderScale < 1) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); arSince = 0; }
+    const s = arWin.slice().sort((a, b) => a - b), med = s[s.length >> 1], p95 = s[Math.floor(0.95 * s.length)]; arWin = [];
+    // genuine overload (frames far past the refresh): always trim, abandon any probe.
+    if (p95 > refreshMs * 1.8 && renderScale > AR_MIN) {
+      renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arProbe = false; arCooldown = 6; arBaseMed = 99; return;
+    }
+    if (arProbe) {                                    // verdict on the last trial trim
+      arProbe = false;
+      if (med < arBaseMed - 0.6) {                    // it got FASTER -> the panel has headroom; learn it, keep going
+        refreshMs = Math.max(6.5, Math.min(refreshMs, med)); arCooldown = 4;
+      } else {                                        // it didn't -> vsync-locked here; undo + rest long (avoid churn)
+        if (renderScale < 1) { renderScale = Math.min(1, +(renderScale + AR_STEP).toFixed(2)); resize(); }
+        refreshMs = Math.min(18, Math.max(refreshMs, med)); arCooldown = 200;
+      }
+      arBaseMed = med; return;
+    }
+    if (arCooldown > 0) { arCooldown--; arBaseMed = med; return; }
+    // idle: trial-trim DOWN to probe whether the panel can run faster than we are. (If we're already
+    // at the quality floor, just rest — we're giving it our best.)
+    if (renderScale > AR_MIN) { arBaseMed = med; renderScale = Math.max(AR_MIN, +(renderScale - AR_STEP).toFixed(2)); resize(); arProbe = true; }
+    else arCooldown = 200;
   }
   function resize() {
     const dpr = Math.min(devicePixelRatio || 1, 2) * renderScale;
@@ -1279,7 +1307,7 @@ async function main() {
   // shadow-quality controls (opt-in): town shadow-map filter mode + the screen-space contact blur
   const sqTown = document.getElementById("shq_town"); if (sqTown) sqTown.onchange = () => { townShadowMode = parseInt(sqTown.value, 10) || 0; diag.done = false; };
   const sqSss = document.getElementById("shq_sss"); if (sqSss) sqSss.onchange = () => { sssBlur = sqSss.checked ? 1 : 0; diag.done = false; };
-  const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; };
+  const arT = document.getElementById("autores"); if (arT) arT.onchange = () => { autoRes = arT.checked; if (!autoRes && renderScale !== 1) { renderScale = 1; resize(); } arWin = []; arProbe = false; arCooldown = 6; };
   const ipT = document.getElementById("interp"); if (ipT) ipT.onchange = () => { interpEnabled = ipT.checked; if (!interpEnabled) wasm.set_interp(0); diag.done = false; };
   // any control change in the profile panel dismisses a finished report and resumes the live readout
   const pc = document.getElementById("profctl"); if (pc) pc.addEventListener("input", () => { reportShown = false; });
@@ -1355,7 +1383,7 @@ async function main() {
     const gpuTotal = GP.reduce((a, p) => a + (R[p] ? g[p] || 0 : 0), 0);
     const ft = stats(ftRecent(120));   // the real frame-time distribution over ~2s (not the smoothed mean)
     let s = ft
-      ? `<b>frame</b> ${ft.med.toFixed(1)} ms (${(1000 / ft.med).toFixed(0)} fps) · p95 <b>${ft.p95.toFixed(1)}</b> · max <b>${ft.max.toFixed(1)}</b> · jitter ${ft.sd.toFixed(1)} ms · <b>res</b> ${renderScale.toFixed(2)}×${autoRes ? " auto" : ""}\n`
+      ? `<b>frame</b> ${ft.med.toFixed(1)} ms (${(1000 / ft.med).toFixed(0)} fps) · p95 <b>${ft.p95.toFixed(1)}</b> · max <b>${ft.max.toFixed(1)}</b> · jitter ${ft.sd.toFixed(1)} ms · <b>res</b> ${renderScale.toFixed(2)}×${autoRes ? ` auto→${Math.round(1000 / refreshMs)}Hz` : ""}\n`
       : "";
     s += `<b>CPU</b> sim ${prof.sim.toFixed(2)} · encode ${prof.enc.toFixed(2)} · total ${prof.cpu.toFixed(2)} ms\n`;
     s += canTimestamp
