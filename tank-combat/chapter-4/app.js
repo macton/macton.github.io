@@ -453,7 +453,14 @@ async function main() {
   // timestamp-query gives real per-pass GPU time; not every platform exposes it (notably iOS
   // Safari today), so it is optional — the profiler falls back to CPU timing + the layer toggles.
   const canTimestamp = adapter.features.has("timestamp-query");
-  const device = await adapter.requestDevice({ requiredFeatures: canTimestamp ? ["timestamp-query"] : [] });
+  // rg11b10ufloat as a blendable RENDER TARGET needs this feature; with it we can halve the HDR
+  // target (8 -> 4 bytes/px), cutting the bandwidth of every full-screen lighting pass. Falls back
+  // to rgba16float where it's unavailable. (Point-light accumulation is all positive, so the
+  // unsigned range is fine.)
+  const canRG11 = adapter.features.has("rg11b10ufloat-renderable");
+  const device = await adapter.requestDevice({ requiredFeatures: [
+    ...(canTimestamp ? ["timestamp-query"] : []),
+    ...(canRG11 ? ["rg11b10ufloat-renderable"] : []) ] });
   device.addEventListener("uncapturederror", (e) => console.error("WEBGPU_UNCAPTURED:", e.error.message));
   const canvas = document.getElementById("gpu");
   const ctx = canvas.getContext("webgpu");
@@ -583,7 +590,8 @@ async function main() {
   // lighting is then a screen pass that reads the G-buffer. That is what makes per-mite /
   // per-FX point lights affordable later: their cost is the lit pixels they cover, not the
   // object count times the light count. For now the screen pass is just the environment.
-  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", HDR = "rgba16float", DEPTH = "depth32float";   // depth32float so the lighting can sample it + reconstruct world position
+  const GBUF_COLOR = "rgba8unorm", GBUF_NORMAL = "rgba8unorm", DEPTH = "depth32float";   // depth32float so the lighting can sample it + reconstruct world position
+  const HDR = canRG11 ? "rg11b10ufloat" : "rgba16float";   // half the HDR bandwidth when the device allows it as a blendable target
 
   // GEOMETRY: fill the G-buffer (albedo, normal, world position) + depth. No lighting here.
   const geometryPipe = device.createRenderPipeline({ layout,
