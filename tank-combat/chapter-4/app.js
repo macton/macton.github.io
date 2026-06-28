@@ -392,6 +392,11 @@ async function main() {
   // the dynamic buffer, so it feeds the SAME pipeline — we just bind THIS buffer for the
   // static draws. Sized to the cell count (the bake never exceeds one instance per cell).
   const staticBuf = device.createBuffer({ size: C.NWC * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  // the static PROPS (trees on grass corners): a second baked-once buffer, same Inst layout,
+  // uploaded alongside the town on the same version tick. Drawn with the M_TREE procedural mesh
+  // (no LOD — a tree is cheap and small), frustum-culled per screen exactly like the town runs.
+  const propBuf = device.createBuffer({ size: C.NWC * C.STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  let propRuns = [];
   // each screen's world AABB (subcells), constant — the frustum cull tests the visible box
   // against these to pick which screens' runs to draw ("at most, a filter for culling").
   const screenBox = [];
@@ -410,6 +415,15 @@ async function main() {
     for (let r = 0; r < nr; r++) { const o = r * C.SRSTRIDE;
       staticRuns.push({ screen: dv.getUint16(o, true), mesh: dv.getUint16(o + 2, true),
                         first: dv.getUint32(o + 4, true), count: dv.getUint32(o + 8, true) }); }
+    // the trees re-bake on the same tick: upload them + read their per-screen runs (one M_TREE
+    // run per screen). Same Inst/StaticRun layout, so they share the run stride and pipeline.
+    const npi = wasm.prop_inst_count();
+    device.queue.writeBuffer(propBuf, 0, new Uint8Array(mem(), wasm.prop_inst_ptr(), npi * C.STRIDE));
+    const npr = wasm.prop_run_count(), pdv = new DataView(mem(), wasm.prop_run_ptr(), npr * C.SRSTRIDE);
+    propRuns = [];
+    for (let r = 0; r < npr; r++) { const o = r * C.SRSTRIDE;
+      propRuns.push({ screen: pdv.getUint16(o, true), mesh: pdv.getUint16(o + 2, true),
+                      first: pdv.getUint32(o + 4, true), count: pdv.getUint32(o + 8, true) }); }
     // the town changed, so its baked SUN shadow is stale: refit the light frustum to the tallest
     // instance (wz + hz, subcells) and re-render the depth map. Once, here — never per frame.
     const idv = new DataView(mem(), wasm.static_inst_ptr(), nInst * C.STRIDE);
@@ -419,6 +433,9 @@ async function main() {
       const top = idv.getInt16(o + 8, true) + idv.getInt16(o + 10, true); if (top > maxTop) maxTop = top;
       const wcx = (idv.getInt32(o, true) / C.SUB) | 0, wcy = (idv.getInt32(o + 4, true) / C.SUB) | 0;
       cell2static[wcy * C.BW + wcx] = i; }
+    // trees cast shadows too, so the light frustum must reach the tallest tree's top (wz+hz).
+    const pdv2 = new DataView(mem(), wasm.prop_inst_ptr(), npi * C.STRIDE);
+    for (let i = 0; i < npi; i++) { const top = pdv2.getInt16(i * C.STRIDE + 8, true) + pdv2.getInt16(i * C.STRIDE + 10, true); if (top > maxTop) maxTop = top; }
     lightMVP = sunLightMatrix(maxTop);
     device.queue.writeBuffer(lightViewBuf, 0, new Float32Array(lightMVP));   // for the bake (vs_shadow)
     device.queue.writeBuffer(envBuf, 160, new Float32Array(lightMVP));       // for the sample (fs_light)
@@ -615,6 +632,9 @@ async function main() {
     sp.setPipeline(shadowPipe); sp.setBindGroup(0, shadowBind);
     sp.setVertexBuffer(0, meshBuf); sp.setVertexBuffer(1, staticBuf);
     for (const run of staticRuns) { const m = meshTable[run.mesh + C.LOD2OFF]; sp.draw(m.cnt, run.count, m.off, run.first); }
+    // the trees cast into the same baked map (their real M_TREE mesh — no LOD massing to swap).
+    sp.setVertexBuffer(1, propBuf);
+    for (const run of propRuns) { const m = meshTable[run.mesh]; sp.draw(m.cnt, run.count, m.off, run.first); }
     sp.end();
     device.queue.submit([enc.finish()]);
   }
@@ -1006,6 +1026,12 @@ async function main() {
       for (const run of staticRuns) { if (screenLod[run.screen] !== 1 || !inView(run)) continue;
         const m = imposterTable[run.mesh - C.MPROC]; gpass.draw(m.cnt, run.count, m.off, run.first); }
       gpass.setPipeline(geometryPipe); gpass.setVertexBuffer(0, meshBuf);  // restore for the dynamic kinds
+    }
+    // the static PROPS (trees): art-pass only, frustum-culled per screen, drawn with the M_TREE
+    // procedural mesh at every distance (no LOD — a tree is a handful of triangles).
+    if (useAssets) {
+      gpass.setVertexBuffer(1, propBuf);
+      for (const run of propRuns) { if (!inView(run)) continue; const m = meshTable[run.mesh]; gpass.draw(m.cnt, run.count, m.off, run.first); }
     }
     // the DYNAMIC opaque kinds from their own buffer: one draw per kind, that kind's mesh.
     gpass.setVertexBuffer(1, instBuf);

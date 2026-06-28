@@ -28,7 +28,7 @@
 /* The procedural meshes (the dynamic things). The town meshes are NOT in this enum —
  * they are indexed by their own group bases in map_mesh_data.h and offset by
  * M_PROC_COUNT into the shared GPU vertex buffer at draw time. */
-enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_PROC_COUNT };
+enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE, M_PROC_COUNT };
 
 extern const int8_t   MESH_VERT[];                   /* procedural meshes, MESH_VSTRIDE bytes/vertex */
 extern const uint32_t MESH_VOFF[M_PROC_COUNT];       /* first vertex of each procedural mesh */

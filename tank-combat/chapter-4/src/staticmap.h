@@ -42,4 +42,23 @@ typedef struct { uint16_t screen, mesh; uint32_t first, count; } StaticRun;
 uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
                           Inst* inst, StaticRun* runs, uint32_t* n_runs);
 
+/* ---- static PROPS: trees, scattered on grass-cell corners (render-only scenery) ----
+ * A second static layer, baked once exactly like the town: low-poly trees (M_TREE) placed
+ * at GRID-CELL CORNERS whose four surrounding cells are all grass — deep in the open, hash-
+ * thinned for density, each on the ground with a slight per-corner rotation. They are pure
+ * decoration: the sim never knows they exist (no collision), and the thin trunk sitting on
+ * a cell boundary signals "scenery, not obstacle". Same Inst/StaticRun layout + per-screen
+ * grouping as the town, so the host uploads once and frustum-culls per screen. Because trees
+ * sit on corners, NOT one-per-cell, they live in their OWN buffer (the town's one-instance-
+ * per-cell invariant — which the wall-shake cell->instance map relies on — stays intact). */
+#define STATIC_PROP_INST_MAX  N_WORLD_CELLS          /* <= one tree per grass corner (<= cells) */
+#define STATIC_PROP_RUN_MAX   N_SCREENS              /* one M_TREE run per screen */
+
+/* Bake the trees. Scatters M_TREE instances onto all-grass corners of the frozen map, writes
+ * them into `inst` ordered by screen, and fills `runs` with one run per non-empty screen.
+ * Returns the instance count (<= STATIC_PROP_INST_MAX); writes *n_runs (<= STATIC_PROP_RUN_MAX).
+ * A pure function of (grid, nest_cell) — re-runs with the town on a wall/nest edit. */
+uint32_t build_static_props(const uint32_t* grid, const uint16_t* nest_cell,
+                            Inst* inst, StaticRun* runs, uint32_t* n_runs);
+
 #endif

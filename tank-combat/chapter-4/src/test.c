@@ -1087,6 +1087,70 @@ static void t_static_map(void) {
   check(memcmp(g_si2, g_si, ni * sizeof(Inst)) != 0, "the wall edit actually changes the baked town");
 }
 
+/* the static PROPS bake (build_static_props): trees scattered on grass corners. Render-only
+ * scenery — the sim never sees them — so the test pins WHERE they may sit (cell corners, on
+ * open non-nest ground), that they partition into per-screen M_TREE runs, and that the bake
+ * is pure, exactly the disciplines the static town is held to. */
+static Inst      g_pi[STATIC_PROP_INST_MAX], g_pi2[STATIC_PROP_INST_MAX];
+static StaticRun g_pr[STATIC_PROP_RUN_MAX], g_pr2[STATIC_PROP_RUN_MAX];
+static int8_t    g_isnest[N_WORLD_CELLS];
+static void t_static_props(void) {
+  printf("the static PROPS (trees) are render-only scenery scattered on grass corners:\n");
+  sim_init(&W);
+  uint32_t npr = 0, npi = build_static_props(W.grid, W.nest_cell, g_pi, g_pr, &npr);
+  check(npi > 0 && npi <= (uint32_t)STATIC_PROP_INST_MAX, "trees are placed, within the prop cap");
+  check(npr > 0 && npr <= (uint32_t)STATIC_PROP_RUN_MAX, "the prop run table is non-empty and within bound");
+
+  /* the runs partition the prop buffer: contiguous from 0, ordered, non-empty, all M_TREE. */
+  int part = (npr == 0 || g_pr[0].first == 0); uint32_t cover = 0;
+  for (uint32_t r = 0; r < npr; r++) {
+    cover += g_pr[r].count;
+    if (g_pr[r].count == 0) part = 0;
+    if (r + 1 < npr && g_pr[r].first + g_pr[r].count != g_pr[r + 1].first) part = 0;
+    if (g_pr[r].screen >= (uint16_t)N_SCREENS) part = 0;
+    if (g_pr[r].mesh != (uint16_t)M_TREE) part = 0;
+  }
+  check(part, "prop runs are contiguous, ordered, non-empty, all M_TREE, valid screen");
+  check(cover == npi, "the prop runs cover every tree exactly once");
+
+  /* a nest-cell membership, for the placement check below */
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) g_isnest[c] = 0;
+  for (uint32_t n = 0; n < NEST_COUNT; n++) g_isnest[W.nest_cell[n]] = 1;
+
+  /* WHERE a tree may sit: at a grid-cell CORNER (wx,wy on the cell grid — not the town's
+   * cell-centre placement), grounded (wz==hz>0), square-footprinted, white-tinted (it carries
+   * its own brown/green); inside its run's screen; and its four surrounding cells all OPEN and
+   * non-nest, so a tree never lands on a building or a landmark. */
+  int corner = 1, ground = 1, open4 = 1, boxed = 1;
+  for (uint32_t r = 0; r < npr; r++) {
+    int32_t sx = g_pr[r].screen % SCREENS_X, sy = g_pr[r].screen / SCREENS_X;
+    int32_t x0 = sx * GRID_W * SUB, x1 = x0 + GRID_W * SUB, y0 = sy * GRID_H * SUB, y1 = y0 + GRID_H * SUB;
+    for (uint32_t i = g_pr[r].first; i < g_pr[r].first + g_pr[r].count; i++) {
+      const Inst* t = &g_pi[i];
+      if (t->wx % SUB != 0 || t->wy % SUB != 0) corner = 0;
+      if (t->wz != t->hz || t->hz <= 0 || t->hx <= 0 || t->hx != t->hy || t->rgba != 0xFFFFFFFFu) ground = 0;
+      if (t->wx < x0 || t->wx > x1 || t->wy < y0 || t->wy > y1) boxed = 0;   /* corner sits on/inside the screen box */
+      int32_t cx = t->wx / SUB, cy = t->wy / SUB;
+      const int dxs[4] = { -1, 0, -1, 0 }, dys[4] = { -1, -1, 0, 0 };
+      for (int k = 0; k < 4; k++) {
+        int32_t ax = cx + dxs[k], ay = cy + dys[k];
+        if (cell_is_wall(W.grid, ax, ay)) open4 = 0;
+        int32_t wx = ((ax % BIG_W) + BIG_W) % BIG_W, wy = ((ay % BIG_H) + BIG_H) % BIG_H;
+        if (g_isnest[wc_pack(wx, wy)]) open4 = 0;
+      }
+    }
+  }
+  check(corner, "every tree sits at a grid-cell corner (on the cell grid, not the cell centre)");
+  check(ground && boxed, "every tree is grounded + square-footprinted + white-tinted, inside its screen");
+  check(open4, "every tree's four cells are open and non-nest (never on a building or landmark)");
+
+  /* a pure function of the map: same map -> byte-identical trees. */
+  uint32_t npr2 = 0, npi2 = build_static_props(W.grid, W.nest_cell, g_pi2, g_pr2, &npr2);
+  check(npi2 == npi && npr2 == npr &&
+        memcmp(g_pi2, g_pi, npi * sizeof(Inst)) == 0 && memcmp(g_pr2, g_pr, npr * sizeof(StaticRun)) == 0,
+        "the prop bake is a pure function — same map rebuilds byte-identical trees");
+}
+
 static void t_render_overlays(void) {
   printf("interaction overlays are render-only (derived from the sim + one host hover cell):\n");
   sim_init(&W);
@@ -1160,6 +1224,7 @@ int main(void) {
   t_render_deterministic();
   t_render_visibility();
   t_static_map();
+  t_static_props();
   t_render_overlays();
   t_lights();
   printf("\n%d checks, %d failed\n", g_checks, g_fails);

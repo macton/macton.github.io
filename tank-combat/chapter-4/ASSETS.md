@@ -34,6 +34,19 @@ This is the chapter's thesis applied to the map: the sim never knows it became a
 the town is a *projection* of the sim's walls and nests, the same bake-it-once discipline
 as the escape table.
 
+### Static props (trees)
+
+A second baked-once layer, alongside the town: low-poly **trees** (`M_TREE`) scattered for
+visual interest on the grass. `src/staticmap.c` (`build_static_props`) places one at a **grid-
+cell corner** wherever the four cells meeting there are all grass — deep in the open, hash-
+thinned to ~22% of eligible corners, each grounded with a hash-driven size — and groups them
+by screen into runs, exactly like the town. The host uploads the buffer once and frustum-culls
+per screen; the trees also cast into the baked sun shadow map. Because they sit on **corners,
+not one-per-cell**, they live in their **own buffer** — the town's one-instance-per-cell
+invariant (which the wall-shake cell→instance map depends on) is left intact. They are pure
+scenery: the **sim never sees them** (no collision), and a **thin trunk** parked on a cell
+boundary reads as decoration, not an obstacle — there is no reason to expect a tank to hit one.
+
 ## What ships in the repo
 
 **Procedural meshes** — original, CC0, no attribution. A packed `int8` vertex buffer
@@ -47,6 +60,10 @@ ships in the binary.
 | `M_PYRAMID` | square pyramid | `K_MITE` | the swarm (a little spike) |
 | `M_HULL`    | tapered box | `K_HULL` | tank bodies (oriented by `tank_ang`) |
 | `M_TURRET`  | tapered dome | `K_TURRET` | tank turrets (oriented by `tank_turret`) |
+| `M_TREE`    | thin trunk + faceted canopy | *(unbound — a STATIC prop)* | scenery scattered on grass corners (its own static-props buffer, not a per-frame kind) |
+
+`M_TREE` is the one procedural mesh that carries its **own baked colours** (a brown trunk, a green
+canopy) instead of white — the same path the town meshes take, so its instance tint stays white.
 
 Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.

@@ -141,3 +141,61 @@ uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
   *n_runs = nr;
   return ni;
 }
+
+/* ---- static PROPS: trees on grass corners (render-only scenery; see staticmap.h) ----
+ * A grass cell is the town's "wide-open interior": open (not a wall), not a road (no wall in
+ * its 8-neighbourhood), and not a nest. cell_is_wall / is_road already wrap toroidally; the
+ * nest lookup wraps explicitly so the scatter tiles seamlessly like the town. */
+#define TREE_DENSITY  22    /* % of eligible (all-grass) corners that grow a tree */
+
+static int wrap_c(int v, int n) { v %= n; return v < 0 ? v + n : v; }
+static int is_grass(const uint32_t* grid, const int16_t* nest_at, int32_t x, int32_t y) {
+  if (nest_at[wc_pack(wrap_c(x, BIG_W), wrap_c(y, BIG_H))] >= 0) return 0;   /* nest -> landmark */
+  if (cell_is_wall(grid, x, y)) return 0;                                    /* wall -> building */
+  if (is_road(grid, x, y)) return 0;                                         /* by a wall -> road */
+  return 1;                                                                  /* open interior -> grass */
+}
+/* a corner (cx,cy) — the shared vertex of cells (cx-1,cy-1),(cx,cy-1),(cx-1,cy),(cx,cy), at
+ * world (cx*SUB, cy*SUB) — grows a tree iff all four cells are grass and the hash passes. */
+static int corner_has_tree(const uint32_t* grid, const int16_t* nest_at, int32_t cx, int32_t cy) {
+  if (!is_grass(grid, nest_at, cx - 1, cy - 1) || !is_grass(grid, nest_at, cx, cy - 1) ||
+      !is_grass(grid, nest_at, cx - 1, cy)     || !is_grass(grid, nest_at, cx, cy)) return 0;
+  return (int)(cell_hash(cx, cy) % 100u) < TREE_DENSITY;
+}
+
+uint32_t build_static_props(const uint32_t* grid, const uint16_t* nest_cell,
+                            Inst* inst, StaticRun* runs, uint32_t* n_runs) {
+  for (uint32_t c = 0; c < N_WORLD_CELLS; c++) s_nest_at[c] = -1;
+  for (uint32_t n = 0; n < NEST_COUNT; n++) s_nest_at[nest_cell[n]] = (int16_t)n;
+
+  uint32_t ni = 0, nr = 0;
+  /* walk screen by screen so trees bucket by screen (all share M_TREE); a corner is owned
+   * by the screen of its lower-right cell (cx,cy), which is where the corner's world position
+   * sits inside the screen AABB the host culls against. */
+  for (int sy = 0; sy < SCREENS_Y; sy++)
+    for (int sx = 0; sx < SCREENS_X; sx++) {
+      int s = sy * SCREENS_X + sx, bx = sx * GRID_W, by = sy * GRID_H;
+      uint32_t first = ni;
+      for (int ly = 0; ly < GRID_H; ly++)
+        for (int lx = 0; lx < GRID_W; lx++) {
+          int32_t cx = bx + lx, cy = by + ly;
+          if (!corner_has_tree(grid, s_nest_at, cx, cy)) continue;
+          /* hash-driven size variation (no rotation — the canopy is square-symmetric). The
+           * tree spans the unit box z[-1,1]; wz==hz drops its base onto the ground (z=0). */
+          uint32_t h = cell_hash(cx, cy);
+          int v = (int)((h >> 11) % 64u);          /* 0..63 */
+          int16_t hz = (int16_t)(176 + v * 2);     /* half-height  176..302 (height 352..604) */
+          int16_t hr = (int16_t)(84 + v);          /* footprint half 84..147 (thin trunk = 0.13*hr) */
+          Inst* o = &inst[ni++];
+          o->wx = cx * SUB; o->wy = cy * SUB;      /* the corner (cell min-corner), not the centre */
+          o->wz = hz; o->hz = hz; o->hx = hr; o->hy = hr;
+          o->co = Q14_COS[0]; o->si = Q14_SIN[0]; o->rgba = 0xFFFFFFFFu;   /* white: tree carries its own colours */
+        }
+      if (ni > first) {
+        runs[nr].screen = (uint16_t)s; runs[nr].mesh = (uint16_t)M_TREE;
+        runs[nr].first = first; runs[nr].count = ni - first; nr++;
+      }
+    }
+  *n_runs = nr;
+  return ni;
+}

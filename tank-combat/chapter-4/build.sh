@@ -27,6 +27,9 @@ cd "$(dirname "$0")"
 #                                          instance/cell; built once at init, re-baked only
 #                                          on a wall/nest edit; uploaded once, then culled)
 #   static run table  StaticRun * (N_SCREENS*MAP_MESH_COUNT) ~= 12 KB
+#   static props (trees)  24-byte Inst * N_WORLD_CELLS         ~= 460 KB (a second baked-once
+#                                          buffer; trees scatter on grass corners, a few
+#                                          hundred in practice; uploaded once, culled per screen)
 #   procedural meshes (src/mesh_data.c)                     ~= 2 KB (loaded once)
 #   town meshes (src/map_mesh_data.c, baked Kenney art)     ~= 400 KB (data segment, once)
 # The DEPTH buffer is a viewport-sized GPU texture, NOT wasm linear memory. The sim's

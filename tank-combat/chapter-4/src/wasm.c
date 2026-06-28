@@ -48,6 +48,11 @@ static uint16_t g_hover = REC_EMPTY;
 static Inst      g_static_inst[STATIC_INST_MAX];
 static StaticRun g_static_runs[STATIC_RUN_MAX];
 static uint32_t  g_static_inst_count, g_static_run_count, g_static_version;
+/* the static PROPS (trees on grass corners): a second baked-once layer, re-baked with the
+ * town on the same version tick. Its own buffer — trees sit on corners, not one-per-cell. */
+static Inst      g_prop_inst[STATIC_PROP_INST_MAX];
+static StaticRun g_prop_runs[STATIC_PROP_RUN_MAX];
+static uint32_t  g_prop_inst_count, g_prop_run_count;
 
 static void rebuild(void) {
   g_inst_count = build_view(&g_world, g_inst, &g_dl, g_wx0, g_wy0, g_wx1, g_wy1, g_hover);
@@ -56,6 +61,8 @@ static void rebuild(void) {
 static void rebuild_static(void) {
   g_static_inst_count = build_static_map(g_world.grid, g_world.nest_cell,
                                          g_static_inst, g_static_runs, &g_static_run_count);
+  g_prop_inst_count = build_static_props(g_world.grid, g_world.nest_cell,
+                                         g_prop_inst, g_prop_runs, &g_prop_run_count);
   g_static_version++;
 }
 
@@ -239,3 +246,9 @@ EXPORT(static_run_ptr)    const StaticRun* static_run_ptr(void)    { return g_st
 EXPORT(static_run_count)  uint32_t         static_run_count(void)  { return g_static_run_count; }
 EXPORT(static_run_stride) uint32_t         static_run_stride(void) { return (uint32_t)sizeof(StaticRun); }
 EXPORT(static_version)    uint32_t         static_version(void)    { return g_static_version; }
+/* the static PROPS (trees): same Inst/StaticRun layout + stride as the town, its own buffer.
+ * Re-baked on the same static_version tick, so the host re-uploads it in the same sync. */
+EXPORT(prop_inst_ptr)     const Inst*      prop_inst_ptr(void)     { return g_prop_inst; }
+EXPORT(prop_inst_count)   uint32_t         prop_inst_count(void)   { return g_prop_inst_count; }
+EXPORT(prop_run_ptr)      const StaticRun* prop_run_ptr(void)      { return g_prop_runs; }
+EXPORT(prop_run_count)    uint32_t         prop_run_count(void)    { return g_prop_run_count; }
