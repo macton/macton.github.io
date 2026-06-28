@@ -1336,7 +1336,8 @@ async function main() {
   if (statusEl) statusEl.style.display = "none";
 
   // --- frame loop ---------------------------------------------------------
-  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0;
+  let paused = false, stepOnce = false, last = performance.now(), fps = 60, acc = 0, updMs = 0, uiTick = 0;
+  const camLabelEl = document.getElementById("camlabel");   // cached: was a getElementById per frame
   // one timed sim step: the whole per-tick CPU cost (index rebuild, gossip, fields,
   // movement, combat) — EMA-smoothed so the readout is stable across frames.
   // snapshot the pre-tick positions FIRST (the "previous" frame for render interpolation),
@@ -1561,12 +1562,19 @@ async function main() {
       }).catch(() => {});   // buffer can be discarded on teardown; ignore
     }
 
-    const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
-    articleMap.update(camIdx);
-    if (pickerOpen) pickerMap.update(camIdx);
-    document.getElementById("camlabel").textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
-    updateCamUI();
-    dbg.update({ fps, dt, updMs, instCount: n, cam });
+    // Per-frame UI is THROTTLED to ~10Hz. Redrawing the 64-canvas overview minimap (a full
+    // sweep of every screen's cells + the whole 4096-mite swarm + 64 putImageData) and the live
+    // debug widgets EVERY frame is heavy main-thread work — and it runs AFTER the prof.cpu window,
+    // so the profiler never saw it. That main-thread cost competes with touch-event delivery and
+    // shows up as pan judder (worse on already-heavy frames). An overview map at 10Hz is plenty.
+    if ((uiTick++ % 6) === 0) {
+      const cam = camScreen(), camIdx = cam.sy * C.SX + cam.sx;
+      articleMap.update(camIdx);
+      if (pickerOpen) pickerMap.update(camIdx);
+      camLabelEl.textContent = pickerOpen ? "pick a screen" : `screen ${cam.sx},${cam.sy} ▾`;
+      updateCamUI();
+      dbg.update({ fps, dt, updMs, instCount: n, cam });
+    }
     if (profEl) {
       if (diag.active) profEl.textContent = `diagnostics… ${diag.ci + 1}/${DIAG_CONFIGS.length}  "${DIAG_CONFIGS[diag.ci].k}"  (${diag.phase === "warm" ? "settling" : diag.coll.length + "/" + DIAG_N})`;
       else if (followDiag.active) profEl.textContent = `follow diag… leg ${followDiag.leg + 1}/${followDiag.wps.length} → cell ${followDiag.wps[followDiag.leg].wcx},${followDiag.wps[followDiag.leg].wcy}  (${followDiag.legSamp.length} frames)`;
@@ -1609,7 +1617,13 @@ function makeMiniMap(container, onPick, R) {
   }
   const put = (img, lcx, lcy, c) => { const o = (lcy * C.GW + lcx) * 4, d = img.data; d[o] = c[0]; d[o+1] = c[1]; d[o+2] = c[2]; d[o+3] = 255; };
   const scr = (wcx, wcy) => ((wcy / C.GH) | 0) * C.SX + ((wcx / C.GW) | 0);
+  // Skip the whole redraw when the map is scrolled off-screen — this 64-canvas sweep over the
+  // world + the 4096-mite swarm is heavy main-thread work, and during play the article map is
+  // usually out of view. (Defaults visible if IntersectionObserver is unavailable.)
+  let onScreen = true;
+  if (typeof IntersectionObserver !== "undefined") new IntersectionObserver((es) => { onScreen = es[es.length - 1].isIntersecting; }).observe(container);
   return { update(camIdx) {
+    if (!onScreen) return;
     const grid = view.grid(), xy = view.xy(), mxy = view.mxy(), mmode = view.mmode(), resp = view.mresp(), nest = view.nest();
     for (let s = 0; s < C.NS; s++) { const img = imgs[s];
       for (let cy = 0; cy < C.GH; cy++) { const w = grid[s * C.GH + cy];
