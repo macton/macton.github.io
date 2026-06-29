@@ -263,6 +263,31 @@ for (const [g, list, roofs] of GROUPS) { bases[g] = meshes0.length;
     const m0 = bake(dir(k), name, imgs[k], roofCol);
     meshes0.push(m0);
     cages.push({ cg: cage(dir(k), name, imgs[k], roofCol, g), tris3: m0.tris3 }); }); }
+// GRASS-FILL the road tiles: the Kenney roads kit sits its asphalt on a pale BLUE-grey base, so a
+// road cell next to a grass cell shows a blue square (worst where a curve's corner meets grass).
+// Recolour every road LOD0 vertex that ISN'T the dark asphalt driving surface (luminance < 125)
+// to the tower-defense grass palette, so roads read as grey asphalt laid on the SAME grass as the
+// field — the curve's corner fills with grass. Done on the full-detail LOD0 only; the far massing/
+// imposter keep the tile's blended average (the road still reads as road at a distance). Colours
+// here are 0..255 (the int8 packing happens at emit). The grass tones are read from the baked
+// GRASS tile so they always match it exactly.
+{
+  const gv = meshes0[bases.GRASS].verts, seen = new Map();
+  for (const v of gv) { const k = `${v[8]},${v[9]},${v[10]}`; seen.set(k, (seen.get(k) || 0) + 1); }
+  const tones = [...seen.keys()].map((k) => k.split(",").map(Number));
+  const lum = (c) => (c[0] + c[1] + c[2]) / 3;
+  tones.sort((a, b) => lum(a) - lum(b));
+  const GRASS_DARK = tones[0], GRASS_LIGHT = tones[tones.length - 1];
+  let recoloured = 0;
+  for (let mi = bases.ROAD; mi < bases.ROAD + GROUPS[0][1].length; mi++) {
+    for (const v of meshes0[mi].verts) {
+      if (lum([v[8], v[9], v[10]]) < 125) continue;          // the asphalt road surface stays grey
+      const gc = lum([v[8], v[9], v[10]]) >= 165 ? GRASS_LIGHT : GRASS_DARK;
+      v[8] = gc[0]; v[9] = gc[1]; v[10] = gc[2]; recoloured++;
+    }
+  }
+  console.log(`grass-fill: recoloured ${recoloured} road ground verts to grass ${GRASS_DARK}/${GRASS_LIGHT}`);
+}
 // atlas size is known once we count the textured (non-flat) buildings — one tile row each
 const nTex = cages.filter((c) => !c.cg.flat).length;
 ATLAS_W = 5 * STRIDE; ATLAS_H = Math.max(1, nTex) * STRIDE;
