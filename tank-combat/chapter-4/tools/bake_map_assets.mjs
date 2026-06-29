@@ -287,6 +287,17 @@ for (const [g, list, roofs] of GROUPS) { bases[g] = meshes0.length;
     }
   }
   console.log(`grass-fill: recoloured ${recoloured} road ground verts to grass ${GRASS_DARK}/${GRASS_LIGHT}`);
+  // The road-BEND tile's art only covers ~77% of the cell — its outer (convex) curve corner has NO
+  // top face, so in-world that corner showed background, not grass. Add a full-cell grass backing
+  // quad just BELOW the asphalt road surface (which sits at z=0; the recoloured curbs are at z=+1):
+  // the opaque road/curbs win the depth test where they exist, and the backing only shows through
+  // the outer-curve hole — so the whole curve now reads as grey asphalt on grass.
+  {
+    const BEND = bases.ROAD + 3, PZ = qn(-0.333), N = qn(1), g = GRASS_LIGHT;   // ~1 subcell below the road
+    const v = (px, py) => [qn(px), qn(py), PZ, 0, 0, 0, N, 0, g[0], g[1], g[2], 255];
+    const A = v(-1,-1), B = v(1,-1), C = v(1,1), D = v(-1,1);
+    meshes0[BEND].verts.push(A, B, C, A, C, D);                                  // two tris (cull-agnostic)
+  }
 }
 // atlas size is known once we count the textured (non-flat) buildings — one tile row each
 const nTex = cages.filter((c) => !c.cg.flat).length;
