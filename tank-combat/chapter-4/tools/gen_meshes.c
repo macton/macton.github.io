@@ -21,7 +21,7 @@ static V cross(V a, V b) { return v(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z
 static V norm(V a) { double m = sqrt(a.x * a.x + a.y * a.y + a.z * a.z); if (m < 1e-9) m = 1; return v(a.x / m, a.y / m, a.z / m); }
 
 #define VSTRIDE 12          /* pos snorm8x4 + normal snorm8x4 + colour unorm8x4 */
-static signed char OUT[900000];   /* room for the baked OBJ tank (a few thousand tris) + the small shapes */
+static signed char OUT[65536];   /* the small procedural shapes (a few hundred verts total) */
 static int NV = 0;
 static int M_OFF[16], M_CNT[16], NM = 0, cur_off = 0;
 
@@ -97,121 +97,6 @@ static void tree(void) {
   colour(255, 255, 255);                                  /* reset: later meshes stay tintable */
 }
 
-/* ---- OBJ loader (build-time only, no runtime parser ships) -------------------------
- * Reads a Wavefront OBJ (v / vn / o / usemtl / f with v//vn indices; tris..ngons, fan-
- * triangulated) and bakes it into the same flat-shaded 12-byte vertex format as the shapes
- * above. Used for the CC0 Quaternius tank: its object groups split cleanly into the HULL
- * (Tank_body + the two TrackMesh) and the TURRET (Tank_Turret + Tank_Gun), so each baked
- * part feeds one renderer kind. Both parts share ONE normalisation frame (computed over the
- * whole tank) so they stay registered while the renderer spins them independently. Per-
- * material grey keeps the tracks dark while the identity tint colours the body. */
-#define OBJ_MAXV 80000
-#define OBJ_MAXF 40000
-static V   obj_pos[OBJ_MAXV]; static int obj_npos;
-static V   obj_nrm[OBJ_MAXV]; static int obj_nnrm;
-typedef struct { int v[8], n[8], nv, grey, part; } OFace;   /* part: 0 = hull, 1 = turret */
-static OFace obj_face[OBJ_MAXF]; static int obj_nface;
-
-/* material name -> a grey level that MULTIPLIES the instance's identity tint: tracks/wheels
- * stay dark, the body takes the tint, highlights read brighter. Unknown -> mid. */
-static int mat_grey(const char* m) {
-  if (strstr(m, "Wheel"))  return 70;
-  if (strstr(m, "Dark"))   return 150;
-  if (strstr(m, "Light"))  return 255;
-  if (strstr(m, "Detail")) return 225;
-  return 200;   /* Main */
-}
-/* Blender Y-up -> engine Z-up with the gun (Blender -x) pointing engine +x (facing 0). This
- * map is a proper rotation (det +1), so winding + normals carry over without a flip. */
-static V to_engine(V b) { return v(-b.x, b.z, b.y); }
-
-static int obj_load(const char* path) {
-  FILE* f = fopen(path, "r");
-  if (!f) return 0;
-  obj_npos = obj_nnrm = obj_nface = 0;
-  int part = 0, grey = 200;
-  char line[1024];
-  while (fgets(line, sizeof line, f)) {
-    if (line[0] == 'v' && line[1] == ' ') {
-      V p; if (sscanf(line + 2, "%lf %lf %lf", &p.x, &p.y, &p.z) == 3 && obj_npos < OBJ_MAXV) obj_pos[obj_npos++] = to_engine(p);
-    } else if (line[0] == 'v' && line[1] == 'n') {
-      V p; if (sscanf(line + 3, "%lf %lf %lf", &p.x, &p.y, &p.z) == 3 && obj_nnrm < OBJ_MAXV) obj_nrm[obj_nnrm++] = to_engine(p);
-    } else if (line[0] == 'o' && line[1] == ' ') {
-      part = strstr(line, "Gun") ? 2 : strstr(line, "Turret") ? 1 : 0;   /* 0 hull · 1 turret body · 2 gun */
-    } else if (!strncmp(line, "usemtl", 6)) {
-      grey = mat_grey(line + 6);
-    } else if (line[0] == 'f' && line[1] == ' ') {
-      OFace fc; fc.nv = 0; fc.grey = grey; fc.part = part;
-      for (char* tok = strtok(line + 2, " \t\r\n"); tok && fc.nv < 8; tok = strtok(NULL, " \t\r\n")) {
-        int vi = 0, ni = 0;
-        if (sscanf(tok, "%d//%d", &vi, &ni) < 1) continue;
-        if (ni == 0) sscanf(tok, "%d/%*d/%d", &vi, &ni);          /* v/vt/vn fallback */
-        fc.v[fc.nv] = vi - 1; fc.n[fc.nv] = ni - 1; fc.nv++;
-      }
-      if (fc.nv >= 3 && obj_nface < OBJ_MAXF) obj_face[obj_nface++] = fc;
-    }
-  }
-  fclose(f);
-  return obj_nface > 0;
-}
-/* bbox over the vertices used by faces whose part is in [pmin,pmax] (pmin<0 = every face). */
-static void obj_bbox(int pmin, int pmax, double mn[3], double mx[3]) {
-  for (int k = 0; k < 3; k++) { mn[k] = 1e30; mx[k] = -1e30; }
-  for (int i = 0; i < obj_nface; i++) {
-    OFace* fc = &obj_face[i];
-    if (pmin >= 0 && (fc->part < pmin || fc->part > pmax)) continue;
-    for (int j = 0; j < fc->nv; j++) {
-      V p = obj_pos[fc->v[j]]; double c[3] = { p.x, p.y, p.z };
-      for (int k = 0; k < 3; k++) { if (c[k] < mn[k]) mn[k] = c[k]; if (c[k] > mx[k]) mx[k] = c[k]; }
-    }
-  }
-}
-/* Bake faces with part in [pmin,pmax] (pmin<0 = all), normalised into the unit box about a
- * shared frame: XY centred on (px,py) — the ROTATION PIVOT — uniform scale `s` (aspect
- * preserved), the model bottom `mnz` anchored to z = -1 so the renderer's box rests it on
- * the floor, and an optional vertical lift `vex` (>1 raises a low model so it reads from a
- * top-down camera). A tank bakes its hull and its turret about the SAME pivot (the turret
- * ring) and scale, so the turret spins on its seat instead of swinging off. `grey` >= 0
- * forces a uniform vertex grey (255 = white, so an instance tint shows through, as the
- * mite's mode colour does); grey < 0 uses each face's per-material grey. Flat normal = the
- * OBJ face normal. */
-static double g_emit_yaw = 0;   /* radians, applied about the vertical (z) axis at bake time */
-static V yaw_xy(V p) { double c = cos(g_emit_yaw), s = sin(g_emit_yaw); return v(p.x * c - p.y * s, p.x * s + p.y * c, p.z); }
-
-static void obj_emit(int pmin, int pmax, int grey, double px, double py, double s, double mnz, double vex) {
-  if (s < 1e-9) s = 1;
-  for (int i = 0; i < obj_nface; i++) {
-    OFace* fc = &obj_face[i];
-    if (pmin >= 0 && (fc->part < pmin || fc->part > pmax)) continue;
-    int gv = grey >= 0 ? grey : fc->grey;
-    colour((unsigned char)gv, (unsigned char)gv, (unsigned char)gv);
-    V nn = v(0, 0, 0);                                  /* flat normal: average the face's vertex normals */
-    for (int k = 0; k < fc->nv; k++) if (fc->n[k] >= 0 && fc->n[k] < obj_nnrm) { V g = obj_nrm[fc->n[k]]; nn.x += g.x; nn.y += g.y; nn.z += g.z; }
-    nn = norm(yaw_xy(nn));
-    V P[8];
-    for (int k = 0; k < fc->nv; k++) {
-      V p = obj_pos[fc->v[k]];
-      double zz = (p.z - mnz) / s * vex - 1.0; if (zz > 1.0) zz = 1.0;
-      P[k] = yaw_xy(v((p.x - px) / s, (p.y - py) / s, zz));
-    }
-    for (int t = 1; t + 1 < fc->nv; t++) { emitv(P[0], nn); emitv(P[t], nn); emitv(P[t + 1], nn); }   /* fan */
-  }
-  colour(255, 255, 255);                               /* reset for any later mesh */
-}
-/* the uniform scale that fits everything about pivot (px,py) bottom mnz into [-1,1] (with the
- * vertical lift applied to the height term), so no axis clips. */
-static double fit_scale(double px, double py, const double mn[3], const double mx[3], double vex) {
-  double sx = mx[0] - px; if (px - mn[0] > sx) sx = px - mn[0];
-  double sy = mx[1] - py; if (py - mn[1] > sy) sy = py - mn[1];
-  double sz = (mx[2] - mn[2]) * vex / 2.0;
-  double s = sx; if (sy > s) s = sy; if (sz > s) s = sz;
-  return s;
-}
-
-#define G_MITE_YAW (-1.5707963)   /* z-yaw (radians) so the crab's front leads along engine +x */
-#define TANK_VEX 1.5               /* vertical lift: the real hull is low, so raise it to read from the top-down camera */
-#define MITE_VEX 1.15              /* a gentler lift for the crab */
-
 /* a downward marker: a square top that converges to an apex BELOW, so when the renderer parks it
  * above a selected tank the point hovers down at it. Authored apex-down in the unit box; star-convex
  * about the origin, so tri()'s outward-normal flip is correct. */
@@ -230,44 +115,7 @@ int main(int argc, char** argv) {
   mesh_begin(); taperbox(1, 1, 0.55, 0.55);      mesh_end();   /* M_TURRET  (a tapered dome) */
   mesh_begin(); tree();                          mesh_end();   /* M_TREE    (thin trunk + canopy) */
   mesh_begin(); arrow();                         mesh_end();   /* M_ARROW   (selected-tank down-marker) */
-
-  /* M_TANK_HULL / M_TANK_TURRET — baked from the CC0 Quaternius tank OBJ when present
-   * (ASSETS.md records the gdown re-bake), else a procedural fallback so the build never
-   * needs the download. Both parts share ONE frame whose XY origin is the TURRET RING
-   * (so the turret spins on its seat, not the tank centre), with a vertical lift so the
-   * low hull reads as 3-D from the game's top-down camera. */
-  const char* adir = argc > 1 ? argv[1] : "tools/quaternius";
-  char tpath[768]; snprintf(tpath, sizeof tpath, "%s/Tank.obj", adir);
-  if (obj_load(tpath)) {
-    double mn[3], mx[3]; obj_bbox(-1, 0, mn, mx);                /* whole-tank bbox (z anchor + extents) */
-    double tn[3], tx[3]; obj_bbox(1, 1, tn, tx);                 /* the turret BODY (part 1) → the ring pivot */
-    double px = (tn[0] + tx[0]) / 2, py = (tn[1] + tx[1]) / 2;   /* turret-ring centre = the shared pivot */
-    double vex = TANK_VEX, s = fit_scale(px, py, mn, mx, vex);
-    mesh_begin(); obj_emit(0, 0, -1, px, py, s, mn[2], vex); mesh_end();   /* M_TANK_HULL   (body + tracks) */
-    mesh_begin(); obj_emit(1, 2, -1, px, py, s, mn[2], vex); mesh_end();   /* M_TANK_TURRET (turret + gun)  */
-    fprintf(stderr, "gen_meshes: baked tank from %s\n", tpath);
-  } else {
-    mesh_begin(); taperbox(1, 1, 0.82, 0.66);    mesh_end();   /* M_TANK_HULL   fallback */
-    mesh_begin(); taperbox(1, 1, 0.55, 0.55);    mesh_end();   /* M_TANK_TURRET fallback */
-    fprintf(stderr, "gen_meshes: %s not found — procedural tank fallback\n", tpath);
-  }
-
-  /* M_MITE — a low-poly CC0 Cute-Monsters crab as the swarm creature (LOD: the renderer
-   * only binds it close up, where few are in view; the cheap M_PYRAMID draws the whole swarm
-   * when zoomed out). Baked WHITE so the mite's mode tint (idle/hunt/home) colours it. */
-  char mpath[768]; snprintf(mpath, sizeof mpath, "%s/Crab.obj", adir);
-  if (obj_load(mpath)) {
-    double mn[3], mx[3]; obj_bbox(-1, 0, mn, mx);
-    double px = (mn[0] + mx[0]) / 2, py = (mn[1] + mx[1]) / 2;
-    double vex = MITE_VEX, s = fit_scale(px, py, mn, mx, vex);
-    g_emit_yaw = G_MITE_YAW;                                    /* face the crab's front toward engine +x (heading 0) */
-    mesh_begin(); obj_emit(-1, 0, 255, px, py, s, mn[2], vex); mesh_end();   /* M_MITE (all faces, white) */
-    g_emit_yaw = 0;
-    fprintf(stderr, "gen_meshes: baked mite from %s\n", mpath);
-  } else {
-    mesh_begin(); pyramid();                     mesh_end();    /* M_MITE fallback = the spike */
-    fprintf(stderr, "gen_meshes: %s not found — procedural mite fallback\n", mpath);
-  }
+  (void)argc; (void)argv;
 
   printf("/* GENERATED by tools/gen_meshes.c — do not edit. The chapter-4 low-poly\n");
   printf(" * meshes, host-baked (no runtime parser). See src/mesh_data.h / ASSETS.md. */\n");
@@ -298,7 +146,7 @@ int main(int argc, char** argv) {
    * the tanks, and the overlays; the placeholder pass (page toggle) binds M_CUBE for
    * every kind instead. */
   printf("const uint8_t MESH_FOR_KIND[K_OPAQUE_COUNT] = {\n");
-  printf("  [K_RING]=M_ARROW, [K_MITE]=M_PYRAMID, [K_HULL]=M_TANK_HULL, [K_TURRET]=M_TANK_TURRET,\n");
-  printf("  [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");   /* the gun is part of the turret mesh now: K_BARREL emits no instances */
+  printf("  [K_RING]=M_ARROW, [K_MITE]=M_PYRAMID, [K_HULL]=M_HULL, [K_TURRET]=M_TURRET,\n");
+  printf("  [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");   /* placeholder tank: hull body + dome turret; K_BARREL emits no instances */
   return 0;
 }

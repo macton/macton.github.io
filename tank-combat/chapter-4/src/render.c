@@ -247,12 +247,12 @@ static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b, 
   return k;
 }
 
-/* The tank is two baked meshes authored in ONE shared unit-box frame (M_TANK_HULL =
- * body + tracks, M_TANK_TURRET = turret + gun). The renderer draws BOTH at the same
- * centre + the same uniform half-extent and rests them on the floor (the mesh anchors the
- * tank bottom at z = -1); only the rotation differs — the hull spins with the chassis
- * heading, the turret with the aim — so they stay registered as one tank while the turret
- * tracks independently. The gun lives inside the turret mesh, so K_BARREL emits nothing. */
+/* The tank is two meshes authored in ONE shared unit-box frame (M_HULL = body, M_TURRET =
+ * dome). The renderer draws BOTH at the same centre + the same uniform half-extent and rests
+ * them on the floor (the mesh anchors the tank bottom at z = -1); only the rotation differs —
+ * the hull spins with the chassis heading, the turret with the aim — so they stay registered
+ * as one tank while the turret tracks independently. K_BARREL emits nothing (no separate gun
+ * mesh in the placeholder). */
 static uint32_t emit_tank_part(const World* w, Inst* out, uint32_t k, int part, const Box* b) {
   if (part == K_BARREL) return k;                       /* the gun is part of the turret mesh now */
   for (uint32_t t = 0; t < N_TANKS; t++) {

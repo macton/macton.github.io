@@ -28,16 +28,13 @@
 /* The procedural meshes (the dynamic things). The town meshes are NOT in this enum —
  * they are indexed by their own group bases in map_mesh_data.h and offset by
  * M_PROC_COUNT into the shared GPU vertex buffer at draw time. */
-/* M_HULL / M_TURRET are the procedural fallback tank (a tapered box + dome), kept for a
- * build with no downloaded art; M_TANK_HULL / M_TANK_TURRET are baked from the CC0
- * Quaternius tank OBJ when present (see ASSETS.md) and are what MESH_FOR_KIND binds. Both
- * tank parts are authored in ONE shared unit-box frame so the renderer can spin the hull
- * (body + tracks) by the chassis heading and the turret (turret + gun) by the aim while
- * they stay registered — drawn at the same centre + scale, differing only in rotation. */
-/* M_MITE stays LAST of the procedural meshes — app.js reads the detailed-mite id as
- * (mesh_proc_count - 1), so keep new meshes (M_ARROW) ahead of it. */
-enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE, M_ARROW,
-       M_TANK_HULL, M_TANK_TURRET, M_MITE, M_PROC_COUNT };
+/* The PLACEHOLDER dynamic meshes. M_HULL / M_TURRET are the simple procedural tank (a tapered
+ * box body + a tapered dome turret), authored in ONE shared unit-box frame so the renderer spins
+ * the hull by the chassis heading and the turret by the aim while they stay registered (same
+ * centre + scale, differing only in rotation); M_PYRAMID is the swarm mite (a spike). These are
+ * what MESH_FOR_KIND binds. Externally-sourced art (see ASSETS.md) would drop into this table as
+ * additional meshes re-bound to K_HULL / K_TURRET / K_MITE. */
+enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE, M_ARROW, M_PROC_COUNT };
 
 extern const int8_t   MESH_VERT[];                   /* procedural meshes, MESH_VSTRIDE bytes/vertex */
 extern const uint32_t MESH_VOFF[M_PROC_COUNT];       /* first vertex of each procedural mesh */

@@ -59,55 +59,36 @@ boundary reads as decoration, not an obstacle — there is no reason to expect a
 
 **The dynamic mesh table** — a packed `int8` vertex buffer (12 bytes/vertex: position + face
 normal + colour), uploaded once. No glTF/OBJ parser ships in the binary: `tools/gen_meshes.c`
-bakes both the **original host-authored shapes** (CC0, no attribution) **and** a few **CC0
-external models** (read from a local download at bake time, OBJ → the same packed format —
-exactly the town's discipline) into one committed `src/mesh_data.c`.
+bakes the **original host-authored shapes** (CC0, no attribution) into one committed
+`src/mesh_data.c`. External art, when added, would bake into the same table the same way (OBJ →
+the packed format — exactly the town's discipline).
 
 | mesh (`mesh_data.h`) | geometry | bound to kind | used for |
 |---|---|---|---|
 | `M_CUBE`    | unit box | every kind (placeholder pass) + `K_RING`, `K_DEST` (asset pass) | overlays, beacons, and the placeholder for all kinds |
 | `M_PYLON`   | tapered tower | *(unbound)* | spare — the nest is a town landmark now |
-| `M_PYRAMID` | square pyramid | `K_MITE` (far LOD) | the swarm drawn cheap when the whole pool is in view |
-| `M_HULL`    | tapered box | *(fallback)* | the procedural tank body, used only if the OBJ art is absent at bake |
-| `M_TURRET`  | tapered dome | *(fallback)* | the procedural tank turret, same |
+| `M_PYRAMID` | square pyramid | `K_MITE` | the swarm creature (placeholder spike); one draw for the whole pool |
+| `M_HULL`    | tapered box | `K_HULL` | the tank body (placeholder), oriented by `tank_ang` |
+| `M_TURRET`  | tapered dome | `K_TURRET` | the tank turret (placeholder), oriented by `tank_turret`; `K_BARREL` draws nothing |
 | `M_TREE`    | thin trunk + faceted canopy | *(unbound — a STATIC prop)* | scenery scattered on grass corners (its own static-props buffer, not a per-frame kind) |
-| `M_TANK_HULL`   | **baked OBJ** — body + tracks | `K_HULL` | tank chassis (oriented by `tank_ang`); per-material grey keeps tracks dark under the identity tint |
-| `M_TANK_TURRET` | **baked OBJ** — turret + gun | `K_TURRET` | tank turret + barrel (oriented by `tank_turret`); the gun is part of this mesh, so `K_BARREL` draws nothing |
-| `M_MITE`        | **baked OBJ** — low-poly crab | `K_MITE` (near LOD) | the swarm drawn detailed when few are in view; baked white so the mode tint (idle/hunt/home) colours it |
+| `M_ARROW`   | down-pointing marker | `K_RING` | the selected tank's hovering down-arrow, in the tank's identity colour |
 
-The two tank parts are baked in **one shared unit-box frame** (normalised over the whole tank,
-the bottom anchored to the floor), so the renderer draws both at the same centre + scale and only
-the **rotation** differs — the hull spins with the chassis heading, the turret with the aim — and
-they stay registered as one tank. The **mite LOD** is a per-frame mesh swap in `app.js`: the
-detailed skull binds only while ≤ `MITE_LOD_MAX` mites fall in the visible box (zoomed in); past
-that the whole swarm draws as the cheap `M_PYRAMID` spike, bounding the per-frame triangle budget
+The tank is two placeholder meshes (`M_HULL` body + `M_TURRET` dome) authored in **one shared
+unit-box frame**, so the renderer draws both at the same centre + scale and only the **rotation**
+differs — the hull spins with the chassis heading, the turret with the aim — and they stay
+registered as one tank. The swarm draws as the cheap `M_PYRAMID` spike in a single instanced draw
 for a pool up to 4096 strong (the mites never cast into the baked sun shadow map, so this is their
-only cost). `M_TREE` and the tank's tracks carry their **own baked colours** the same way the town
-meshes do; everything else is white so the instance tint shows through.
+only cost). `M_TREE` carries its **own baked colours** the same way the town meshes do; the
+placeholder dynamic meshes are white so the instance tint (tank identity colour / mite mode tint)
+shows through.
 
-### The dynamic OBJ art (Quaternius, CC0)
+### The dynamic art — placeholders (pending replacement)
 
-The tank and the mite are **Quaternius CC0** models. Unlike the town's **large** Kenney kits (kept
-out of the repo), these two small **CC0** OBJs are **committed** at `tools/quaternius/` — because
-`build.sh` re-runs `gen_meshes.c` on every build, so the source must be present for the bake to
-reproduce the art (absent it, the build silently falls back to the procedural box/dome + pyramid).
-Committing them makes the build hermetic: `./build.sh` always reproduces `src/mesh_data.c` byte-for-
-byte. `tools/quaternius/LICENSE.txt` carries the CC0 dedication.
-
-`gen_meshes.c` splits the tank OBJ's object groups (`Tank_body` + the two `TrackMesh` → hull,
-`Tank_Turret` + `Tank_Gun` → turret), maps Blender Y-up to the engine's Z-up with the gun pointing
-+x, and bakes the crab white with a −90° yaw so its claws lead. To swap in a different Quaternius
-model, drop its OBJ into `tools/quaternius/`, point the loader at it in `tools/gen_meshes.c`, and
-`./build.sh`. The packs:
-
-| model | pack (Quaternius, **CC0 1.0**) | file | becomes |
-|---|---|---|---|
-| tank | [Animated Tanks](https://quaternius.com/packs/animatedtanks.html) | `Tank.obj` | `M_TANK_HULL` + `M_TANK_TURRET` |
-| crab | [Cute Monsters](https://quaternius.com/packs/cutemonsters.html) | `Crab.obj` | `M_MITE` |
-
-Re-fetch (Google-Drive-hosted) with `pip install gdown` then
-`gdown --folder https://drive.google.com/drive/folders/11onydnSTchHz2MZDJ3tK7O3cazIEPQAJ` (tanks,
-OBJ) and `…/1LWGbuzCZ2qJwYoPRlMnqTOsFLAfMbBng` (Cute Monsters, OBJ).
+The tank and the swarm currently use the **original procedural placeholder** shapes above (CC0,
+host-authored in `tools/gen_meshes.c`). Earlier externally-sourced models did not read well and were
+removed; replacement art that fits the flat-shaded top-down look is being sourced. Dropping it in is
+a build-time bake — see **The binding points** below. The wasm keeps a dormant per-mite distance-LOD
+path (`set_mite_lod` / `draw_mite_near` in `src/wasm.c`) for when a detailed creature mesh returns.
 
 Translucent FX (the bolt streak/head and the destruction bursts) draw as `M_CUBE` in the
 blended pass — no distinct mesh needed.
