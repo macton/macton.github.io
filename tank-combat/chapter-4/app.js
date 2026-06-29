@@ -1091,7 +1091,7 @@ async function main() {
   let camX = C.BW * C.SUB / 2, camY = C.BH * C.SUB / 2, zoom = 1, follow = false, followTank = -1, followOffX = 0, followOffY = 0;
   let camEye = [0, 0, 0];   // the eye in world subcells (set by viewWrite) — feeds the LOD distance test
   let invMVP = null;
-  const ZMIN = 0.85, ZMAX = 20;
+  const ZMIN = 0.85, ZMAX = 80, ZLOD = 20;   // ZMAX raised for much-closer zoom; ZLOD keeps the LOD0 reference at the old max so the town doesn't drop to imposters at normal zoom
   const DEG = Math.PI / 180;
   // pitch = tilt off straight-down, yaw = orbit around the look-at point, fov = lens.
   // All three are presentation-only and live (sliders + rotate-drag); the defaults are
@@ -1157,7 +1157,7 @@ async function main() {
   function lodDist2() {
     const p = 56 * DEG, f = FOV0, t = Math.tan(f / 2), aspect = canvas.width / canvas.height;
     const bd = Math.max((C.BH * 0.62) / (t / Math.cos(p)), (C.BW * 0.62) / (t * aspect));
-    const dist = bd / ZMAX, eyeH = dist * Math.cos(p);
+    const dist = bd / ZLOD, eyeH = dist * Math.cos(p);   // LOD0 reference distance (fixed at ZLOD, independent of the closer ZMAX)
     const topA = Math.max(3 * DEG, (HALF_PI - p) - f / 2), farGround = eyeH / Math.sin(topA);
     const d = Math.hypot(farGround, eyeH) * C.SUB;
     return d * d;

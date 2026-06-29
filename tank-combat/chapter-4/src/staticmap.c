@@ -205,6 +205,10 @@ uint32_t build_static_map(const uint32_t* grid, const uint16_t* nest_cell,
       for (int m = 0; m < MAP_LOD2_OFFSET; m++) {
         uint32_t first = ni;
         int hz = MAP_MESH_HZ[m];
+        /* lay GRASS flush with the street: the Kenney grass tile bakes as a raised block (hz ~26),
+         * which sat well above the flat road (hz ~3) and buried the path-overlay tiles. Squash it
+         * to the road's height so grass and street share a surface and the path blocks read on top. */
+        if (m == MAP_GRASS_BASE) hz = MAP_MESH_HZ[MAP_ROAD_BASE];
         for (int ly = 0; ly < GRID_H; ly++)
           for (int lx = 0; lx < GRID_W; lx++) {
             int i = ly * GRID_W + lx;

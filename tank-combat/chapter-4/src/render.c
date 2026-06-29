@@ -28,9 +28,6 @@ static const uint32_t COL_BODY[N_TANKS] = {
  * grey, multiplied by the body tint above, so a separate barrel colour is no longer needed) */
 static const uint32_t COL_PATH[N_TANKS] = {   /* a lighter, translucent shade of the body colour */
   RGBA(255, 205, 120, 205), RGBA(150, 215, 250, 205), RGBA(180, 240, 180, 205), RGBA(225, 190, 250, 205) };
-/* the selected tank's state highlight (UNSELECTED draws none), and the cursor highlight */
-static const uint32_t COL_AUTOPATH = RGBA(120, 235, 140, 255);
-static const uint32_t COL_MANUAL   = RGBA(245, 225,  90, 255);
 static const uint32_t COL_HOVER    = RGBA(255, 255, 255, 140);   /* translucent cursor cell */
 
 /* a mite's tint shows its CURRENT role (re-derived every tick, never stale):
@@ -82,10 +79,9 @@ static const uint32_t COL_BOLT_CORE = RGBA(255, 244, 224, 255);   /* its bright 
 #define BARREL_HW  16               /* barrel half-width */
 /* interaction overlays */
 #define TILE_LIFT  6                /* lift overlay tiles above the floor (no z-fight) */
-#define RING_H     (SUB / 7)        /* the selected tank's state ring (a low bright base) */
-#define RING_HALF  130              /* clearly larger than the hull footprint */
-#define MARK_HALF  34               /* the state spike rising above the tank (diamond section) */
-#define MARK_H     (SUB + SUB / 5)  /* ~300: tall enough to spot above the swarm */
+#define ARROW_HALF 56               /* the selected tank's hovering down-arrow marker: width */
+#define ARROW_H    104              /* its height (the apex points DOWN at the tank) */
+#define ARROW_Z    150              /* apex height above the floor — just over the tank, in its colour */
 #define DEST_H     (2 * SUB)        /* a tall destination beacon */
 #define DEST_HALF  26
 #define PATH_HALF  (SUB / 2 - 22)   /* a routed-path tile, inset from the cell */
@@ -182,19 +178,19 @@ static int cell_in_box(const Box* b, uint32_t cell) {
  * map data now (build_static_map in staticmap.c), placed once and drawn from the
  * uploaded-once static buffer. What follows emits only the DYNAMIC things. */
 
-/* the selected tank's selection highlight — green for AUTOPATH, yellow for MANUAL.
- * UNSELECTED tanks draw none, so this IS the mode indicator: a bright base ring under
- * the tank PLUS a tall diamond spike above it, so the selection (and which mode) reads
- * clearly from anywhere in the connected world. */
+/* the selected tank's selection mark — a single down-arrow hovering above the tank in the
+ * tank's OWN identity colour, apex pointing down at it. UNSELECTED tanks draw none, so this
+ * IS the selection indicator; there is no ground ring/block (it would sit on the grass/road
+ * and clutter the floor), and the arrow reads from anywhere in the connected world. */
 static uint32_t emit_rings(const World* w, Inst* out, uint32_t k, const Box* b) {
   for (uint32_t t = 0; t < N_TANKS; t++) {
     if (w->tstate[t] == TS_UNSELECTED) continue;
     int px, py; interp_xy(w->tank_xy[t], g_prev_tank_xy, t, &px, &py);
     if (!in_box(b, px, py)) continue;
-    uint32_t col = w->tstate[t] == TS_MANUAL ? COL_MANUAL : COL_AUTOPATH;
-    k = push(out, k, px, py, FLOOR_H + RING_H / 2, RING_HALF, RING_HALF, RING_H / 2, 16384, 0, col);
-    int mz = FLOOR_H + HULL_H + TURRET_H + MARK_H / 2 + 20;               /* a tall diamond spike above */
-    k = push(out, k, px, py, mz, MARK_HALF, MARK_HALF, MARK_H / 2, 11585, 11585, col);
+    /* a single down-arrow hovering above the tank, in the tank's OWN identity colour: its apex
+     * points down at the tank, and that IS the selection mark — no ground ring/block any more. */
+    k = push(out, k, px, py, FLOOR_H + ARROW_Z + ARROW_H / 2, ARROW_HALF, ARROW_HALF, ARROW_H / 2,
+             16384, 0, COL_BODY[t]);
   }
   return k;
 }

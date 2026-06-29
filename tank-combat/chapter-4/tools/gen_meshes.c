@@ -212,6 +212,16 @@ static double fit_scale(double px, double py, const double mn[3], const double m
 #define TANK_VEX 1.5               /* vertical lift: the real hull is low, so raise it to read from the top-down camera */
 #define MITE_VEX 1.15              /* a gentler lift for the crab */
 
+/* a downward marker: a square top that converges to an apex BELOW, so when the renderer parks it
+ * above a selected tank the point hovers down at it. Authored apex-down in the unit box; star-convex
+ * about the origin, so tri()'s outward-normal flip is correct. */
+static void arrow(void) {
+  V ap = v(0, 0, -1);                                                  /* apex (points down) */
+  V t0 = v(-1,-1,1), t1 = v(1,-1,1), t2 = v(1,1,1), t3 = v(-1,1,1);    /* the wide top */
+  quad(t0, t1, t2, t3);                                                /* top cap */
+  tri(t1, t0, ap); tri(t2, t1, ap); tri(t3, t2, ap); tri(t0, t3, ap); /* four faces down to the apex */
+}
+
 int main(int argc, char** argv) {
   mesh_begin(); taperbox(1, 1, 1, 1);            mesh_end();   /* M_CUBE    */
   mesh_begin(); taperbox(1, 1, 0.40, 0.40);      mesh_end();   /* M_PYLON   (tall tapered tower) */
@@ -219,6 +229,7 @@ int main(int argc, char** argv) {
   mesh_begin(); taperbox(1, 1, 0.82, 0.66);      mesh_end();   /* M_HULL    (a tapered tank body) */
   mesh_begin(); taperbox(1, 1, 0.55, 0.55);      mesh_end();   /* M_TURRET  (a tapered dome) */
   mesh_begin(); tree();                          mesh_end();   /* M_TREE    (thin trunk + canopy) */
+  mesh_begin(); arrow();                         mesh_end();   /* M_ARROW   (selected-tank down-marker) */
 
   /* M_TANK_HULL / M_TANK_TURRET — baked from the CC0 Quaternius tank OBJ when present
    * (ASSETS.md records the gdown re-bake), else a procedural fallback so the build never
@@ -287,7 +298,7 @@ int main(int argc, char** argv) {
    * the tanks, and the overlays; the placeholder pass (page toggle) binds M_CUBE for
    * every kind instead. */
   printf("const uint8_t MESH_FOR_KIND[K_OPAQUE_COUNT] = {\n");
-  printf("  [K_RING]=M_CUBE, [K_MITE]=M_PYRAMID, [K_HULL]=M_TANK_HULL, [K_TURRET]=M_TANK_TURRET,\n");
+  printf("  [K_RING]=M_ARROW, [K_MITE]=M_PYRAMID, [K_HULL]=M_TANK_HULL, [K_TURRET]=M_TANK_TURRET,\n");
   printf("  [K_BARREL]=M_CUBE, [K_DEST]=M_CUBE };\n");   /* the gun is part of the turret mesh now: K_BARREL emits no instances */
   return 0;
 }

@@ -1236,7 +1236,7 @@ static void t_render_overlays(void) {
   sim_set_dest(&W, 0, 12, 9);            /* a reachable cell on screen (0,0) */
   for (int i = 0; i < 3; i++) sim_tick(&W);   /* let pstatus become ROUTING so the path traces */
   DrawList dr; uint32_t n = build_view(&W, g_a, &dr, 0, 0, WX1, WY1, REC_EMPTY);
-  check(dr.opaque[K_RING] == 2, "the selected tank shows its highlight (a base ring + a tall spike)");
+  check(dr.opaque[K_RING] == 1, "the selected tank shows its selection mark (a single down-arrow)");
   check(dr.opaque[K_DEST] == 1, "its destination shows a beacon");
   check(dr.translucent > 0, "the routed path is drawn (path tiles in the translucent pass)");
   check(n <= INST_MAX, "with overlays the instance count still fits the cap");

@@ -34,7 +34,9 @@
  * tank parts are authored in ONE shared unit-box frame so the renderer can spin the hull
  * (body + tracks) by the chassis heading and the turret (turret + gun) by the aim while
  * they stay registered — drawn at the same centre + scale, differing only in rotation. */
-enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE,
+/* M_MITE stays LAST of the procedural meshes — app.js reads the detailed-mite id as
+ * (mesh_proc_count - 1), so keep new meshes (M_ARROW) ahead of it. */
+enum { M_CUBE = 0, M_PYLON, M_PYRAMID, M_HULL, M_TURRET, M_TREE, M_ARROW,
        M_TANK_HULL, M_TANK_TURRET, M_MITE, M_PROC_COUNT };
 
 extern const int8_t   MESH_VERT[];                   /* procedural meshes, MESH_VSTRIDE bytes/vertex */
