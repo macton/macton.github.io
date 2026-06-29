@@ -499,11 +499,16 @@ async function main() {
   device.queue.writeBuffer(meshBuf, mProc * C.MVSTRIDE, new Uint8Array(mem(), wasm.map_mesh_data_ptr(), (C.MVTOTAL - mProc) * C.MVSTRIDE));
   const meshTable = []; for (let m = 0; m < C.MCOUNT; m++) meshTable.push({ off: wasm.mesh_voff(m), cnt: wasm.mesh_vcnt(m) });
   const meshForKind = []; for (let k = 0; k < C.KOC; k++) meshForKind.push(wasm.mesh_for_kind(k));
-  // mite level-of-detail: the swarm is up to 4096 strong, so the detailed CC0 crab mesh
-  // (M_MITE, the last procedural mesh, ~1.8k tris) is only bound when few mites are in view
-  // (zoomed in); once more than MITE_LOD_MAX fall in the visible box the whole swarm draws as
-  // the cheap M_PYRAMID spike (K_MITE's baked default), bounding the per-frame triangle budget.
-  const M_MITE_DETAIL = C.MPROC - 1, MITE_LOD_MAX = 40;
+  // mite level-of-detail, by TRUE distance to the camera (not visible count): the wasm emits the
+  // mites within MITE_LOD_CELLS of the eye (3-D) first, capped at MITE_LOD_CAP for the triangle
+  // budget, and reports that prefix via draw_mite_near(). The host draws the prefix with the
+  // detailed CC0 crab (M_MITE, the last procedural mesh, ~1.8k tris) and the rest with the cheap
+  // M_PYRAMID spike. So a mite CLOSE to the camera is detailed even when the swarm is dense or the
+  // camera is at a low angle (the old count heuristic spiked the near foreground in those cases);
+  // zoomed out, the eye recedes past the radius and the whole swarm collapses to spikes.
+  const M_MITE_DETAIL = C.MPROC - 1;
+  const MITE_LOD_CELLS = 22, MITE_LOD_CAP = 64;        // detail radius (cells) + max detailed mites
+  const M_PYRAMID = 2;                                 // the far/spike mite mesh (K_MITE's baked default)
   // the LOD1 IMPOSTERS: their own 16-byte vertex buffer (they carry UVs) + a table indexed by base m.
   const IMP_VSTRIDE = 16, impTotal = wasm.map_imposter_vert_total();
   const imposterBuf = device.createBuffer({ size: Math.max(IMP_VSTRIDE, impTotal * IMP_VSTRIDE), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -1458,6 +1463,11 @@ async function main() {
       clampCam();
     }
     viewWrite();
+    // arm per-mite distance LOD for this frame's rebuild: the eye (subcells, set by viewWrite)
+    // + the detail radius, so close mites emit first (detailed) and the rest as spikes. Must
+    // precede set_view, whose rebuild is what emits the swarm. Only when assets are on.
+    wasm.set_mite_lod(Math.round(camEye[0]), Math.round(camEye[1]), Math.round(camEye[2]),
+                      useAssets ? MITE_LOD_CELLS * C.SUB : 0, MITE_LOD_CAP);
     // tell the wasm what the camera shows + the cursor cell; it builds only that
     const box = visibleBox();
     const hc = lastMouse ? cellAt(lastMouse.x, lastMouse.y) : null;
@@ -1521,9 +1531,16 @@ async function main() {
     for (let k = 0; k < C.KOC; k++) {
       const cnt = wasm.draw_opaque(k);
       if (cnt) {
-        let mid = useAssets ? meshForKind[k] : C.CUBE;
-        if (useAssets && k === 1 /* K_MITE */ && cnt <= MITE_LOD_MAX) mid = M_MITE_DETAIL;   // skull up close, spike for the full swarm
-        const m = meshTable[mid]; gpass.draw(m.cnt, cnt, m.off, first);
+        if (useAssets && k === 1 /* K_MITE */) {
+          // per-mite distance LOD: the wasm emitted the near mites first (draw_mite_near of them),
+          // then the far ones. Draw the near prefix as the detailed crab, the tail as the spike.
+          const near = Math.min(cnt, wasm.draw_mite_near());
+          if (near) { const m = meshTable[M_MITE_DETAIL]; gpass.draw(m.cnt, near, m.off, first); }
+          if (cnt - near) { const m = meshTable[M_PYRAMID]; gpass.draw(m.cnt, cnt - near, m.off, first + near); }
+        } else {
+          const mid = useAssets ? meshForKind[k] : C.CUBE;
+          const m = meshTable[mid]; gpass.draw(m.cnt, cnt, m.off, first);
+        }
       }
       first += cnt;
     }

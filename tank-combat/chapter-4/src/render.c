@@ -138,6 +138,19 @@ void render_set_interp(uint32_t alpha_q8, const uint32_t* prev_tank_xy,
   g_prev_tank_xy = prev_tank_xy; g_prev_mite_xy = prev_mite_xy; g_prev_proj_xy = prev_proj_xy;
 }
 
+/* PER-MITE DISTANCE LOD state — the camera eye (subcells) + the detail radius (subcells) and
+ * the prefix cap. near_d 0 (the default) means "no detail bucket": emit_mites then emits the
+ * whole swarm into the far range, byte-identical to the un-LOD'd emit. */
+static int32_t  g_eye_x = 0, g_eye_y = 0, g_eye_z = 0;
+static int64_t  g_mite_near_d2 = 0;      /* squared detail radius (subcells^2); 0 disables the detail bucket */
+static uint32_t g_mite_near_cap = 0;     /* max detailed mites (triangle-budget guard) */
+void render_set_lod(int32_t eye_x, int32_t eye_y, int32_t eye_z,
+                    uint32_t near_d, uint32_t near_cap) {
+  g_eye_x = eye_x; g_eye_y = eye_y; g_eye_z = eye_z;
+  g_mite_near_d2 = (int64_t)near_d * (int64_t)near_d;
+  g_mite_near_cap = near_cap;
+}
+
 /* unpack `cur` to subcell x,y, interpolated from prev_arr[idx] by g_alpha_q8 when enabled
  * (and not a teleport). With g_alpha_q8 == 0 or a null prev table this is just xy_lo/xy_hi. */
 static void interp_xy(uint32_t cur, const uint32_t* prev_arr, uint32_t idx, int* ox, int* oy) {
@@ -195,15 +208,42 @@ static uint32_t emit_rings(const World* w, Inst* out, uint32_t k, const Box* b) 
   return k;
 }
 
-static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b) {
-  for (uint32_t m = 0; m < N_MITES; m++) {
+static uint32_t push_mite(const World* w, Inst* out, uint32_t k, uint32_t m, int px, int py) {
+  uint32_t di = w->mite_ang[m] >> ANGLE_SHIFT;
+  return push(out, k, px, py, FLOOR_H + MITE_H / 2, MITE_HALF, MITE_HALF, MITE_H / 2,
+              dir_cos(di), dir_sin(di), mite_colour(w, m));
+}
+/* a visible mite is "near" if its 3-D distance to the eye is within the detail radius */
+static int mite_near(int px, int py) {
+  int64_t dx = px - g_eye_x, dy = py - g_eye_y, dz = (int64_t)(FLOOR_H + MITE_H / 2) - g_eye_z;
+  return dx * dx + dy * dy + dz * dz <= g_mite_near_d2;
+}
+/* PER-MITE DISTANCE LOD: emit the mites NEAR the eye first (3-D distance <= the detail radius),
+ * capped at g_mite_near_cap for the triangle budget, then the rest. dl->mite_near records the
+ * size of that detailed prefix so the host binds the crab to it and the spike to the tail.
+ * Pass 1 takes the first near_n qualifiers in index order; pass 2 re-counts qualifiers and
+ * skips exactly those first near_n so nothing is double-emitted. With the detail radius 0 (the
+ * default / native tests) there are no qualifiers: pass 1 is empty and the whole swarm lands in
+ * the far range, byte-identical to the old single-pass emit. */
+static uint32_t emit_mites(const World* w, Inst* out, uint32_t k, const Box* b, uint32_t* near_out) {
+  uint32_t near_n = 0;
+  if (g_mite_near_d2 > 0) {                            /* pass 1: the close mites (detailed) */
+    for (uint32_t m = 0; m < N_MITES && near_n < g_mite_near_cap; m++) {
+      if (w->mite_resp[m]) continue;
+      int px, py; interp_xy(w->mite_xy[m], g_prev_mite_xy, m, &px, &py);
+      if (!in_box(b, px, py) || !mite_near(px, py)) continue;
+      k = push_mite(w, out, k, m, px, py); near_n++;
+    }
+  }
+  uint32_t q = 0;                                       /* qualifiers seen in index order */
+  for (uint32_t m = 0; m < N_MITES; m++) {             /* pass 2: the far mites (spike) */
     if (w->mite_resp[m]) continue;                     /* dead mites aren't drawn (or indexed) */
     int px, py; interp_xy(w->mite_xy[m], g_prev_mite_xy, m, &px, &py);
     if (!in_box(b, px, py)) continue;
-    uint32_t di = w->mite_ang[m] >> ANGLE_SHIFT;
-    k = push(out, k, px, py, FLOOR_H + MITE_H / 2, MITE_HALF, MITE_HALF, MITE_H / 2,
-             dir_cos(di), dir_sin(di), mite_colour(w, m));
+    if (g_mite_near_d2 > 0 && mite_near(px, py) && q++ < near_n) continue;  /* taken by pass 1 */
+    k = push_mite(w, out, k, m, px, py);
   }
+  if (near_out) *near_out = near_n;
   return k;
 }
 
@@ -334,7 +374,7 @@ uint32_t build_view(const World* w, Inst* out, DrawList* dl,
 
   uint32_t k = 0, base;
   base = k; k = emit_rings(w, out, k, &b);             dl->opaque[K_RING]   = k - base;
-  base = k; k = emit_mites(w, out, k, &b);             dl->opaque[K_MITE]   = k - base;
+  base = k; k = emit_mites(w, out, k, &b, &dl->mite_near); dl->opaque[K_MITE] = k - base;
   base = k; k = emit_tank_part(w, out, k, K_HULL,  &b); dl->opaque[K_HULL]   = k - base;
   base = k; k = emit_tank_part(w, out, k, K_TURRET, &b); dl->opaque[K_TURRET] = k - base;
   base = k; k = emit_tank_part(w, out, k, K_BARREL, &b); dl->opaque[K_BARREL] = k - base;

@@ -223,6 +223,15 @@ EXPORT(frame)       uint32_t frame(void)       { return g_world.frame; }
 EXPORT(k_opaque_count)    uint32_t k_opaque_count(void)            { return K_OPAQUE_COUNT; }
 EXPORT(draw_opaque)       uint32_t draw_opaque(uint32_t kind)      { return kind < K_OPAQUE_COUNT ? g_dl.opaque[kind] : 0; }
 EXPORT(draw_translucent)  uint32_t draw_translucent(void)          { return g_dl.translucent; }
+/* of the K_MITE range, how many lead instances are CLOSE to the eye (drawn with the detailed
+ * crab; the rest are the cheap spike) — see render_set_lod / emit_mites. */
+EXPORT(draw_mite_near)    uint32_t draw_mite_near(void)            { return g_dl.mite_near; }
+/* arm the per-mite distance LOD for the NEXT build_view (host calls it before set_view, like
+ * set_interp): the camera eye in world subcells, the detail radius (subcells), and the cap on
+ * detailed mites. Pure presentation — does not rebuild on its own. */
+EXPORT(set_mite_lod) void set_mite_lod(int32_t ex, int32_t ey, int32_t ez, uint32_t near_d, uint32_t near_cap) {
+  render_set_lod(ex, ey, ez, near_d, near_cap);
+}
 /* the projection is now a host-side perspective MVP matrix (see app.js); the wasm
  * exports no projection basis — it just emits the world placements the host views. */
 

@@ -69,6 +69,9 @@ extern const uint32_t COL_NEST[NEST_COUNT];
 typedef struct {
   uint32_t opaque[K_OPAQUE_COUNT];
   uint32_t translucent;
+  uint32_t mite_near;    /* of opaque[K_MITE], how many lead instances are CLOSE to the eye:
+                          * they're emitted first so the host draws that prefix with the detailed
+                          * crab mesh and the rest with the cheap spike — per-mite distance LOD. */
 } DrawList;
 
 /* Capacity per built view: the DYNAMIC worst case is the whole world in view — the
@@ -98,6 +101,17 @@ uint32_t build_view(const World* w, Inst* out, DrawList* dl,
  * slots. Bursts (fx_xy) don't move (they only expand), so they take no prev table. */
 void render_set_interp(uint32_t alpha_q8, const uint32_t* prev_tank_xy,
                        const uint32_t* prev_mite_xy, const uint32_t* prev_proj_xy);
+
+/* PER-MITE DISTANCE LOD (presentation-only). The host sets the camera eye (world subcells)
+ * and a detail radius each frame; build_view then emits the mites CLOSE to the eye (3-D
+ * distance <= near_d) first, capping that prefix at near_cap for the triangle budget, and
+ * records the count in DrawList.mite_near. The host draws that prefix with the detailed crab
+ * and the remainder with the cheap spike, so the LOD tracks true camera distance per mite —
+ * the foreground mites at a shallow angle stay detailed while the far swarm is spikes. The
+ * default (near_d 0) emits every mite into the far range, leaving the un-LOD'd emit byte-
+ * identical, so the determinism tests and sim hash are untouched. */
+void render_set_lod(int32_t eye_x, int32_t eye_y, int32_t eye_z,
+                    uint32_t near_d, uint32_t near_cap);
 
 /* The DYNAMIC point lights for the DEFERRED renderer: one per visible mite (its mode tint,
  * a faint glow) and per visible FX (a burst or a bolt — bright, fading). Each reuses the
